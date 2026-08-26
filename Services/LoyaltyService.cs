@@ -52,7 +52,8 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
 
     public async Task<PointTransaction> EarnAsync(int memberId, int points, PointTxType type, string? note, string? refNo)
     {
-        var m = await db.Members.FindAsync(memberId) ?? throw new KeyNotFoundException();
+        // FirstOrDefault (không Find) để áp query filter tenant — chặn tích điểm chéo tổ chức.
+        var m = await db.Members.FirstOrDefaultAsync(x => x.Id == memberId) ?? throw new KeyNotFoundException();
         m.Points += points;
         if (points > 0) m.LifetimePoints += points;     // chỉ điểm dương mới tính xếp hạng
         await RecomputeRankAsync(m);
@@ -70,8 +71,8 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
 
     public async Task<(bool ok, string msg)> RedeemAsync(int memberId, int rewardId)
     {
-        var m = await db.Members.FindAsync(memberId) ?? throw new KeyNotFoundException();
-        var r = await db.Rewards.FindAsync(rewardId);
+        var m = await db.Members.FirstOrDefaultAsync(x => x.Id == memberId) ?? throw new KeyNotFoundException();
+        var r = await db.Rewards.FirstOrDefaultAsync(x => x.Id == rewardId);
         if (r == null || !r.IsActive) return (false, "Quà không khả dụng.");
         if (r.Stock <= 0) return (false, "Quà đã hết.");
         if (m.Points < r.PointCost) return (false, $"Không đủ điểm (cần {r.PointCost}, có {m.Points}).");

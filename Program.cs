@@ -17,6 +17,7 @@ builder.Services.AddDbContext<AppDbContext>(o =>
     if (DbUtil.IsPostgres(conn)) o.UseNpgsql(DbUtil.ToNpgsql(conn));
     else o.UseSqlite(conn);
 });
+builder.Services.AddScoped<ITenantContext, TenantContext>();   // multi-tenant: ngữ cảnh org/request
 builder.Services.AddScoped<ILoyaltyService, LoyaltyService>();
 builder.Services.AddControllersWithViews();
 
@@ -24,8 +25,33 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
     await Seeder.SeedAsync(scope.ServiceProvider.GetRequiredService<AppDbContext>());
 
+// Multi-tenant: X-Api-Key → OrgId (đặt TRƯỚC khi AppDbContext của request được dựng, dùng scope tra cứu riêng).
+app.Use(async (ctx, next) =>
+{
+    var key = ctx.Request.Headers["X-Api-Key"].FirstOrDefault();
+    if (!string.IsNullOrWhiteSpace(key))
+    {
+        using var lookup = app.Services.CreateScope();
+        var ldb = lookup.ServiceProvider.GetRequiredService<AppDbContext>();
+        var org = await ldb.Orgs.FirstOrDefaultAsync(o => o.ApiKey == key);
+        if (org != null) ctx.RequestServices.GetRequiredService<ITenantContext>().OrgId = org.Id;
+    }
+    await next();
+});
+
 app.UseStaticFiles();
 app.MapGet("/healthz", () => "ok");
+
+// Đăng ký tổ chức mới (nhận khách) — trả về ApiKey để gọi API với dữ liệu cô lập.
+app.MapPost("/api/orgs/register", async (RegisterOrgDto dto, AppDbContext db) =>
+{
+    if (string.IsNullOrWhiteSpace(dto.Name)) return Results.BadRequest(new { error = "Cần Name." });
+    var apiKey = "lyl_" + Guid.NewGuid().ToString("N");
+    var org = new Org { Name = dto.Name.Trim(), ApiKey = apiKey };
+    db.Orgs.Add(org);
+    await db.SaveChangesAsync();
+    return Results.Ok(new { orgId = org.Id, apiKey, note = "Gửi header X-Api-Key khi gọi API để dữ liệu cô lập." });
+});
 
 // API tích điểm từ đơn hàng (MiniDMS gọi): theo SĐT hoặc mã hội viên.
 app.MapPost("/api/earn", async (EarnDto dto, ILoyaltyService svc) =>
@@ -42,3 +68,4 @@ app.MapControllerRoute(name: "default", pattern: "{controller=Home}/{action=Inde
 app.Run();
 
 record EarnDto(string? Phone, int? MemberId, decimal Amount, string? RefNo);
+record RegisterOrgDto(string Name);

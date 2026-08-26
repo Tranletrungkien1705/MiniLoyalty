@@ -14,9 +14,10 @@ public class RankTier
 }
 
 /// <summary>Hội viên.</summary>
-public class Member
+public class Member : IOrgOwned
 {
     public int Id { get; set; }
+    public Guid OrgId { get; set; }
     public string Code { get; set; } = "";
     public string Name { get; set; } = "";
     public string? Phone { get; set; }
@@ -32,9 +33,10 @@ public class Member
 }
 
 /// <summary>Giao dịch điểm (tích/đổi/sinh nhật/điều chỉnh/hết hạn).</summary>
-public class PointTransaction
+public class PointTransaction : IOrgOwned
 {
     public int Id { get; set; }
+    public Guid OrgId { get; set; }
     public int MemberId { get; set; }
     public PointTxType Type { get; set; }
     public int Points { get; set; }            // + tích, - đổi/hết hạn
@@ -47,9 +49,10 @@ public class PointTransaction
 }
 
 /// <summary>Quà/voucher đổi bằng điểm.</summary>
-public class Reward
+public class Reward : IOrgOwned
 {
     public int Id { get; set; }
+    public Guid OrgId { get; set; }
     public string Name { get; set; } = "";
     public int PointCost { get; set; }
     public string? Description { get; set; }
