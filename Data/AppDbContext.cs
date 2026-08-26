@@ -12,6 +12,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     protected override void OnModelCreating(ModelBuilder b)
     {
+        if (Database.IsNpgsql()) b.HasDefaultSchema("miniloyalty");
         b.Entity<RankTier>().Property(x => x.DiscountPercent).HasPrecision(5, 2);
         b.Entity<Member>(e =>
         {
