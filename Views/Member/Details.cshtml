@@ -1,0 +1,72 @@
+@model Member
+@{
+    ViewData["Title"] = $"Hội viên {Model.Code}";
+    var rewards = (List<Reward>)ViewBag.Rewards;
+    string TxName(PointTxType t) => t switch { PointTxType.Earn=>"Tích điểm", PointTxType.Redeem=>"Đổi quà", PointTxType.Birthday=>"Sinh nhật", PointTxType.Adjust=>"Điều chỉnh", PointTxType.Expiry=>"Hết hạn", _=>t.ToString() };
+}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div><h5 class="fw-bold mb-0"><i class="bi bi-person-badge me-2"></i>@Model.Name</h5>
+        <small class="text-muted font-monospace">@Model.Code · @Model.Phone</small></div>
+    <a asp-action="Index" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left me-1"></i>Danh sách</a>
+</div>
+
+<div class="row g-3">
+    <div class="col-lg-4">
+        <div class="card mb-3" style="background:linear-gradient(135deg,@Model.RankTier?.ColorHex,#2a1220);color:#fff"><div class="card-body">
+            <div class="d-flex justify-content-between"><span class="rank-chip" style="background:rgba(255,255,255,.25)">@Model.RankTier?.Name</span>
+                <i class="bi bi-award-fill fs-3 opacity-75"></i></div>
+            <div class="mt-3" style="font-size:12px;opacity:.85;text-transform:uppercase;letter-spacing:1px">Điểm khả dụng</div>
+            <div style="font-size:34px;font-weight:800;line-height:1.1">@Model.Points.ToString("N0")</div>
+            <div class="mt-2" style="font-size:13px;opacity:.9">Tích lũy trọn đời: <b>@Model.LifetimePoints.ToString("N0")</b></div>
+            <div style="font-size:13px;opacity:.9">Chiết khấu hạng: <b>@Model.RankTier?.DiscountPercent%</b></div>
+            <div class="mt-2" style="font-size:12px;opacity:.75">Tham gia @Model.JoinedAt.ToString("dd/MM/yyyy")@if(Model.Dob.HasValue){<span> · Sinh nhật @Model.Dob.Value.ToString("dd/MM")</span>}</div>
+        </div></div>
+
+        <div class="card mb-3"><div class="card-body">
+            <h6 class="fw-bold mb-2"><i class="bi bi-plus-circle me-1"></i>Tích điểm từ mua hàng</h6>
+            <form asp-action="Earn" asp-route-id="@Model.Id" method="post" class="row g-2">@Html.AntiForgeryToken()
+                <div class="col-7"><input name="amount" type="number" step="1000" min="0" class="form-control form-control-sm" placeholder="Số tiền (đ)" required /></div>
+                <div class="col-5"><button class="btn btn-primary btn-sm w-100">Tích điểm</button></div>
+                <div class="col-12"><input name="note" class="form-control form-control-sm" placeholder="Ghi chú / số HĐ" /></div>
+            </form>
+            <hr class="my-2" />
+            <form asp-action="Adjust" asp-route-id="@Model.Id" method="post" class="row g-2">@Html.AntiForgeryToken()
+                <div class="col-7"><input name="points" type="number" class="form-control form-control-sm" placeholder="+/- điểm điều chỉnh" required /></div>
+                <div class="col-5"><button class="btn btn-outline-primary btn-sm w-100">Điều chỉnh</button></div>
+            </form>
+        </div></div>
+    </div>
+
+    <div class="col-lg-8">
+        <div class="card mb-3"><div class="card-header bg-white fw-semibold"><i class="bi bi-gift me-1"></i>Đổi quà (điểm khả dụng: @Model.Points.ToString("N0"))</div>
+        <div class="card-body"><div class="row g-2">
+            @foreach (var r in rewards)
+            {
+                var canAfford = Model.Points >= r.PointCost && r.Stock > 0;
+                <div class="col-md-6"><div class="border rounded p-2 d-flex justify-content-between align-items-center h-100">
+                    <div><div class="fw-semibold small">@r.Name</div><div class="text-muted" style="font-size:12px">@r.Description</div>
+                        <span class="badge bg-warning-subtle text-warning">@r.PointCost điểm</span> @if(r.Stock<=0){<span class="badge bg-danger-subtle text-danger">Hết</span>}</div>
+                    <form asp-action="Redeem" asp-route-id="@Model.Id" method="post">@Html.AntiForgeryToken()<input type="hidden" name="rewardId" value="@r.Id" />
+                        <button class="btn btn-sm @(canAfford?"btn-primary":"btn-light")" @(canAfford?"":"disabled")>Đổi</button></form>
+                </div></div>
+            }
+        </div></div></div>
+
+        <div class="card"><div class="card-header bg-white fw-semibold"><i class="bi bi-clock-history me-1"></i>Lịch sử điểm</div>
+        <div class="table-responsive"><table class="table table-hover align-middle mb-0">
+            <thead><tr><th>Thời gian</th><th>Loại</th><th>Diễn giải</th><th class="text-end">Điểm</th><th class="text-end">Số dư</th></tr></thead>
+            <tbody>
+                @foreach (var tx in Model.Transactions.OrderByDescending(t => t.CreatedAt))
+                {
+                    <tr>
+                        <td class="small text-muted">@tx.CreatedAt.ToString("dd/MM/yyyy HH:mm")</td>
+                        <td class="small">@TxName(tx.Type)</td>
+                        <td class="small">@tx.Note</td>
+                        <td class="text-end fw-semibold @(tx.Points>=0?"text-success":"text-danger")">@(tx.Points>=0?"+":"")@tx.Points.ToString("N0")</td>
+                        <td class="text-end text-muted">@tx.BalanceAfter.ToString("N0")</td>
+                    </tr>
+                }
+            </tbody>
+        </table></div></div>
+    </div>
+</div>

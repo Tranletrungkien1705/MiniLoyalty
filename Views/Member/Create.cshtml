@@ -1,0 +1,20 @@
+@model Member
+@{ ViewData["Title"] = "Thêm hội viên"; }
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="fw-bold mb-0"><i class="bi bi-person-plus me-2"></i>Thêm hội viên</h5>
+    <a asp-action="Index" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left me-1"></i>Quay lại</a>
+</div>
+<form method="post"><div class="card"><div class="card-body">
+    @Html.AntiForgeryToken()
+    <div class="row g-3">
+        <div class="col-md-6"><label class="form-label fw-semibold">Họ tên <span class="text-danger">*</span></label><input name="Name" class="form-control" required /></div>
+        <div class="col-md-3"><label class="form-label fw-semibold">Điện thoại</label><input name="Phone" class="form-control" /></div>
+        <div class="col-md-3"><label class="form-label fw-semibold">Ngày sinh</label><input name="Dob" type="date" class="form-control" /></div>
+        <div class="col-md-6"><label class="form-label fw-semibold">Email</label><input name="Email" type="email" class="form-control" /></div>
+        <div class="col-md-3"><label class="form-label fw-semibold">Điểm ban đầu</label><input name="Points" type="number" value="0" min="0" class="form-control" /></div>
+        <div class="col-md-3"><label class="form-label fw-semibold">Tích lũy ban đầu</label><input name="LifetimePoints" type="number" value="0" min="0" class="form-control" /></div>
+    </div>
+    <div class="mt-3"><button class="btn btn-primary"><i class="bi bi-check-lg me-1"></i>Tạo hội viên</button>
+        <a asp-action="Index" class="btn btn-light">Hủy</a></div>
+    <div class="small text-muted mt-2">Hạng thẻ tự xếp theo điểm tích lũy. Tỉ lệ tích: 1 điểm / 1.000đ.</div>
+</div></div></form>

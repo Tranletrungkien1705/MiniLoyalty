@@ -1,0 +1,56 @@
+@{
+    ViewData["Title"] = "Bảng điều khiển";
+    var d = (LoyaltyDash)ViewBag.Dash;
+    var top = (List<Member>)ViewBag.Top;
+}
+<style>.stat .ico{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:21px}
+.stat .lbl{font-size:11.5px;text-transform:uppercase;letter-spacing:1px;color:#94a3b8;font-weight:600}.stat .val{font-size:26px;font-weight:800}</style>
+<div class="row g-3 mb-4">
+    <div class="col-md-4"><div class="card stat h-100"><div class="card-body d-flex justify-content-between align-items-start">
+        <div><div class="lbl mb-1">Hội viên</div><div class="val" style="color:#db2777">@d.Members</div></div>
+        <div class="ico" style="background:#fce7f3;color:#db2777"><i class="bi bi-people-fill"></i></div></div></div></div>
+    <div class="col-md-4"><div class="card stat h-100"><div class="card-body d-flex justify-content-between align-items-start">
+        <div><div class="lbl mb-1">Điểm khả dụng</div><div class="val" style="color:#6366f1">@d.ActivePoints.ToString("N0")</div></div>
+        <div class="ico" style="background:#e0e7ff;color:#6366f1"><i class="bi bi-coin"></i></div></div></div></div>
+    <div class="col-md-4"><div class="card stat h-100"><div class="card-body d-flex justify-content-between align-items-start">
+        <div><div class="lbl mb-1">Điểm tích lũy trọn đời</div><div class="val" style="color:#f59e0b">@d.LifetimeIssued.ToString("N0")</div></div>
+        <div class="ico" style="background:#fef3c7;color:#f59e0b"><i class="bi bi-graph-up-arrow"></i></div></div></div></div>
+</div>
+
+<div class="row g-3">
+    <div class="col-lg-7"><div class="card h-100"><div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h6 class="fw-bold mb-0"><i class="bi bi-trophy me-1"></i>Top hội viên</h6>
+            <a href="/Member" class="btn btn-outline-primary btn-sm">Xem tất cả</a></div>
+        <table class="table table-hover align-middle mb-0">
+            <thead><tr><th>Mã</th><th>Hội viên</th><th>Hạng</th><th class="text-end">Điểm</th></tr></thead>
+            <tbody>
+                @foreach (var m in top)
+                {
+                    <tr style="cursor:pointer" onclick="location.href='/Member/Details/@m.Id'">
+                        <td class="font-monospace small fw-semibold">@m.Code</td>
+                        <td>@m.Name<div class="small text-muted">@m.Phone</div></td>
+                        <td><span class="rank-chip" style="background:@m.RankTier?.ColorHex">@m.RankTier?.Name</span></td>
+                        <td class="text-end fw-bold">@m.Points.ToString("N0")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div></div></div>
+    <div class="col-lg-5"><div class="card h-100"><div class="card-body">
+        <h6 class="fw-bold mb-3"><i class="bi bi-diagram-3 me-1"></i>Hội viên theo hạng</h6>
+        <canvas id="rankChart" height="170"></canvas>
+    </div></div></div>
+</div>
+
+@section Scripts {
+<script>
+  new Chart(document.getElementById('rankChart'), {
+    type:'bar',
+    data:{ labels:[@Html.Raw(string.Join(",", d.ByRank.Select(r => $"'{r.Rank}'")))],
+      datasets:[{ data:[@string.Join(",", d.ByRank.Select(r => r.Count))],
+        backgroundColor:[@Html.Raw(string.Join(",", d.ByRank.Select(r => $"'{r.Color}'")))], borderRadius:5 }] },
+    options:{ plugins:{ legend:{ display:false } }, scales:{ y:{ ticks:{ precision:0 } } } }
+  });
+</script>
+}
