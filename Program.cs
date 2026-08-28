@@ -2,11 +2,14 @@ using Microsoft.EntityFrameworkCore;
 using MiniLoyalty.Data;
 using MiniLoyalty.Models;
 using MiniLoyalty.Services;
+using Serilog;
 
 // Npgsql: DateTime (Kind Local/Unspecified) '' timestamp without time zone (khong phai timestamptz)
 AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
 
+FleetObs.ConfigureLogger("miniloyalty");
 var builder = WebApplication.CreateBuilder(args);
+builder.Host.UseSerilog();
 var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
 builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
 
@@ -19,11 +22,14 @@ builder.Services.AddDbContext<AppDbContext>(o =>
 });
 builder.Services.AddScoped<ITenantContext, TenantContext>();   // multi-tenant: ngữ cảnh org/request
 builder.Services.AddScoped<ILoyaltyService, LoyaltyService>();
+builder.Services.AddFleetObs();
 builder.Services.AddControllersWithViews();
 
 var app = builder.Build();
 using (var scope = app.Services.CreateScope())
     await Seeder.SeedAsync(scope.ServiceProvider.GetRequiredService<AppDbContext>());
+
+app.UseFleetObs();
 
 // Multi-tenant: X-Api-Key → OrgId (đặt TRƯỚC khi AppDbContext của request được dựng, dùng scope tra cứu riêng).
 app.Use(async (ctx, next) =>

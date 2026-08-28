@@ -2,3 +2,6 @@ bin/
 obj/
 *.db
 *.db-*
+
+node_modules/
+clientapp/dist/
