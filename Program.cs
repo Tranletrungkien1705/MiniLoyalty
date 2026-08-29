@@ -70,8 +70,26 @@ app.MapPost("/api/earn", async (EarnDto dto, ILoyaltyService svc) =>
     return Results.Ok(new { memberCode = member!.Code, earned = tx.Points, balance = member.Points, rank = member.RankTier?.Name });
 });
 
+// API tích hợp: mua xe / sửa xe → tự tạo hội viên nếu chưa có (theo SĐT) rồi tích điểm.
+app.MapPost("/api/ext/auto-earn", async (AutoEarnDto dto, ILoyaltyService svc) =>
+{
+    if (string.IsNullOrWhiteSpace(dto.Phone)) return Results.BadRequest(new { error = "Cần số điện thoại." });
+    if (dto.Amount <= 0) return Results.BadRequest(new { error = "Số tiền phải > 0." });
+    var m = await svc.GetByPhoneAsync(dto.Phone.Trim());
+    var enrolled = false;
+    if (m == null)
+    {
+        var id = await svc.CreateAsync(new Member { Name = dto.Name ?? "Khách hàng", Phone = dto.Phone.Trim() });
+        m = await svc.GetAsync(id); enrolled = true;
+    }
+    var tx = await svc.EarnFromPurchaseAsync(m!.Id, dto.Amount, dto.RefNo);
+    var member = await svc.GetAsync(m.Id);
+    return Results.Ok(new { memberCode = member!.Code, enrolled, earned = tx.Points, balance = member.Points, rank = member.RankTier?.Name });
+});
+
 app.MapControllerRoute(name: "default", pattern: "{controller=Home}/{action=Index}/{id?}");
 app.Run();
 
 record EarnDto(string? Phone, int? MemberId, decimal Amount, string? RefNo);
+record AutoEarnDto(string? Phone, string? Name, decimal Amount, string? RefNo);
 record RegisterOrgDto(string Name);
