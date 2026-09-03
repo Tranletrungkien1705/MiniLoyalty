@@ -87,9 +87,35 @@ app.MapPost("/api/ext/auto-earn", async (AutoEarnDto dto, ILoyaltyService svc) =
     return Results.Ok(new { memberCode = member!.Code, enrolled, earned = tx.Points, balance = member.Points, rank = member.RankTier?.Name });
 });
 
+// Import members thật từ DB nguồn (dedupe theo Phone)
+app.MapPost("/api/import/members", async (List<ImportMemberDto> rows, AppDbContext db, ITenantContext tc) =>
+{
+    if (rows == null || rows.Count == 0) return Results.BadRequest(new { error = "Không có dữ liệu import." });
+    int added = 0, skipped = 0;
+    var orgId = tc.OrgId != Guid.Empty ? tc.OrgId : db.Orgs.Select(o => o.Id).FirstOrDefault();
+    var defaultRank = db.RankTiers.OrderBy(r => r.MinLifetimePoints).FirstOrDefault()?.Id ?? 1;
+    foreach (var row in rows)
+    {
+        if (string.IsNullOrWhiteSpace(row.Phone)) { skipped++; continue; }
+        var phone = row.Phone.Trim();
+        if (await db.Members.AnyAsync(m => m.OrgId == orgId && m.Phone == phone)) { skipped++; continue; }
+        db.Members.Add(new Member
+        {
+            OrgId = orgId, Code = row.Code ?? ("M" + Guid.NewGuid().ToString("N")[..8].ToUpper()),
+            Name = row.Name?.Trim() ?? "Hội viên", Phone = phone,
+            Dob = row.Dob.HasValue ? row.Dob.Value : null,
+            Points = row.Points, LifetimePoints = row.LifetimePoints, RankTierId = defaultRank
+        });
+        added++;
+    }
+    await db.SaveChangesAsync();
+    return Results.Ok(new { added, skipped, total = added + skipped });
+});
+
 app.MapControllerRoute(name: "default", pattern: "{controller=Home}/{action=Index}/{id?}");
 app.Run();
 
 record EarnDto(string? Phone, int? MemberId, decimal Amount, string? RefNo);
 record AutoEarnDto(string? Phone, string? Name, decimal Amount, string? RefNo);
 record RegisterOrgDto(string Name);
+record ImportMemberDto(string? Code, string? Name, string? Phone, DateTime? Dob, int Points, int LifetimePoints);
