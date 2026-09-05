@@ -79,6 +79,9 @@ public static class Seeder
             $"ALTER TABLE miniloyalty.\"Members\" ADD COLUMN IF NOT EXISTS \"OrgId\" uuid NOT NULL DEFAULT '{def}'",
             $"ALTER TABLE miniloyalty.\"PointTransactions\" ADD COLUMN IF NOT EXISTS \"OrgId\" uuid NOT NULL DEFAULT '{def}'",
             $"ALTER TABLE miniloyalty.\"Rewards\" ADD COLUMN IF NOT EXISTS \"OrgId\" uuid NOT NULL DEFAULT '{def}'",
+            // Code trước đây unique TOÀN CỤC (bug: 2 org khác nhau tạo hội viên thứ N đầu tiên bị trùng mã) — đổi sang unique theo (OrgId, Code).
+            "DROP INDEX IF EXISTS miniloyalty.\"IX_Members_Code\"",
+            "CREATE UNIQUE INDEX IF NOT EXISTS \"IX_Members_OrgId_Code\" ON miniloyalty.\"Members\" (\"OrgId\", \"Code\")",
         };
         foreach (var s in sql)
             try { await db.Database.ExecuteSqlRawAsync(s); } catch { }

@@ -24,7 +24,7 @@ public class AppDbContext : DbContext
         b.Entity<RankTier>().Property(x => x.DiscountPercent).HasPrecision(5, 2);
         b.Entity<Member>(e =>
         {
-            e.HasIndex(x => x.Code).IsUnique();
+            e.HasIndex(x => new { x.OrgId, x.Code }).IsUnique();   // unique theo tenant (không phải toàn cục) - tránh trùng mã giữa các org
             e.HasOne(x => x.RankTier).WithMany().HasForeignKey(x => x.RankTierId);
             e.HasQueryFilter(x => x.OrgId == _orgId);           // cô lập theo tenant
         });
