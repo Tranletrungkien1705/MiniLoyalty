@@ -55,6 +55,7 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
         // FirstOrDefault (không Find) để áp query filter tenant — chặn tích điểm chéo tổ chức.
         var m = await db.Members.FirstOrDefaultAsync(x => x.Id == memberId) ?? throw new KeyNotFoundException();
         m.Points += points;
+        if (m.Points < 0) m.Points = 0;                  // không cho điểm khả dụng âm (vd Adjust trừ quá số dư)
         if (points > 0) m.LifetimePoints += points;     // chỉ điểm dương mới tính xếp hạng
         await RecomputeRankAsync(m);
         var tx = new PointTransaction { MemberId = memberId, Type = type, Points = points, BalanceAfter = m.Points, Note = note, RefNo = refNo };
