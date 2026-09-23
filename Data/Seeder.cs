@@ -38,6 +38,14 @@ public static class Seeder
                 new Reward { Name = "Quà sinh nhật đặc biệt", PointCost = 1500, Description = "Set quà tặng thành viên VIP", Stock = 20 });
             await db.SaveChangesAsync();
         }
+        if (!await db.Promotions.AnyAsync())
+        {
+            db.Promotions.AddRange(
+                new Promotion { Code = "PR-BAODUONG", Name = "Gói bảo dưỡng nhanh", PointCost = 800, Description = "Miễn phí 1 lần bảo dưỡng định kỳ", Qty = 50 },
+                new Promotion { Code = "PR-PHUKIEN", Name = "Phụ kiện chính hãng", PointCost = 1200, Description = "Đổi phụ kiện trị giá 1.200.000đ", Qty = 30 },
+                new Promotion { Code = "PR-RUAXE", Name = "Thẻ rửa xe 6 tháng", PointCost = 400, Description = "Rửa xe không giới hạn 6 tháng", Qty = 100 });
+            await db.SaveChangesAsync();
+        }
         if (!await db.Members.AnyAsync())
         {
             var tiers = await db.RankTiers.OrderBy(t => t.SortOrder).ToListAsync();
@@ -109,6 +117,16 @@ public static class Seeder
                 RefNo = "VOUCHERSD-DEMO-001", Note = "Sử dụng điểm voucher (VCH-NEWCAR-2026)", CreatedAt = DateTime.Now.AddDays(-4)
             });
             db.Members.Add(vch);
+            // Sử dụng điểm đổi ưu đãi (DealPointType=POINTUSE, Crd_DealUsePromotion) — minh hoạ trừ điểm khả dụng theo ưu đãi.
+            var prm = M("Lý Minh Quân", "0911222222", 3000, 2500);
+            var pr = db.Promotions.Local.First();
+            prm.PromotionUses.Add(new MemberPromotionUse
+            {
+                PromotionId = pr.Id, PrProgramCode = pr.Code, Points = -pr.PointCost, BalanceAfter = 2500 - pr.PointCost,
+                RefNo = "DUP-DEMO-001", Note = $"Sử dụng ưu đãi {pr.Code} ({pr.Name})", CreatedAt = DateTime.Now.AddDays(-2)
+            });
+            prm.Transactions.Add(new PointTransaction { Type = PointTxType.PointUse, Points = -pr.PointCost, BalanceAfter = 2500 - pr.PointCost, Note = $"Sử dụng ưu đãi: {pr.Name}", RefNo = "DUP-DEMO-001", CreatedAt = DateTime.Now.AddDays(-2) });
+            db.Members.Add(prm);
             await db.SaveChangesAsync();
         }
     }

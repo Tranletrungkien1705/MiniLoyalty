@@ -4,7 +4,9 @@
     var rewards = (List<Reward>)ViewBag.Rewards;
     var discounts = (List<MemberDiscountTransaction>)ViewBag.Discounts;
     var vouchers = (List<MemberVoucherTransaction>)ViewBag.Vouchers;
-    string TxName(PointTxType t) => t switch { PointTxType.Earn=>"Tích điểm", PointTxType.Redeem=>"Đổi quà", PointTxType.Birthday=>"Sinh nhật", PointTxType.Adjust=>"Điều chỉnh", PointTxType.Expiry=>"Hết hạn", PointTxType.Introduction=>"Giới thiệu", PointTxType.ServiceTurn=>"Lượt dịch vụ", _=>t.ToString() };
+    var promotions = (List<Promotion>)ViewBag.Promotions;
+    var promotionUses = (List<MemberPromotionUse>)ViewBag.PromotionUses;
+    string TxName(PointTxType t) => t switch { PointTxType.Earn=>"Tích điểm", PointTxType.Redeem=>"Đổi quà", PointTxType.Birthday=>"Sinh nhật", PointTxType.Adjust=>"Điều chỉnh", PointTxType.Expiry=>"Hết hạn", PointTxType.Introduction=>"Giới thiệu", PointTxType.ServiceTurn=>"Lượt dịch vụ", PointTxType.PointUse=>"Dùng ưu đãi", _=>t.ToString() };
 }
 <div class="d-flex justify-content-between align-items-center mb-3">
     <div><h5 class="fw-bold mb-0"><i class="bi bi-person-badge me-2"></i>@Model.Name</h5>
@@ -68,6 +70,27 @@
             </form>
         </div></div>
 
+        <div class="card mb-3"><div class="card-body">
+            <h6 class="fw-bold mb-2"><i class="bi bi-bag-check me-1"></i>Sử dụng điểm đổi ưu đãi</h6>
+            <div class="small text-muted mb-2">Điểm khả dụng: <b>@Model.Points.ToString("N0")</b> điểm</div>
+            @if (promotions.Count == 0)
+            {
+                <div class="text-muted small">Chưa có chương trình ưu đãi.</div>
+            }
+            @foreach (var p in promotions)
+            {
+                var canUse = Model.Points >= p.PointCost && p.Qty > 0;
+                <form asp-action="UsePromotion" asp-route-id="@Model.Id" method="post" class="row g-2 align-items-center mb-2">@Html.AntiForgeryToken()
+                    <input type="hidden" name="promotionId" value="@p.Id" />
+                    <div class="col-7"><div class="fw-semibold small">@p.Name</div>
+                        <div class="text-muted" style="font-size:12px">@p.Description</div>
+                        <span class="badge bg-warning-subtle text-warning">@p.PointCost điểm</span>
+                        @if (p.Qty <= 0) { <span class="badge bg-danger-subtle text-danger">Hết</span> }</div>
+                    <div class="col-5"><button class="btn btn-sm w-100 @(canUse?"btn-primary":"btn-light")" @(canUse?"":"disabled")><i class="bi bi-cart-check me-1"></i>Dùng</button></div>
+                </form>
+            }
+        </div></div>
+
         @if (!string.IsNullOrWhiteSpace(Model.MemberNoIntro) || Model.PointIntro > 0)
         {
             <div class="card mb-3"><div class="card-body">
@@ -94,6 +117,28 @@
                 </div></div>
             }
         </div></div></div>
+
+        <div class="card mb-3"><div class="card-header bg-white fw-semibold"><i class="bi bi-bag-check me-1"></i>Lịch sử sử dụng ưu đãi</div>
+        <div class="table-responsive"><table class="table table-hover align-middle mb-0">
+            <thead><tr><th>Thời gian</th><th>Ưu đãi</th><th>Mã ưu đãi</th><th class="text-end">Điểm</th><th class="text-end">Còn lại</th><th>Tham chiếu</th></tr></thead>
+            <tbody>
+                @if (promotionUses.Count == 0)
+                {
+                    <tr><td colspan="6" class="text-center text-muted small py-3">Chưa có giao dịch sử dụng ưu đãi.</td></tr>
+                }
+                @foreach (var u in promotionUses)
+                {
+                    <tr>
+                        <td class="small text-muted">@u.CreatedAt.ToString("dd/MM/yyyy HH:mm")</td>
+                        <td class="small">@(u.PromotionNav?.Name ?? "—")</td>
+                        <td class="small font-monospace">@u.PrProgramCode</td>
+                        <td class="text-end fw-semibold text-danger">@u.Points.ToString("N0")</td>
+                        <td class="text-end text-muted">@u.BalanceAfter.ToString("N0")</td>
+                        <td class="small text-muted">@u.RefNo</td>
+                    </tr>
+                }
+            </tbody>
+        </table></div></div>
 
         <div class="card mb-3"><div class="card-header bg-white fw-semibold"><i class="bi bi-percent me-1"></i>Lịch sử chiết khấu dịch vụ</div>
         <div class="table-responsive"><table class="table table-hover align-middle mb-0">

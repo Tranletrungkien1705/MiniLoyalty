@@ -1,6 +1,6 @@
 namespace MiniLoyalty.Models;
 
-public enum PointTxType { Earn = 0, Redeem = 1, Birthday = 2, Adjust = 3, Expiry = 4, Introduction = 5, ServiceTurn = 6, Discount = 7 }
+public enum PointTxType { Earn = 0, Redeem = 1, Birthday = 2, Adjust = 3, Expiry = 4, Introduction = 5, ServiceTurn = 6, Discount = 7, PointUse = 8 }
 
 /// <summary>Loại giao dịch điểm voucher (Crd_MemberVoucherTransaction.DealPointType).</summary>
 public enum VoucherTxType { Award = 0, Use = 1 }   // VOUCHERXM = tặng, VOUCHERSD = sử dụng
@@ -59,6 +59,7 @@ public class Member : IOrgOwned
     public List<PointTransaction> Transactions { get; set; } = [];
     public List<MemberDiscountTransaction> Discounts { get; set; } = [];
     public List<MemberVoucherTransaction> Vouchers { get; set; } = [];
+    public List<MemberPromotionUse> PromotionUses { get; set; } = [];
 }
 
 /// <summary>Giao dịch điểm (tích/đổi/sinh nhật/điều chỉnh/hết hạn).</summary>
@@ -131,4 +132,40 @@ public class Reward : IOrgOwned
     public string? Description { get; set; }
     public int Stock { get; set; } = 100;
     public bool IsActive { get; set; } = true;
+}
+
+/// <summary>
+/// Chương trình ưu đãi (Mst_PromotionProgram): ưu đãi hội viên có thể dùng điểm để đổi
+/// (ví dụ: gói bảo dưỡng, phụ kiện). Mỗi ưu đãi có giá điểm (PointCost) và số lượng còn lại (Qty).
+/// </summary>
+public class Promotion : IOrgOwned
+{
+    public int Id { get; set; }
+    public Guid OrgId { get; set; }
+    public string Code { get; set; } = "";          // Mst_PromotionProgram.PrProgramCode
+    public string Name { get; set; } = "";          // Mst_PromotionProgram.PrProgramName
+    public int PointCost { get; set; }              // điểm cần để đổi ưu đãi
+    public string? Description { get; set; }
+    public int Qty { get; set; } = 100;             // Mst_PromotionProgramDtl.Qty — số lượng còn lại
+    public bool IsActive { get; set; } = true;      // Mst_PromotionProgram.FlagActive
+}
+
+/// <summary>
+/// Giao dịch sử dụng ưu đãi (Crd_DealUsePromotion): hội viên dùng điểm khả dụng để đổi ưu đãi tại đại lý.
+/// Tương ứng Crd_CardTransaction với DealPointType = POINTUSE, PointChTotal &lt; 0 (trừ điểm).
+/// </summary>
+public class MemberPromotionUse : IOrgOwned
+{
+    public int Id { get; set; }
+    public Guid OrgId { get; set; }
+    public int MemberId { get; set; }
+    public int PromotionId { get; set; }            // ưu đãi được sử dụng
+    public string? PrProgramCode { get; set; }      // Crd_CardTransaction.PrProgramCode — mã ưu đãi
+    public int Points { get; set; }                 // Crd_CardTransaction.PointChTotal — điểm bị trừ (âm)
+    public int BalanceAfter { get; set; }           // Crd_Card.PointAvail sau giao dịch
+    public string? RefNo { get; set; }              // Crd_DealUsePromotion.DealUsePrmNo — số phiếu sử dụng ưu đãi
+    public string? Note { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.Now;   // Crd_DealUsePromotion.UsePrmDTime
+    public Member Member { get; set; } = null!;
+    public Promotion? PromotionNav { get; set; }
 }

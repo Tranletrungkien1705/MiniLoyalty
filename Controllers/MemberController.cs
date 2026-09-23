@@ -20,6 +20,8 @@ public class MemberController(ILoyaltyService svc) : Controller
         ViewBag.Rewards = await svc.RewardsAsync();
         ViewBag.Discounts = await svc.DiscountsAsync(id);
         ViewBag.Vouchers = await svc.VouchersAsync(id);
+        ViewBag.Promotions = await svc.PromotionsAsync();
+        ViewBag.PromotionUses = await svc.PromotionUsesAsync(id);
         return View(m);
     }
 
@@ -75,6 +77,14 @@ public class MemberController(ILoyaltyService svc) : Controller
     public async Task<IActionResult> UseVoucher(int id, int points, string? voucherCode, string? note)
     {
         var (ok, msg) = await svc.UseVoucherAsync(id, points, voucherCode, note);
+        TempData[ok ? "Success" : "Error"] = msg;
+        return RedirectToAction(nameof(Details), new { id });
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> UsePromotion(int id, int promotionId, string? note)
+    {
+        var (ok, msg) = await svc.UsePromotionAsync(id, promotionId, note);
         TempData[ok ? "Success" : "Error"] = msg;
         return RedirectToAction(nameof(Details), new { id });
     }

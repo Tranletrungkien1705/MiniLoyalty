@@ -38,6 +38,9 @@ public interface ILoyaltyService
     Task<MemberVoucherTransaction> AwardVoucherAsync(int memberId, int points, string? voucherCode, string? refNo, DateTime? expiry = null);
     Task<(bool ok, string msg)> UseVoucherAsync(int memberId, int points, string? voucherCode, string? refNo);
     Task<List<MemberVoucherTransaction>> VouchersAsync(int memberId);
+    Task<List<Promotion>> PromotionsAsync(bool activeOnly = true);
+    Task<(bool ok, string msg)> UsePromotionAsync(int memberId, int promotionId, string? refNo);
+    Task<List<MemberPromotionUse>> PromotionUsesAsync(int memberId);
 }
 
 public class LoyaltyService(AppDbContext db) : ILoyaltyService
@@ -359,6 +362,46 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
         db.MemberVoucherTransactions
             .Where(v => v.MemberId == memberId)
             .OrderByDescending(v => v.CreatedAt).ToListAsync();
+
+    public Task<List<Promotion>> PromotionsAsync(bool activeOnly = true) =>
+        (activeOnly ? db.Promotions.Where(p => p.IsActive) : db.Promotions).OrderBy(p => p.PointCost).ToListAsync();
+
+    /// <summary>
+    /// Sử dụng điểm đổi ưu đãi (DealPointType = POINTUSE, Crd_DealUsePromotion / WA_Crd_DealUsePromotion_Save):
+    /// hội viên dùng điểm khả dụng (PointAvail) để đổi một chương trình ưu đãi tại đại lý.
+    /// Trừ điểm khả dụng theo giá điểm của ưu đãi, giảm số lượng ưu đãi còn lại, ghi 1 giao dịch POINTUSE
+    /// (PointChTotal &lt; 0) kèm mã ưu đãi (PrProgramCode). KHÔNG đổi điểm tích lũy trọn đời (không ảnh hưởng xét hạng).
+    /// </summary>
+    public async Task<(bool ok, string msg)> UsePromotionAsync(int memberId, int promotionId, string? refNo)
+    {
+        var m = await db.Members.FirstOrDefaultAsync(x => x.Id == memberId);
+        if (m == null) return (false, "Không tìm thấy hội viên.");
+        var p = await db.Promotions.FirstOrDefaultAsync(x => x.Id == promotionId);
+        if (p == null || !p.IsActive) return (false, "Ưu đãi không khả dụng.");
+        if (p.Qty <= 0) return (false, "Ưu đãi đã hết.");
+        if (m.Points < p.PointCost) return (false, $"Không đủ điểm (cần {p.PointCost:N0}, có {m.Points:N0}).");
+
+        m.Points -= p.PointCost;   // trừ điểm khả dụng (PointAvail); KHÔNG đụng LifetimePoints
+        p.Qty--;
+        db.PointTransactions.Add(new PointTransaction
+        {
+            MemberId = memberId, Type = PointTxType.PointUse, Points = -p.PointCost, BalanceAfter = m.Points,
+            Note = $"Sử dụng ưu đãi: {p.Name}", RefNo = refNo
+        });
+        db.MemberPromotionUses.Add(new MemberPromotionUse
+        {
+            MemberId = memberId, PromotionId = p.Id, PrProgramCode = p.Code,
+            Points = -p.PointCost, BalanceAfter = m.Points, RefNo = refNo,
+            Note = $"Sử dụng ưu đãi {p.Code} ({p.Name})"
+        });
+        await db.SaveChangesAsync();
+        return (true, $"Đã sử dụng ưu đãi \"{p.Name}\" (-{p.PointCost:N0} điểm). Còn lại {m.Points:N0} điểm.");
+    }
+
+    public Task<List<MemberPromotionUse>> PromotionUsesAsync(int memberId) =>
+        db.MemberPromotionUses.Include(u => u.PromotionNav)
+            .Where(u => u.MemberId == memberId)
+            .OrderByDescending(u => u.CreatedAt).ToListAsync();
 
     public async Task<LoyaltyDash> DashboardAsync()
     {

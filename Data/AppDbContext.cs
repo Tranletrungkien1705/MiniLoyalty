@@ -18,6 +18,8 @@ public class AppDbContext : DbContext
     public DbSet<MemberDiscountTransaction> MemberDiscountTransactions => Set<MemberDiscountTransaction>();
     public DbSet<MemberVoucherTransaction> MemberVoucherTransactions => Set<MemberVoucherTransaction>();
     public DbSet<Reward> Rewards => Set<Reward>();
+    public DbSet<Promotion> Promotions => Set<Promotion>();
+    public DbSet<MemberPromotionUse> MemberPromotionUses => Set<MemberPromotionUse>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -48,6 +50,17 @@ public class AppDbContext : DbContext
         b.Entity<MemberVoucherTransaction>(e =>
         {
             e.HasOne(x => x.Member).WithMany(x => x.Vouchers).HasForeignKey(x => x.MemberId);
+            e.HasQueryFilter(x => x.OrgId == _orgId);
+        });
+        b.Entity<Promotion>(e =>
+        {
+            e.HasIndex(x => x.Code).IsUnique();
+            e.HasQueryFilter(x => x.OrgId == _orgId);
+        });
+        b.Entity<MemberPromotionUse>(e =>
+        {
+            e.HasOne(x => x.Member).WithMany(x => x.PromotionUses).HasForeignKey(x => x.MemberId);
+            e.HasOne(x => x.PromotionNav).WithMany().HasForeignKey(x => x.PromotionId);
             e.HasQueryFilter(x => x.OrgId == _orgId);
         });
     }
