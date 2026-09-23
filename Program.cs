@@ -207,6 +207,21 @@ app.MapPost("/api/pointincrease", async (PointIncreaseDto dto, ILoyaltyService s
     return Results.Ok(new { memberCode = member!.Code, rankPoints = tx.PointChRankTotal, pointCardRank = member.PointCardRank, points = member.Points, rank = member.RankTier?.Name });
 });
 
+// API tặng điểm mở thẻ mới (DealPointType=OPENCARD): tặng điểm chào mừng khi hội viên hoàn tất đăng ký.
+app.MapPost("/api/opencard/award", async (OpenCardDto dto, ILoyaltyService svc) =>
+{
+    var m = dto.Phone is { Length: > 0 } p ? await svc.GetByPhoneAsync(p) : null;
+    if (m == null && dto.MemberId is { } mid) m = await svc.GetAsync(mid);
+    if (m == null) return Results.NotFound(new { error = "Không tìm thấy hội viên" });
+    try
+    {
+        var tx = await svc.AwardOpenCardAsync(m.Id, dto.Points, dto.RefNo);
+        var member = await svc.GetAsync(m.Id);
+        return Results.Ok(new { memberCode = member!.Code, awarded = tx.Points, balance = member.Points, lifetime = member.LifetimePoints, rank = member.RankTier?.Name });
+    }
+    catch (Exception ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+
 app.MapControllerRoute(name: "default", pattern: "{controller=Home}/{action=Index}/{id?}");
 app.Run();
 
@@ -215,6 +230,7 @@ record RegisterOrgDto(string Name);
 record IntroDto(string? Phone, int? MemberId);
 record BuyNewCarDto(string? Phone, int? MemberId, int? Points, string? RefNo);
 record KmbhDto(string? Phone, int? MemberId, int? Points, string? RefNo);
+record OpenCardDto(string? Phone, int? MemberId, int? Points, string? RefNo);
 record ServiceTurnDto(string? Phone, int? MemberId, int Qty, string? RefNo);
 record ConsumptionDto(string? Phone, int? MemberId, decimal Amount, string? RefNo);
 record DiscountDto(string? Phone, int? MemberId, decimal Amount, string? RefNo);

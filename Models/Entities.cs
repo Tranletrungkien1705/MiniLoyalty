@@ -1,6 +1,6 @@
 namespace MiniLoyalty.Models;
 
-public enum PointTxType { Earn = 0, Redeem = 1, Birthday = 2, Adjust = 3, Expiry = 4, Introduction = 5, ServiceTurn = 6, Discount = 7, PointUse = 8, Sale = 9, Consumption = 10, Kmbh = 11, PrProgram = 12, PointIncrease = 13 }
+public enum PointTxType { Earn = 0, Redeem = 1, Birthday = 2, Adjust = 3, Expiry = 4, Introduction = 5, ServiceTurn = 6, Discount = 7, PointUse = 8, Sale = 9, Consumption = 10, Kmbh = 11, PrProgram = 12, PointIncrease = 13, OpenCard = 14 }
 
 /// <summary>Phân loại ghi nhận sử dụng ưu đãi (Crd_DealUsePromotion): POINTUSE trừ điểm, PRPROGRAM chỉ ghi nhận (không đổi điểm).</summary>
 public enum PromotionUseKind { PointUse = 0, PrProgram = 1 }
@@ -61,6 +61,9 @@ public class Member : IOrgOwned
     // hội viên mua xe thuộc chương trình khuyến mại. Khi đủ điều kiện, hệ thống cộng PointBuyCreta
     // điểm (DealPointType=KMBH) — khác với SALES (điểm thưởng của đại lý).
     public int PointBuyCreta { get; set; }       // Crd_Member.PointBuyCreta — điểm khuyến mại bán hàng (HTV)
+    // Điểm tặng mở thẻ mới (Crd_Member.PointOpenCard): khi hội viên hoàn tất đăng ký (Finish),
+    // hệ thống tặng PointOpenCard điểm chào mừng (DealPointType=OPENCARD, DLCode=HTV).
+    public int PointOpenCard { get; set; }       // Crd_Member.PointOpenCard — điểm tặng mở thẻ mới
 
     // Dữ liệu kỳ xét hạng hiện tại (Crd_Member/Crd_Card): reset về 0 khi sang kỳ mới.
     public int PointCardRank { get; set; }     // Crd_Member.PointCardRank — điểm xét hạng tích trong kỳ

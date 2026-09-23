@@ -113,6 +113,10 @@ public static class Seeder
             var kmbh = M("Đặng Quốc Huy", "0910555555", 0, 0);
             kmbh.PointBuyCreta = 3000;
             db.Members.Add(kmbh);
+            // Hội viên mới có điểm tặng mở thẻ (Crd_Member.PointOpenCard) — minh hoạ nghiệp vụ tặng điểm mở thẻ (DealPointType=OPENCARD).
+            var openCard = M("Nguyễn Thị Bích", "0910666666", 0, 0);
+            openCard.PointOpenCard = 150000;
+            db.Members.Add(openCard);
             // Ghi nhận lượt dịch vụ (DealPointType=SERVICETURN) — minh hoạ nghiệp vụ cộng lượt vào QtyVisitAvail.
             var svcTurn = M("Bùi Thanh Tùng", "0908888888", 300, 300);
             svcTurn.QtyVisitAvail = 2;

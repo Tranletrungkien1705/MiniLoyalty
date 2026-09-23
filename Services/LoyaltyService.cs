@@ -38,6 +38,7 @@ public interface ILoyaltyService
     Task<(bool ok, string msg)> AwardIntroductionAsync(int newMemberId);
     Task<PointTransaction> AwardBuyNewCarAsync(int memberId, int? points = null, string? refNo = null);
     Task<PointTransaction> AwardKmbhAsync(int memberId, int? points = null, string? refNo = null);
+    Task<PointTransaction> AwardOpenCardAsync(int memberId, int? points = null, string? refNo = null);
     Task<PointTransaction> RecordServiceTurnAsync(int memberId, int qty, string? refNo);
     Task<PointTransaction> RecordConsumptionAsync(int memberId, decimal amount, string? refNo);
     Task<PointTransaction> RecordPointIncreaseAsync(int memberId, int rankPoints, string? refNo);
@@ -361,6 +362,28 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
         if (already) throw new InvalidOperationException("Đã thưởng điểm khuyến mại bán hàng cho hội viên này rồi.");
 
         return await EarnAsync(m.Id, pts, PointTxType.Kmbh, $"Điểm khuyến mại bán hàng HTV ({pts:N0} điểm)", rn);
+    }
+
+    /// <summary>
+    /// Tặng điểm mở thẻ mới (DealPointType = OPENCARD, Crd_Member_PerformOpenCardX / Crd_Member_Finish):
+    /// khi hội viên hoàn tất đăng ký (Finish), hệ thống tặng số điểm chào mừng (Crd_Member.PointOpenCard)
+    /// do đại lý HTV phát hành. Cộng điểm khả dụng + điểm tích lũy trọn đời (điểm dương nên ảnh hưởng
+    /// xét hạng), ghi 1 giao dịch OPENCARD. Điểm có hạn dùng cuối năm kế tiếp (PointExpiryDTime).
+    /// Idempotent: mỗi hội viên chỉ tặng 1 lần (chặn bằng giao dịch OPENCARD đã có theo RefNo).
+    /// </summary>
+    public async Task<PointTransaction> AwardOpenCardAsync(int memberId, int? points = null, string? refNo = null)
+    {
+        var m = await db.Members.FirstOrDefaultAsync(x => x.Id == memberId) ?? throw new KeyNotFoundException();
+        var pts = points ?? m.PointOpenCard;
+        if (pts <= 0) throw new ArgumentException("Điểm tặng mở thẻ phải > 0.", nameof(points));
+
+        var rn = string.IsNullOrWhiteSpace(refNo) ? $"MT.{m.Code}" : refNo;
+        // Đã tặng điểm mở thẻ cho hội viên này chưa? (chặn tặng trùng)
+        var already = await db.PointTransactions.AnyAsync(t =>
+            t.MemberId == m.Id && t.Type == PointTxType.OpenCard && t.RefNo == rn);
+        if (already) throw new InvalidOperationException("Đã tặng điểm mở thẻ cho hội viên này rồi.");
+
+        return await EarnAsync(m.Id, pts, PointTxType.OpenCard, $"Tặng điểm mở thẻ mới ({pts:N0} điểm, đại lý HTV)", rn);
     }
 
     /// <summary>
