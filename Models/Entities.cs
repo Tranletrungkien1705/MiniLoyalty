@@ -1,6 +1,6 @@
 namespace MiniLoyalty.Models;
 
-public enum PointTxType { Earn = 0, Redeem = 1, Birthday = 2, Adjust = 3, Expiry = 4, Introduction = 5, ServiceTurn = 6, Discount = 7, PointUse = 8, Sale = 9, Consumption = 10, Kmbh = 11, PrProgram = 12, PointIncrease = 13, OpenCard = 14 }
+public enum PointTxType { Earn = 0, Redeem = 1, Birthday = 2, Adjust = 3, Expiry = 4, Introduction = 5, ServiceTurn = 6, Discount = 7, PointUse = 8, Sale = 9, Consumption = 10, Kmbh = 11, PrProgram = 12, PointIncrease = 13, OpenCard = 14, Support = 15 }
 
 /// <summary>Phân loại ghi nhận sử dụng ưu đãi (Crd_DealUsePromotion): POINTUSE trừ điểm, PRPROGRAM chỉ ghi nhận (không đổi điểm).</summary>
 public enum PromotionUseKind { PointUse = 0, PrProgram = 1 }
@@ -96,6 +96,9 @@ public class PointTransaction : IOrgOwned
     public string? PrProgramCode { get; set; } // Crd_CardTransaction.PrProgramCode — mã chương trình ưu đãi (PRPROGRAM)
     public int QtyPrChTotal { get; set; }      // Crd_CardTransaction.QtyPrChTotal — số lượng ưu đãi ghi nhận (PRPROGRAM)
     public int QtyPrUsed { get; set; }         // Crd_CardTransaction.QtyPrUsed — số lượng ưu đãi đã dùng (PRPROGRAM)
+    // Hỗ trợ điều chỉnh điểm (DealPointType=SUPPORT): nhân viên hỗ trợ cộng/trừ điểm thủ công.
+    public string? DLCode { get; set; }        // Crd_CardTransaction.DLCode — đại lý thực hiện (SUPPORT = hỗ trợ idocNet)
+    public string? FunctionRemark { get; set; } // Crd_CardTransaction.FunctionRemark — lý do điều chỉnh (audit)
     public DateTime? ExpiresAt { get; set; }   // điểm dương hết hạn vào thời điểm này (PointExpiryDTime)
     public DateTime CreatedAt { get; set; } = DateTime.Now;
 
