@@ -998,8 +998,142 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
         return list.OrderByDescending(h => h.CreatedAt).ToList();
     }
 
+    /// <summary>Danh sách yêu cầu đăng ký hội viên (Req_MemberRegister), lọc theo trạng thái nếu có.</summary>
+    public async Task<List<MemberRegister>> MemberRegistersAsync(MemberRegisterStatus? status = null)
+    {
+        var q = db.MemberRegisters.Include(r => r.Member).AsQueryable();
+        if (status.HasValue) q = q.Where(r => r.Status == status.Value);
+        var list = await q.ToListAsync();
+        return list.OrderByDescending(r => r.CreatedAt).ToList();
+    }
+
+    public Task<MemberRegister?> MemberRegisterAsync(int id) =>
+        db.MemberRegisters.Include(r => r.Member).FirstOrDefaultAsync(r => r.Id == id);
+
+    /// <summary>
+    /// Tạo yêu cầu đăng ký hội viên (Req_MemberRegister_SaveX): đại lý gửi thông tin khách hàng + xe
+    /// để đề nghị cấp thẻ hội viên mới. Yêu cầu khởi tạo ở trạng thái PENDING. Sinh mã lượt đăng ký
+    /// dạng MR.&lt;năm&gt;.&lt;seq&gt;. Chặn khi thiếu tên khách hàng.
+    /// </summary>
+    public async Task<(bool ok, string msg, int id)> CreateMemberRegisterAsync(MemberRegister req)
+    {
+        if (string.IsNullOrWhiteSpace(req.CustomerName)) return (false, "Cần tên khách hàng.", 0);
+
+        var seq = await db.MemberRegisters.CountAsync() + 1;
+        req.ReqMemberRegisterCode = $"MR.{DateTime.Now:yyyy}.{seq:D4}";
+        req.Status = MemberRegisterStatus.Pending;
+        req.RegisterDate = req.RegisterDate == default ? DateTime.Now : req.RegisterDate;
+        req.CreatedAt = DateTime.Now;
+        db.MemberRegisters.Add(req);
+        await db.SaveChangesAsync();
+        return (true, $"Đã tạo yêu cầu đăng ký {req.ReqMemberRegisterCode} (PENDING).", req.Id);
+    }
+
+    /// <summary>
+    /// Duyệt yêu cầu đăng ký (Req_MemberRegister_ApprX): chỉ duyệt được yêu cầu đang PENDING.
+    /// Trước khi duyệt, chặn nếu đã có hội viên APPROVE trùng CarNo/VIN (tránh cấp trùng thẻ cho cùng một xe).
+    /// Đặt Status = APPROVE, ghi ApproveAt/ApproveBy/Remark.
+    /// </summary>
+    public async Task<(bool ok, string msg)> ApproveMemberRegisterAsync(int id, string? remark, string? by = null)
+    {
+        var r = await db.MemberRegisters.FirstOrDefaultAsync(x => x.Id == id);
+        if (r == null) return (false, "Không tìm thấy yêu cầu đăng ký.");
+        if (r.Status != MemberRegisterStatus.Pending) return (false, "Chỉ duyệt được yêu cầu đang PENDING.");
+
+        // Chặn cấp trùng: đã có hội viên APPROVE cùng CarNo hoặc VIN.
+        // (Hội viên lưu biển số/VIN ở trường Remark khi hoàn tất đăng ký — xem FinishMemberRegisterAsync.)
+        var existed = await db.Members.FirstOrDefaultAsync(m => m.Status == MemberStatus.Approve
+            && ((r.CarNo != null && r.CarNo != "" && m.Remark == r.CarNo) || (r.VIN != null && r.VIN != "" && m.Remark == r.VIN)));
+        if (existed != null)
+            return (false, $"Đã có hội viên {existed.Code} dùng biển số/VIN này (tránh cấp trùng thẻ).");
+
+        r.Status = MemberRegisterStatus.Approve;
+        r.ApproveAt = DateTime.Now;
+        r.ApproveBy = by;
+        r.Remark = remark;
+        await db.SaveChangesAsync();
+        return (true, $"Đã duyệt yêu cầu đăng ký {r.ReqMemberRegisterCode} (APPROVE).");
+    }
+
+    /// <summary>
+    /// Hoàn tất yêu cầu đăng ký (Req_MemberRegister_FinishX): chỉ hoàn tất được yêu cầu đang APPROVE.
+    /// Tạo hội viên mới từ thông tin khách hàng (mã HV..., hạng thấp nhất), gắn MemberId vào yêu cầu,
+    /// đặt Status = FINISH, ghi FinishAt/FinishBy. Idempotent: yêu cầu đã FINISH thì bỏ qua.
+    /// </summary>
+    public async Task<(bool ok, string msg)> FinishMemberRegisterAsync(int id, string? by = null)
+    {
+        var r = await db.MemberRegisters.FirstOrDefaultAsync(x => x.Id == id);
+        if (r == null) return (false, "Không tìm thấy yêu cầu đăng ký.");
+        if (r.Status != MemberRegisterStatus.Approve) return (false, "Chỉ hoàn tất được yêu cầu đang APPROVE.");
+
+        // Tạo hội viên mới từ thông tin đăng ký (Crd_Member_Finish).
+        var count = await db.Members.CountAsync();
+        var m = new Member
+        {
+            Code = $"HV{DateTime.Now:yy}{count + 1:D5}",
+            Name = r.CustomerName,
+            Phone = r.CustomerPhoneNo,
+            Email = r.CustomerEmail,
+            Dob = r.CustomerDateOfBirth,
+            RankTierId = (await LowestRankAsync()).Id,
+            JoinedAt = DateTime.Now,
+            MemberNoIntro = r.MemberNoIntro,
+            Remark = r.CarNo ?? r.VIN   // lưu biển số/VIN để chặn cấp trùng về sau
+        };
+        db.Members.Add(m);
+        await db.SaveChangesAsync();
+
+        r.MemberId = m.Id;
+        r.Status = MemberRegisterStatus.Finish;
+        r.FinishAt = DateTime.Now;
+        r.FinishBy = by;
+        await db.SaveChangesAsync();
+        return (true, $"Đã hoàn tất đăng ký {r.ReqMemberRegisterCode}; tạo hội viên {m.Code} ({m.Name}).");
+    }
+
+    /// <summary>
+    /// Huỷ yêu cầu đăng ký (Req_MemberRegister_CancelX): đại lý huỷ yêu cầu đang PENDING/APPROVE.
+    /// Đặt Status = CANCEL, ghi CancelAt/CancelBy/Remark.
+    /// </summary>
+    public async Task<(bool ok, string msg)> CancelMemberRegisterAsync(int id, string? remark, string? by = null)
+    {
+        var r = await db.MemberRegisters.FirstOrDefaultAsync(x => x.Id == id);
+        if (r == null) return (false, "Không tìm thấy yêu cầu đăng ký.");
+        if (r.Status != MemberRegisterStatus.Pending && r.Status != MemberRegisterStatus.Approve)
+            return (false, "Chỉ huỷ được yêu cầu đang PENDING/APPROVE.");
+
+        r.Status = MemberRegisterStatus.Cancel;
+        r.CancelAt = DateTime.Now;
+        r.CancelBy = by;
+        r.Remark = remark;
+        await db.SaveChangesAsync();
+        return (true, $"Đã huỷ yêu cầu đăng ký {r.ReqMemberRegisterCode} (CANCEL).");
+    }
+
+    /// <summary>
+    /// Từ chối yêu cầu đăng ký (Req_MemberRegister_RejectX): HTV từ chối yêu cầu đang APPROVE.
+    /// Bắt buộc có lý do (Remark). Đặt Status = REJECT, ghi RejectAt/RejectBy/Remark.
+    /// </summary>
+    public async Task<(bool ok, string msg)> RejectMemberRegisterAsync(int id, string? remark, string? by = null)
+    {
+        var r = await db.MemberRegisters.FirstOrDefaultAsync(x => x.Id == id);
+        if (r == null) return (false, "Không tìm thấy yêu cầu đăng ký.");
+        if (r.Status != MemberRegisterStatus.Approve) return (false, "Chỉ từ chối được yêu cầu đang APPROVE.");
+        if (string.IsNullOrWhiteSpace(remark)) return (false, "Cần lý do từ chối.");
+
+        r.Status = MemberRegisterStatus.Reject;
+        r.RejectAt = DateTime.Now;
+        r.RejectBy = by;
+        r.Remark = remark;
+        await db.SaveChangesAsync();
+        return (true, $"Đã từ chối yêu cầu đăng ký {r.ReqMemberRegisterCode} (REJECT).");
+    }
+
     private async Task<RankTier> LowestRankAsync() =>
         (await db.RankTiers.OrderBy(t => t.SortOrder).FirstAsync());
+
+    /// <summary>Tính lại hạng thẻ theo điểm tích lũy trọn đời (hạng cao nhất mà hội viên đạt ngưỡng).</summary>
+    private async Task RecomputeRankAsync(Member m)
     {
         var tiers = await db.RankTiers.OrderBy(t => t.SortOrder).ToListAsync();
         var newTier = tiers.Last(t => m.LifetimePoints >= t.MinLifetimePoints);

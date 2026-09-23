@@ -1,0 +1,43 @@
+@model List<MemberRegister>
+@{
+    ViewData["Title"] = "Yêu cầu đăng ký hội viên";
+    var status = (MemberRegisterStatus?)ViewBag.Status;
+    string StName(MemberRegisterStatus s) => s switch { MemberRegisterStatus.Pending => "Chờ duyệt", MemberRegisterStatus.Approve => "Đã duyệt", MemberRegisterStatus.Finish => "Hoàn tất", MemberRegisterStatus.Cancel => "Đã huỷ", MemberRegisterStatus.Reject => "Từ chối", _ => s.ToString() };
+    string StBadge(MemberRegisterStatus s) => s switch { MemberRegisterStatus.Pending => "bg-warning-subtle text-warning", MemberRegisterStatus.Approve => "bg-info-subtle text-info", MemberRegisterStatus.Finish => "bg-success-subtle text-success", MemberRegisterStatus.Cancel => "bg-secondary-subtle text-secondary", MemberRegisterStatus.Reject => "bg-danger-subtle text-danger", _ => "bg-secondary-subtle" };
+}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div><h5 class="fw-bold mb-0"><i class="bi bi-person-vcard me-2"></i>Yêu cầu đăng ký hội viên</h5>
+        <small class="text-muted">Req_MemberRegister — luồng duyệt PENDING → APPROVE → FINISH</small></div>
+    <a asp-action="Create" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i>Tạo yêu cầu</a>
+</div>
+
+<div class="mb-3">
+    <a asp-action="Index" class="btn btn-sm @(status==null?"btn-primary":"btn-outline-secondary")">Tất cả</a>
+    <a asp-action="Index" asp-route-status="@MemberRegisterStatus.Pending" class="btn btn-sm @(status==MemberRegisterStatus.Pending?"btn-primary":"btn-outline-secondary")">Chờ duyệt</a>
+    <a asp-action="Index" asp-route-status="@MemberRegisterStatus.Approve" class="btn btn-sm @(status==MemberRegisterStatus.Approve?"btn-primary":"btn-outline-secondary")">Đã duyệt</a>
+    <a asp-action="Index" asp-route-status="@MemberRegisterStatus.Finish" class="btn btn-sm @(status==MemberRegisterStatus.Finish?"btn-primary":"btn-outline-secondary")">Hoàn tất</a>
+    <a asp-action="Index" asp-route-status="@MemberRegisterStatus.Cancel" class="btn btn-sm @(status==MemberRegisterStatus.Cancel?"btn-primary":"btn-outline-secondary")">Đã huỷ</a>
+    <a asp-action="Index" asp-route-status="@MemberRegisterStatus.Reject" class="btn btn-sm @(status==MemberRegisterStatus.Reject?"btn-primary":"btn-outline-secondary")">Từ chối</a>
+</div>
+
+<div class="card"><div class="table-responsive"><table class="table table-hover align-middle mb-0">
+    <thead><tr><th>Mã lượt</th><th>Khách hàng</th><th>Xe (biển số / VIN)</th><th>Đại lý</th><th>Trạng thái</th><th>Ngày ĐK</th><th></th></tr></thead>
+    <tbody>
+        @if (Model.Count == 0)
+        {
+            <tr><td colspan="7" class="text-center text-muted small py-4">Chưa có yêu cầu đăng ký nào.</td></tr>
+        }
+        @foreach (var r in Model)
+        {
+            <tr>
+                <td class="small font-monospace">@r.ReqMemberRegisterCode</td>
+                <td class="small">@r.CustomerName <span class="text-muted">@r.CustomerPhoneNo</span></td>
+                <td class="small">@(r.CarNo ?? "—") <span class="text-muted font-monospace">@r.VIN</span></td>
+                <td class="small text-muted">@(r.DLCodeRegis ?? "—")</td>
+                <td><span class="badge @StBadge(r.Status)">@StName(r.Status)</span></td>
+                <td class="small text-muted">@r.RegisterDate.ToString("dd/MM/yyyy")</td>
+                <td class="text-end"><a asp-action="Details" asp-route-id="@r.Id" class="btn btn-outline-primary btn-sm">Xem</a></td>
+            </tr>
+        }
+    </tbody>
+</table></div></div>

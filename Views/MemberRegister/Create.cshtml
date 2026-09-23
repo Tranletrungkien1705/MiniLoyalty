@@ -1,0 +1,82 @@
+@{
+    ViewData["Title"] = "Tạo yêu cầu đăng ký";
+}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div><h5 class="fw-bold mb-0"><i class="bi bi-person-plus me-2"></i>Tạo yêu cầu đăng ký hội viên</h5>
+        <small class="text-muted">Req_MemberRegister_SaveX — khởi tạo ở trạng thái PENDING</small></div>
+    <a asp-action="Index" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left me-1"></i>Danh sách</a>
+</div>
+
+<div class="card"><div class="card-body">
+    <form asp-action="Create" method="post" class="row g-3">@Html.AntiForgeryToken()
+        <div class="col-md-4">
+            <label class="form-label small fw-semibold">Họ tên khách hàng <span class="text-danger">*</span></label>
+            <input name="CustomerName" class="form-control form-control-sm" required />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label small fw-semibold">Số điện thoại</label>
+            <input name="CustomerPhoneNo" class="form-control form-control-sm" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label small fw-semibold">Ngày sinh</label>
+            <input name="CustomerDateOfBirth" type="date" class="form-control form-control-sm" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label small fw-semibold">CCCD/MST</label>
+            <input name="CustomerIDNo" class="form-control form-control-sm" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label small fw-semibold">Email</label>
+            <input name="CustomerEmail" type="email" class="form-control form-control-sm" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label small fw-semibold">Giới tính (mã)</label>
+            <input name="GenderCode" class="form-control form-control-sm" placeholder="M/F" />
+        </div>
+        <div class="col-md-6">
+            <label class="form-label small fw-semibold">Địa chỉ</label>
+            <input name="CustomerAddress" class="form-control form-control-sm" />
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small fw-semibold">Tỉnh/TP</label>
+            <input name="ProvinceName" class="form-control form-control-sm" />
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small fw-semibold">Quận/Huyện</label>
+            <input name="DistrictName" class="form-control form-control-sm" />
+        </div>
+
+        <div class="col-12"><hr class="my-1" /><span class="small fw-semibold text-muted">Thông tin xe</span></div>
+        <div class="col-md-3">
+            <label class="form-label small fw-semibold">Biển số</label>
+            <input name="CarNo" class="form-control form-control-sm" />
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small fw-semibold">Số khung (VIN)</label>
+            <input name="VIN" class="form-control form-control-sm" />
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small fw-semibold">Hiệu xe</label>
+            <input name="TradeMarkName" class="form-control form-control-sm" />
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small fw-semibold">Dòng xe</label>
+            <input name="ModelName" class="form-control form-control-sm" />
+        </div>
+
+        <div class="col-md-4">
+            <label class="form-label small fw-semibold">Đại lý đăng ký</label>
+            <input name="DLCodeRegis" class="form-control form-control-sm" placeholder="DLCodeRegis" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label small fw-semibold">Mã hội viên người giới thiệu</label>
+            <input name="MemberNoIntro" class="form-control form-control-sm" placeholder="MemberNoIntro" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label small fw-semibold">Ghi chú</label>
+            <input name="Remark" class="form-control form-control-sm" />
+        </div>
+
+        <div class="col-12"><button class="btn btn-primary btn-sm"><i class="bi bi-send me-1"></i>Tạo yêu cầu</button></div>
+    </form>
+</div></div>

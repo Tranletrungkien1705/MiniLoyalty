@@ -331,6 +331,51 @@ app.MapPost("/api/cardexception/reject", async (CardExceptionActionDto dto, ILoy
     return ok ? Results.Ok(new { ok, msg }) : Results.BadRequest(new { ok, error = msg });
 });
 
+// API tạo yêu cầu đăng ký hội viên mới (Req_MemberRegister_SaveX): đại lý gửi thông tin khách hàng + xe, PENDING.
+app.MapPost("/api/memberregister/create", async (MemberRegisterCreateDto dto, ILoyaltyService svc) =>
+{
+    var req = new MemberRegister
+    {
+        DLCodeRegis = dto.DlCodeRegis, RegisterDate = dto.RegisterDate ?? DateTime.Now,
+        VIN = dto.VIN, CarNo = dto.CarNo, TradeMarkName = dto.TradeMarkName, ModelName = dto.ModelName,
+        CustomerName = dto.CustomerName ?? "", CustomerPhoneNo = dto.CustomerPhoneNo,
+        CustomerDateOfBirth = dto.CustomerDateOfBirth, CustomerIDNo = dto.CustomerIDNo,
+        CustomerEmail = dto.CustomerEmail, CustomerAddress = dto.CustomerAddress,
+        GenderCode = dto.GenderCode, ProvinceName = dto.ProvinceName, DistrictName = dto.DistrictName,
+        MemberNoIntro = dto.MemberNoIntro, Remark = dto.Remark
+    };
+    var (ok, msg, id) = await svc.CreateMemberRegisterAsync(req);
+    return ok ? Results.Ok(new { ok, msg, requestId = id }) : Results.BadRequest(new { ok, error = msg });
+});
+
+// API duyệt yêu cầu đăng ký (Req_MemberRegister_ApprX): PENDING → APPROVE, chặn trùng CarNo/VIN.
+app.MapPost("/api/memberregister/approve", async (MemberRegisterActionDto dto, ILoyaltyService svc) =>
+{
+    var (ok, msg) = await svc.ApproveMemberRegisterAsync(dto.Id, dto.Remark, dto.By);
+    return ok ? Results.Ok(new { ok, msg }) : Results.BadRequest(new { ok, error = msg });
+});
+
+// API hoàn tất yêu cầu đăng ký (Req_MemberRegister_FinishX): APPROVE → FINISH, tạo hội viên mới.
+app.MapPost("/api/memberregister/finish", async (MemberRegisterActionDto dto, ILoyaltyService svc) =>
+{
+    var (ok, msg) = await svc.FinishMemberRegisterAsync(dto.Id, dto.By);
+    return ok ? Results.Ok(new { ok, msg }) : Results.BadRequest(new { ok, error = msg });
+});
+
+// API huỷ yêu cầu đăng ký (Req_MemberRegister_CancelX): PENDING/APPROVE → CANCEL.
+app.MapPost("/api/memberregister/cancel", async (MemberRegisterActionDto dto, ILoyaltyService svc) =>
+{
+    var (ok, msg) = await svc.CancelMemberRegisterAsync(dto.Id, dto.Remark, dto.By);
+    return ok ? Results.Ok(new { ok, msg }) : Results.BadRequest(new { ok, error = msg });
+});
+
+// API từ chối yêu cầu đăng ký (Req_MemberRegister_RejectX): APPROVE → REJECT, bắt buộc lý do.
+app.MapPost("/api/memberregister/reject", async (MemberRegisterActionDto dto, ILoyaltyService svc) =>
+{
+    var (ok, msg) = await svc.RejectMemberRegisterAsync(dto.Id, dto.Remark, dto.By);
+    return ok ? Results.Ok(new { ok, msg }) : Results.BadRequest(new { ok, error = msg });
+});
+
 app.MapControllerRoute(name: "default", pattern: "{controller=Home}/{action=Index}/{id?}");
 app.Run();
 
@@ -355,3 +400,5 @@ record ChangeRequestCreateDto(string? Phone, int? MemberId, ChangeRequestType Re
 record ChangeRequestActionDto(int RequestId, string? RemarkHtv, string? By);
 record CardExceptionRequestDto(string? Phone, int? MemberId, string? DlCodeExceptionally, string? Remark, List<string>? DealerCodes);
 record CardExceptionActionDto(int Id, string? RemarkHtv, string? By);
+record MemberRegisterCreateDto(string? DlCodeRegis, DateTime? RegisterDate, string? VIN, string? CarNo, string? TradeMarkName, string? ModelName, string? CustomerName, string? CustomerPhoneNo, DateTime? CustomerDateOfBirth, string? CustomerIDNo, string? CustomerEmail, string? CustomerAddress, string? GenderCode, string? ProvinceName, string? DistrictName, string? MemberNoIntro, string? Remark);
+record MemberRegisterActionDto(int Id, string? Remark, string? By);

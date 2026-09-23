@@ -1,0 +1,80 @@
+@model MemberRegister
+@{
+    ViewData["Title"] = $"Đăng ký {Model.ReqMemberRegisterCode}";
+    string StName(MemberRegisterStatus s) => s switch { MemberRegisterStatus.Pending => "Chờ duyệt", MemberRegisterStatus.Approve => "Đã duyệt", MemberRegisterStatus.Finish => "Hoàn tất", MemberRegisterStatus.Cancel => "Đã huỷ", MemberRegisterStatus.Reject => "Từ chối", _ => s.ToString() };
+    string StBadge(MemberRegisterStatus s) => s switch { MemberRegisterStatus.Pending => "bg-warning-subtle text-warning", MemberRegisterStatus.Approve => "bg-info-subtle text-info", MemberRegisterStatus.Finish => "bg-success-subtle text-success", MemberRegisterStatus.Cancel => "bg-secondary-subtle text-secondary", MemberRegisterStatus.Reject => "bg-danger-subtle text-danger", _ => "bg-secondary-subtle" };
+    var canApprove = Model.Status == MemberRegisterStatus.Pending;
+    var canFinish = Model.Status == MemberRegisterStatus.Approve;
+    var canCancel = Model.Status == MemberRegisterStatus.Pending || Model.Status == MemberRegisterStatus.Approve;
+    var canReject = Model.Status == MemberRegisterStatus.Approve;
+}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div><h5 class="fw-bold mb-0"><i class="bi bi-person-vcard me-2"></i>@Model.ReqMemberRegisterCode
+            <span class="badge @StBadge(Model.Status) ms-1">@StName(Model.Status)</span></h5>
+        <small class="text-muted">Đăng ký @Model.RegisterDate.ToString("dd/MM/yyyy") · tạo @Model.CreatedAt.ToString("dd/MM/yyyy HH:mm")</small></div>
+    <a asp-action="Index" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left me-1"></i>Danh sách</a>
+</div>
+
+<div class="row g-3">
+    <div class="col-lg-7">
+        <div class="card mb-3"><div class="card-header bg-white fw-semibold"><i class="bi bi-person me-1"></i>Thông tin khách hàng</div>
+        <div class="card-body">
+            <div class="row g-2 small">
+                <div class="col-md-6 text-muted">Họ tên: <b class="text-dark">@Model.CustomerName</b></div>
+                <div class="col-md-6 text-muted">SĐT: <b class="text-dark">@(Model.CustomerPhoneNo ?? "—")</b></div>
+                <div class="col-md-6 text-muted">Ngày sinh: <b class="text-dark">@(Model.CustomerDateOfBirth?.ToString("dd/MM/yyyy") ?? "—")</b></div>
+                <div class="col-md-6 text-muted">CCCD/MST: <b class="text-dark">@(Model.CustomerIDNo ?? "—")</b></div>
+                <div class="col-md-6 text-muted">Email: <b class="text-dark">@(Model.CustomerEmail ?? "—")</b></div>
+                <div class="col-md-6 text-muted">Giới tính: <b class="text-dark">@(Model.GenderCode ?? "—")</b></div>
+                <div class="col-12 text-muted">Địa chỉ: <b class="text-dark">@(Model.CustomerAddress ?? "—")</b></div>
+                <div class="col-md-6 text-muted">Tỉnh/TP: <b class="text-dark">@(Model.ProvinceName ?? "—")</b></div>
+                <div class="col-md-6 text-muted">Quận/Huyện: <b class="text-dark">@(Model.DistrictName ?? "—")</b></div>
+            </div>
+        </div></div>
+
+        <div class="card mb-3"><div class="card-header bg-white fw-semibold"><i class="bi bi-car-front me-1"></i>Thông tin xe</div>
+        <div class="card-body">
+            <div class="row g-2 small">
+                <div class="col-md-6 text-muted">Biển số: <b class="text-dark">@(Model.CarNo ?? "—")</b></div>
+                <div class="col-md-6 text-muted">Số khung (VIN): <b class="text-dark font-monospace">@(Model.VIN ?? "—")</b></div>
+                <div class="col-md-6 text-muted">Hiệu xe: <b class="text-dark">@(Model.TradeMarkName ?? "—")</b></div>
+                <div class="col-md-6 text-muted">Dòng xe: <b class="text-dark">@(Model.ModelName ?? "—")</b></div>
+            </div>
+        </div></div>
+
+        <div class="card"><div class="card-body">
+            <h6 class="fw-bold mb-2"><i class="bi bi-info-circle me-1"></i>Thông tin xử lý</h6>
+            <div class="small text-muted">Đại lý đăng ký: <b>@(Model.DLCodeRegis ?? "—")</b></div>
+            <div class="small text-muted">Người giới thiệu: <b>@(Model.MemberNoIntro ?? "—")</b></div>
+            <div class="small text-muted">Ghi chú: @(Model.Remark ?? "—")</div>
+            @if (Model.ApproveAt.HasValue) { <div class="small text-muted">Duyệt lúc @Model.ApproveAt.Value.ToString("dd/MM/yyyy HH:mm") bởi @Model.ApproveBy</div> }
+            @if (Model.FinishAt.HasValue) { <div class="small text-muted">Hoàn tất lúc @Model.FinishAt.Value.ToString("dd/MM/yyyy HH:mm") bởi @Model.FinishBy</div> }
+            @if (Model.CancelAt.HasValue) { <div class="small text-muted">Huỷ lúc @Model.CancelAt.Value.ToString("dd/MM/yyyy HH:mm") bởi @Model.CancelBy</div> }
+            @if (Model.RejectAt.HasValue) { <div class="small text-muted">Từ chối lúc @Model.RejectAt.Value.ToString("dd/MM/yyyy HH:mm") bởi @Model.RejectBy</div> }
+            @if (Model.Member != null) { <div class="small text-muted">Hội viên tạo: <b>@Model.Member.Name</b> <span class="font-monospace">@Model.Member.Code</span></div> }
+        </div></div>
+    </div>
+
+    <div class="col-lg-5">
+        <div class="card mb-3"><div class="card-body">
+            <h6 class="fw-bold mb-2"><i class="bi bi-check2-square me-1"></i>Duyệt / Hoàn tất</h6>
+            <div class="small text-muted mb-2">Luồng: PENDING → APPROVE (duyệt, chặn trùng biển số/VIN) → FINISH (tạo hội viên mới). Huỷ ở PENDING/APPROVE → CANCEL; từ chối ở APPROVE → REJECT.</div>
+            <form asp-action="Approve" asp-route-id="@Model.Id" method="post" class="row g-2 mb-2">@Html.AntiForgeryToken()
+                <div class="col-12"><input name="remark" class="form-control form-control-sm" placeholder="Ghi chú khi duyệt" /></div>
+                <div class="col-12"><button class="btn btn-info btn-sm w-100" @(canApprove ? "" : "disabled")><i class="bi bi-check2 me-1"></i>Duyệt (APPROVE)</button></div>
+            </form>
+            <form asp-action="Finish" asp-route-id="@Model.Id" method="post" class="row g-2 mb-2">@Html.AntiForgeryToken()
+                <div class="col-12"><button class="btn btn-success btn-sm w-100" @(canFinish ? "" : "disabled")><i class="bi bi-flag me-1"></i>Hoàn tất (FINISH) — tạo hội viên</button></div>
+            </form>
+            <hr class="my-2" />
+            <form asp-action="Cancel" asp-route-id="@Model.Id" method="post" class="row g-2 mb-2">@Html.AntiForgeryToken()
+                <div class="col-12"><input name="remark" class="form-control form-control-sm" placeholder="Lý do huỷ" /></div>
+                <div class="col-12"><button class="btn btn-outline-secondary btn-sm w-100" @(canCancel ? "" : "disabled")><i class="bi bi-slash-circle me-1"></i>Huỷ (CANCEL)</button></div>
+            </form>
+            <form asp-action="Reject" asp-route-id="@Model.Id" method="post" class="row g-2">@Html.AntiForgeryToken()
+                <div class="col-12"><input name="remark" class="form-control form-control-sm" placeholder="Lý do từ chối (bắt buộc)" /></div>
+                <div class="col-12"><button class="btn btn-outline-danger btn-sm w-100" @(canReject ? "" : "disabled")><i class="bi bi-x-circle me-1"></i>Từ chối (REJECT)</button></div>
+            </form>
+        </div></div>
+    </div>
+</div>

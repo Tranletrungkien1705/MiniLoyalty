@@ -387,6 +387,7 @@ public class MemberRegister : IOrgOwned
     public DateTime? RejectAt { get; set; }                    // Req_MemberRegister.RejectDTimeUTC
     public string? RejectBy { get; set; }                      // Req_MemberRegister.RejectBy
     public DateTime? FinishAt { get; set; }                    // Req_MemberRegister.cm_RegisFinishDTimeUTC — thời gian hoàn tất đăng ký
+    public string? FinishBy { get; set; }                      // Req_MemberRegister.FinishBy — người hoàn tất đăng ký
     public int? MemberId { get; set; }                         // hội viên được tạo khi hoàn tất (FINISH)
 
     public Member? Member { get; set; }

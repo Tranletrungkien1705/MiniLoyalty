@@ -292,6 +292,35 @@ public static class Seeder
                 await db.SaveChangesAsync();
             }
         }
+        if (!await db.MemberRegisters.AnyAsync())
+        {
+            // Yêu cầu đăng ký hội viên mẫu (Req_MemberRegister) — minh hoạ luồng duyệt PENDING → APPROVE → FINISH.
+            // Đại lý gửi thông tin khách hàng + xe để đề nghị cấp thẻ hội viên mới.
+            db.MemberRegisters.AddRange(
+                new MemberRegister
+                {
+                    ReqMemberRegisterCode = $"MR.{DateTime.Now:yyyy}.0001", DLCodeRegis = "DL-DEMO-001",
+                    RegisterDate = DateTime.Now.AddDays(-2), VIN = "RL4DEMO0000000001", CarNo = "30A-123.45",
+                    TradeMarkName = "Toyota", ModelName = "Vios", CustomerName = "Nguyễn Thị Hồng",
+                    CustomerPhoneNo = "0912000001", CustomerDateOfBirth = new DateTime(1993, 5, 12),
+                    CustomerIDNo = "001093000001", CustomerEmail = "hong.nguyen@example.com",
+                    CustomerAddress = "12 Lê Lợi", GenderCode = "F", ProvinceName = "Hà Nội", DistrictName = "Hoàn Kiếm",
+                    Status = MemberRegisterStatus.Pending, Remark = "Khách mua xe mới, đăng ký thẻ hội viên",
+                    CreatedAt = DateTime.Now.AddDays(-2)
+                },
+                new MemberRegister
+                {
+                    ReqMemberRegisterCode = $"MR.{DateTime.Now:yyyy}.0002", DLCodeRegis = "DL-DEMO-002",
+                    RegisterDate = DateTime.Now.AddDays(-5), VIN = "RL4DEMO0000000002", CarNo = "51G-678.90",
+                    TradeMarkName = "Honda", ModelName = "CR-V", CustomerName = "Trần Văn Kiên",
+                    CustomerPhoneNo = "0912000002", CustomerDateOfBirth = new DateTime(1988, 9, 3),
+                    CustomerIDNo = "079088000002", CustomerEmail = "kien.tran@example.com",
+                    CustomerAddress = "45 Nguyễn Huệ", GenderCode = "M", ProvinceName = "TP. Hồ Chí Minh", DistrictName = "Quận 1",
+                    Status = MemberRegisterStatus.Approve, Remark = "Đã duyệt, chờ hoàn tất cấp thẻ",
+                    CreatedAt = DateTime.Now.AddDays(-5), ApproveAt = DateTime.Now.AddDays(-3), ApproveBy = "HTV"
+                });
+            await db.SaveChangesAsync();
+        }
     }
 
     /// <summary>
