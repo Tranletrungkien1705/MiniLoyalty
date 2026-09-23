@@ -3,6 +3,7 @@
     ViewData["Title"] = $"Hội viên {Model.Code}";
     var rewards = (List<Reward>)ViewBag.Rewards;
     var discounts = (List<MemberDiscountTransaction>)ViewBag.Discounts;
+    var vouchers = (List<MemberVoucherTransaction>)ViewBag.Vouchers;
     string TxName(PointTxType t) => t switch { PointTxType.Earn=>"Tích điểm", PointTxType.Redeem=>"Đổi quà", PointTxType.Birthday=>"Sinh nhật", PointTxType.Adjust=>"Điều chỉnh", PointTxType.Expiry=>"Hết hạn", PointTxType.Introduction=>"Giới thiệu", PointTxType.ServiceTurn=>"Lượt dịch vụ", _=>t.ToString() };
 }
 <div class="d-flex justify-content-between align-items-center mb-3">
@@ -21,6 +22,7 @@
             <div class="mt-2" style="font-size:13px;opacity:.9">Tích lũy trọn đời: <b>@Model.LifetimePoints.ToString("N0")</b></div>
             <div style="font-size:13px;opacity:.9">Chiết khấu hạng: <b>@Model.RankTier?.DiscountPercent%</b></div>
             <div style="font-size:13px;opacity:.9">Lượt dịch vụ trong kỳ: <b>@Model.QtyVisitAvail</b></div>
+            <div style="font-size:13px;opacity:.9">Điểm voucher: <b>@Model.PointVoucher.ToString("N0")</b></div>
             <div class="mt-2" style="font-size:12px;opacity:.75">Tham gia @Model.JoinedAt.ToString("dd/MM/yyyy")@if(Model.Dob.HasValue){<span> · Sinh nhật @Model.Dob.Value.ToString("dd/MM")</span>}</div>
         </div></div>
 
@@ -47,6 +49,22 @@
                 <div class="col-7"><input name="amount" type="number" step="1000" min="0" class="form-control form-control-sm" placeholder="Doanh thu dịch vụ (đ)" required /></div>
                 <div class="col-5"><button class="btn btn-outline-primary btn-sm w-100"><i class="bi bi-percent me-1"></i>Chiết khấu</button></div>
                 <div class="col-12"><input name="note" class="form-control form-control-sm" placeholder="Ghi chú / số RO" /></div>
+            </form>
+        </div></div>
+
+        <div class="card mb-3"><div class="card-body">
+            <h6 class="fw-bold mb-2"><i class="bi bi-ticket-perforated me-1"></i>Điểm voucher xe mới</h6>
+            <div class="small text-muted mb-2">Số dư voucher: <b>@Model.PointVoucher.ToString("N0")</b> điểm (không dùng xét hạng)</div>
+            <form asp-action="AwardVoucher" asp-route-id="@Model.Id" method="post" class="row g-2">@Html.AntiForgeryToken()
+                <div class="col-7"><input name="points" type="number" min="1" class="form-control form-control-sm" placeholder="Điểm voucher tặng" required /></div>
+                <div class="col-5"><button class="btn btn-outline-success btn-sm w-100"><i class="bi bi-gift me-1"></i>Tặng</button></div>
+                <div class="col-12"><input name="voucherCode" class="form-control form-control-sm" placeholder="Mã voucher (Prm_VoucherNewCar)" /></div>
+            </form>
+            <hr class="my-2" />
+            <form asp-action="UseVoucher" asp-route-id="@Model.Id" method="post" class="row g-2">@Html.AntiForgeryToken()
+                <div class="col-7"><input name="points" type="number" min="1" class="form-control form-control-sm" placeholder="Điểm voucher sử dụng" required /></div>
+                <div class="col-5"><button class="btn btn-outline-danger btn-sm w-100"><i class="bi bi-cart-dash me-1"></i>Sử dụng</button></div>
+                <div class="col-12"><input name="voucherCode" class="form-control form-control-sm" placeholder="Mã voucher / số RO" /></div>
             </form>
         </div></div>
 
@@ -94,6 +112,28 @@
                         <td class="text-end">@d.PolicyDiscountRate.ToString("0.##")%</td>
                         <td class="text-end fw-semibold text-danger">-@d.DiscountAmount.ToString("N0")</td>
                         <td class="small text-muted">@d.RefNo</td>
+                    </tr>
+                }
+            </tbody>
+        </table></div></div>
+
+        <div class="card mb-3"><div class="card-header bg-white fw-semibold"><i class="bi bi-ticket-perforated me-1"></i>Lịch sử điểm voucher</div>
+        <div class="table-responsive"><table class="table table-hover align-middle mb-0">
+            <thead><tr><th>Thời gian</th><th>Loại</th><th>Mã voucher</th><th class="text-end">Điểm</th><th class="text-end">Còn lại</th><th>Hết hạn</th></tr></thead>
+            <tbody>
+                @if (vouchers.Count == 0)
+                {
+                    <tr><td colspan="6" class="text-center text-muted small py-3">Chưa có giao dịch voucher.</td></tr>
+                }
+                @foreach (var v in vouchers)
+                {
+                    <tr>
+                        <td class="small text-muted">@v.CreatedAt.ToString("dd/MM/yyyy HH:mm")</td>
+                        <td class="small">@(v.Type == VoucherTxType.Award ? "Tặng (VOUCHERXM)" : "Sử dụng (VOUCHERSD)")</td>
+                        <td class="small font-monospace">@v.VoucherCode</td>
+                        <td class="text-end fw-semibold @(v.Points>=0?"text-success":"text-danger")">@(v.Points>=0?"+":"")@v.Points.ToString("N0")</td>
+                        <td class="text-end text-muted">@v.BalanceAfter.ToString("N0")</td>
+                        <td class="small text-muted">@(v.ExpiryDate?.ToString("dd/MM/yyyy") ?? "—")</td>
                     </tr>
                 }
             </tbody>

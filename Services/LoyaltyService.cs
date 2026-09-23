@@ -35,6 +35,9 @@ public interface ILoyaltyService
     Task<PointTransaction> RecordServiceTurnAsync(int memberId, int qty, string? refNo);
     Task<MemberDiscountTransaction> ApplyServiceDiscountAsync(int memberId, decimal amount, string? refNo);
     Task<List<MemberDiscountTransaction>> DiscountsAsync(int memberId);
+    Task<MemberVoucherTransaction> AwardVoucherAsync(int memberId, int points, string? voucherCode, string? refNo, DateTime? expiry = null);
+    Task<(bool ok, string msg)> UseVoucherAsync(int memberId, int points, string? voucherCode, string? refNo);
+    Task<List<MemberVoucherTransaction>> VouchersAsync(int memberId);
 }
 
 public class LoyaltyService(AppDbContext db) : ILoyaltyService
@@ -308,6 +311,54 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
         db.MemberDiscountTransactions.Include(d => d.CardTypeApply)
             .Where(d => d.MemberId == memberId)
             .OrderByDescending(d => d.CreatedAt).ToListAsync();
+
+    /// <summary>
+    /// Tặng điểm voucher xe mới (DealPointType = VOUCHERXM, Crd_MemberVoucherTransaction): HTV tặng
+    /// điểm voucher cho hội viên mua xe mới theo chương trình. Cộng vào Member.PointVoucher
+    /// (Crd_Member.PointVoucher) — tách biệt điểm tiêu dùng, KHÔNG dùng để xét hạng.
+    /// </summary>
+    public async Task<MemberVoucherTransaction> AwardVoucherAsync(int memberId, int points, string? voucherCode, string? refNo, DateTime? expiry = null)
+    {
+        if (points <= 0) throw new ArgumentException("Điểm voucher phải > 0.", nameof(points));
+        var m = await db.Members.FirstOrDefaultAsync(x => x.Id == memberId) ?? throw new KeyNotFoundException();
+        m.PointVoucher += points;
+        var tx = new MemberVoucherTransaction
+        {
+            MemberId = memberId, Type = VoucherTxType.Award, Points = points, BalanceAfter = m.PointVoucher,
+            VoucherCode = voucherCode, RefNo = refNo, ExpiryDate = expiry,
+            Note = $"Tặng điểm voucher xe mới{(string.IsNullOrWhiteSpace(voucherCode) ? "" : $" ({voucherCode})")}"
+        };
+        db.MemberVoucherTransactions.Add(tx);
+        await db.SaveChangesAsync();
+        return tx;
+    }
+
+    /// <summary>
+    /// Sử dụng điểm voucher (DealPointType = VOUCHERSD, Crd_MemberVoucherTransaction): hội viên dùng
+    /// điểm voucher để quy đổi tại đại lý. Trừ vào Member.PointVoucher; chặn nếu vượt số dư voucher.
+    /// </summary>
+    public async Task<(bool ok, string msg)> UseVoucherAsync(int memberId, int points, string? voucherCode, string? refNo)
+    {
+        if (points <= 0) return (false, "Số điểm voucher sử dụng phải > 0.");
+        var m = await db.Members.FirstOrDefaultAsync(x => x.Id == memberId);
+        if (m == null) return (false, "Không tìm thấy hội viên.");
+        if (m.PointVoucher < points) return (false, $"Không đủ điểm voucher (cần {points:N0}, có {m.PointVoucher:N0}).");
+
+        m.PointVoucher -= points;
+        db.MemberVoucherTransactions.Add(new MemberVoucherTransaction
+        {
+            MemberId = memberId, Type = VoucherTxType.Use, Points = -points, BalanceAfter = m.PointVoucher,
+            VoucherCode = voucherCode, RefNo = refNo,
+            Note = $"Sử dụng điểm voucher{(string.IsNullOrWhiteSpace(voucherCode) ? "" : $" ({voucherCode})")}"
+        });
+        await db.SaveChangesAsync();
+        return (true, $"Đã sử dụng {points:N0} điểm voucher. Còn lại {m.PointVoucher:N0}.");
+    }
+
+    public Task<List<MemberVoucherTransaction>> VouchersAsync(int memberId) =>
+        db.MemberVoucherTransactions
+            .Where(v => v.MemberId == memberId)
+            .OrderByDescending(v => v.CreatedAt).ToListAsync();
 
     public async Task<LoyaltyDash> DashboardAsync()
     {

@@ -2,6 +2,9 @@ namespace MiniLoyalty.Models;
 
 public enum PointTxType { Earn = 0, Redeem = 1, Birthday = 2, Adjust = 3, Expiry = 4, Introduction = 5, ServiceTurn = 6, Discount = 7 }
 
+/// <summary>Loại giao dịch điểm voucher (Crd_MemberVoucherTransaction.DealPointType).</summary>
+public enum VoucherTxType { Award = 0, Use = 1 }   // VOUCHERXM = tặng, VOUCHERSD = sử dụng
+
 /// <summary>Hạng thẻ — xếp theo điểm tích lũy trọn đời (lifetime), kèm % chiết khấu.</summary>
 public class RankTier
 {
@@ -36,6 +39,7 @@ public class Member : IOrgOwned
     public DateTime? Dob { get; set; }
     public int Points { get; set; }            // điểm khả dụng (đổi được)
     public int LifetimePoints { get; set; }    // điểm tích lũy trọn đời (xếp hạng)
+    public int PointVoucher { get; set; }      // Crd_Member.PointVoucher — tổng điểm voucher còn lại (không dùng xét hạng)
     public int RankTierId { get; set; }
     public DateTime JoinedAt { get; set; } = DateTime.Now;
 
@@ -54,6 +58,7 @@ public class Member : IOrgOwned
     public RankTier? RankTier { get; set; }
     public List<PointTransaction> Transactions { get; set; } = [];
     public List<MemberDiscountTransaction> Discounts { get; set; } = [];
+    public List<MemberVoucherTransaction> Vouchers { get; set; } = [];
 }
 
 /// <summary>Giao dịch điểm (tích/đổi/sinh nhật/điều chỉnh/hết hạn).</summary>
@@ -92,6 +97,28 @@ public class MemberDiscountTransaction : IOrgOwned
 
     public Member Member { get; set; } = null!;
     public RankTier? CardTypeApply { get; set; }
+}
+
+/// <summary>
+/// Giao dịch điểm voucher (Crd_MemberVoucherTransaction): tách biệt khỏi điểm tiêu dùng thường.
+/// VOUCHERXM = HTV tặng điểm voucher xe mới (cộng), VOUCHERSD = hội viên sử dụng điểm voucher (trừ).
+/// Điểm voucher KHÔNG dùng để xét hạng.
+/// </summary>
+public class MemberVoucherTransaction : IOrgOwned
+{
+    public int Id { get; set; }
+    public Guid OrgId { get; set; }
+    public int MemberId { get; set; }
+    public VoucherTxType Type { get; set; }         // Crd_MemberVoucherTransaction.DealPointType (VOUCHERXM/VOUCHERSD)
+    public string? RefNo { get; set; }              // Crd_MemberVoucherTransaction.RefNo — mã giao dịch
+    public string? VoucherCode { get; set; }        // Crd_MemberVoucherTransaction.PrmVoucherCode — mã voucher
+    public int Points { get; set; }                 // Crd_MemberVoucherTransaction.PointChTotal — điểm voucher tích/tiêu (+/-)
+    public int BalanceAfter { get; set; }           // Crd_Member.PointVoucher sau giao dịch
+    public DateTime? ExpiryDate { get; set; }       // Crd_MemberVoucherTransaction.PointExpiryDate — ngày hết hạn điểm voucher
+    public string? Note { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.Now;
+
+    public Member Member { get; set; } = null!;
 }
 
 /// <summary>Quà/voucher đổi bằng điểm.</summary>

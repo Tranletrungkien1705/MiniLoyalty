@@ -94,6 +94,21 @@ public static class Seeder
                 CreatedAt = DateTime.Now.AddDays(-3)
             });
             db.Members.Add(disc);
+            // Điểm voucher xe mới (DealPointType=VOUCHERXM/VOUCHERSD) — minh hoạ tặng + sử dụng điểm voucher.
+            var vch = M("Đinh Quốc Bảo", "0910111111", 1500, 700);
+            vch.PointVoucher = 3000;
+            vch.Vouchers.Add(new MemberVoucherTransaction
+            {
+                Type = VoucherTxType.Award, Points = 5000, BalanceAfter = 5000, VoucherCode = "VCH-NEWCAR-2026",
+                RefNo = "VOUCHERXM-DEMO-001", ExpiryDate = DateTime.Today.AddMonths(12),
+                Note = "Tặng điểm voucher xe mới (VCH-NEWCAR-2026)", CreatedAt = DateTime.Now.AddDays(-10)
+            });
+            vch.Vouchers.Add(new MemberVoucherTransaction
+            {
+                Type = VoucherTxType.Use, Points = -2000, BalanceAfter = 3000, VoucherCode = "VCH-NEWCAR-2026",
+                RefNo = "VOUCHERSD-DEMO-001", Note = "Sử dụng điểm voucher (VCH-NEWCAR-2026)", CreatedAt = DateTime.Now.AddDays(-4)
+            });
+            db.Members.Add(vch);
             await db.SaveChangesAsync();
         }
     }

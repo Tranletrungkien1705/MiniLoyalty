@@ -19,6 +19,7 @@ public class MemberController(ILoyaltyService svc) : Controller
         if (m == null) return NotFound();
         ViewBag.Rewards = await svc.RewardsAsync();
         ViewBag.Discounts = await svc.DiscountsAsync(id);
+        ViewBag.Vouchers = await svc.VouchersAsync(id);
         return View(m);
     }
 
@@ -58,6 +59,23 @@ public class MemberController(ILoyaltyService svc) : Controller
         if (amount <= 0) { TempData["Error"] = "Doanh thu dịch vụ phải > 0."; return RedirectToAction(nameof(Details), new { id }); }
         var tx = await svc.ApplyServiceDiscountAsync(id, amount, note);
         TempData["Success"] = $"Đã áp chiết khấu {tx.PolicyDiscountRate:0.##}% — giảm {tx.DiscountAmount:N0}đ.";
+        return RedirectToAction(nameof(Details), new { id });
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> AwardVoucher(int id, int points, string? voucherCode, string? note)
+    {
+        if (points <= 0) { TempData["Error"] = "Điểm voucher phải > 0."; return RedirectToAction(nameof(Details), new { id }); }
+        var tx = await svc.AwardVoucherAsync(id, points, voucherCode, note);
+        TempData["Success"] = $"Đã tặng {tx.Points:N0} điểm voucher.";
+        return RedirectToAction(nameof(Details), new { id });
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> UseVoucher(int id, int points, string? voucherCode, string? note)
+    {
+        var (ok, msg) = await svc.UseVoucherAsync(id, points, voucherCode, note);
+        TempData[ok ? "Success" : "Error"] = msg;
         return RedirectToAction(nameof(Details), new { id });
     }
 

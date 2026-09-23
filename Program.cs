@@ -110,6 +110,30 @@ app.MapPost("/api/discount", async (DiscountDto dto, ILoyaltyService svc) =>
     return Results.Ok(new { memberCode = m.Code, rank = tx.CardTypeApply?.Name, rate = tx.PolicyDiscountRate, amount = tx.AmountForDC, discount = tx.DiscountAmount });
 });
 
+// API tặng điểm voucher xe mới (DealPointType=VOUCHERXM): cộng điểm voucher cho hội viên mua xe mới.
+app.MapPost("/api/voucher/award", async (VoucherAwardDto dto, ILoyaltyService svc) =>
+{
+    var m = dto.Phone is { Length: > 0 } p ? await svc.GetByPhoneAsync(p) : null;
+    if (m == null && dto.MemberId is { } mid) m = await svc.GetAsync(mid);
+    if (m == null) return Results.NotFound(new { error = "Không tìm thấy hội viên" });
+    if (dto.Points <= 0) return Results.BadRequest(new { error = "Điểm voucher phải > 0." });
+    var tx = await svc.AwardVoucherAsync(m.Id, dto.Points, dto.VoucherCode, dto.RefNo, dto.Expiry);
+    var member = await svc.GetAsync(m.Id);
+    return Results.Ok(new { memberCode = member!.Code, awarded = tx.Points, voucherBalance = member.PointVoucher });
+});
+
+// API sử dụng điểm voucher (DealPointType=VOUCHERSD): trừ điểm voucher khi hội viên quy đổi tại đại lý.
+app.MapPost("/api/voucher/use", async (VoucherUseDto dto, ILoyaltyService svc) =>
+{
+    var m = dto.Phone is { Length: > 0 } p ? await svc.GetByPhoneAsync(p) : null;
+    if (m == null && dto.MemberId is { } mid) m = await svc.GetAsync(mid);
+    if (m == null) return Results.NotFound(new { error = "Không tìm thấy hội viên" });
+    var (ok, msg) = await svc.UseVoucherAsync(m.Id, dto.Points, dto.VoucherCode, dto.RefNo);
+    if (!ok) return Results.BadRequest(new { ok, error = msg });
+    var member = await svc.GetAsync(m.Id);
+    return Results.Ok(new { ok, msg, memberCode = member!.Code, voucherBalance = member.PointVoucher });
+});
+
 app.MapControllerRoute(name: "default", pattern: "{controller=Home}/{action=Index}/{id?}");
 app.Run();
 
@@ -118,3 +142,5 @@ record RegisterOrgDto(string Name);
 record IntroDto(string? Phone, int? MemberId);
 record ServiceTurnDto(string? Phone, int? MemberId, int Qty, string? RefNo);
 record DiscountDto(string? Phone, int? MemberId, decimal Amount, string? RefNo);
+record VoucherAwardDto(string? Phone, int? MemberId, int Points, string? VoucherCode, string? RefNo, DateTime? Expiry);
+record VoucherUseDto(string? Phone, int? MemberId, int Points, string? VoucherCode, string? RefNo);

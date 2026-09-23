@@ -16,6 +16,7 @@ public class AppDbContext : DbContext
     public DbSet<Member> Members => Set<Member>();
     public DbSet<PointTransaction> PointTransactions => Set<PointTransaction>();
     public DbSet<MemberDiscountTransaction> MemberDiscountTransactions => Set<MemberDiscountTransaction>();
+    public DbSet<MemberVoucherTransaction> MemberVoucherTransactions => Set<MemberVoucherTransaction>();
     public DbSet<Reward> Rewards => Set<Reward>();
 
     protected override void OnModelCreating(ModelBuilder b)
@@ -42,6 +43,11 @@ public class AppDbContext : DbContext
             e.Property(x => x.DiscountAmount).HasPrecision(18, 2);
             e.HasOne(x => x.Member).WithMany(x => x.Discounts).HasForeignKey(x => x.MemberId);
             e.HasOne(x => x.CardTypeApply).WithMany().HasForeignKey(x => x.CardTypeApplyId);
+            e.HasQueryFilter(x => x.OrgId == _orgId);
+        });
+        b.Entity<MemberVoucherTransaction>(e =>
+        {
+            e.HasOne(x => x.Member).WithMany(x => x.Vouchers).HasForeignKey(x => x.MemberId);
             e.HasQueryFilter(x => x.OrgId == _orgId);
         });
     }
