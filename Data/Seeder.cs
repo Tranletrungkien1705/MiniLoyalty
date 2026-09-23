@@ -238,6 +238,12 @@ public static class Seeder
             regAppr2.RegisAppr2At = DateTime.Now.AddDays(-1); regAppr2.RegisAppr2By = "HTV";
             regAppr2.Remark = "HTV đã duyệt, chờ hoàn tất kích hoạt";
             db.Members.Add(regAppr2);
+            // Hội viên đang ở hạng Bạc, còn thiếu điểm/lượt để lên Vàng — minh hoạ màn "Tính toán thẻ / lộ trình lên hạng"
+            // (Crd_Card_Calc): hạng hiện tại + doanh thu/lượt dịch vụ còn thiếu để lên hạng kế tiếp.
+            var calc = M("Phạm Gia Hân", "0911999001", 800, 500);
+            calc.PointCardRank = 600;   // Bạc: PointUpBegin=1000 → còn thiếu 400 điểm xét hạng
+            calc.QtyVisitAvail = 1;     // Bạc: QtyVisitUpBegin=2 → còn thiếu 1 lượt dịch vụ
+            db.Members.Add(calc);
             await db.SaveChangesAsync();
         }
         if (!await db.MemberColumnChanges.AnyAsync())

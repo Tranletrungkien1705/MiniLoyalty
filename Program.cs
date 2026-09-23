@@ -626,6 +626,20 @@ app.MapPost("/api/memberapproval/finish", async (MemberApprovalActionDto dto, IL
     return ok ? Results.Ok(new { ok, msg }) : Results.BadRequest(new { ok, error = msg });
 });
 
+// API tính toán thẻ / lộ trình lên hạng (Crd_Card_Calc): hạng hiện tại + còn thiếu gì để lên hạng kế tiếp.
+app.MapGet("/api/card/calc", async (int memberId, ILoyaltyService svc) =>
+{
+    var r = await svc.CardCalcAsync(memberId);
+    if (r == null) return Results.NotFound(new { error = "Không tìm thấy hội viên" });
+    return Results.Ok(new
+    {
+        r.MemberCode, r.MemberName, r.RankName, r.RankValue,
+        r.PointAvailNow, r.QtyVisitAvail,
+        r.NextRankName, r.NextRankValue, r.PointUpBegin, r.QtyVisitUpBegin,
+        r.RevenueMiss, r.QtyVisitMiss, r.IsMaxRank
+    });
+});
+
 app.MapControllerRoute(name: "default", pattern: "{controller=Home}/{action=Index}/{id?}");
 app.Run();
 

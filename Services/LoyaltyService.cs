@@ -36,6 +36,19 @@ public record DmsMemberLookup(Member? Member, int FlagIsDLQuery);
 /// </summary>
 public record CretaBuyCarCheck(bool Eligible, int Points, string Reason);
 
+/// <summary>
+/// Kết quả tính toán thẻ / lộ trình lên hạng (Crd_Card_Calc, Card.cs): cho biết hội viên đang ở hạng nào,
+/// còn thiếu bao nhiêu để lên hạng kế tiếp. PointAvailNow = điểm xét hạng hiện có trong kỳ (Crd_Card.PointAvail
+/// quy đổi); ValueUpRank = bậc hạng hiện tại (Mst_RankPolicy.Value); NextRankName = hạng kế tiếp;
+/// RevenueMiss = doanh thu dịch vụ còn thiếu (đồng) để đủ điểm xét hạng nâng hạng;
+/// QtyVisitMiss = số lượt dịch vụ còn thiếu để đủ ngưỡng nâng hạng. IsMaxRank = đã ở hạng cao nhất.
+/// </summary>
+public record CardCalcResult(
+    string MemberCode, string MemberName, string RankName, int RankValue,
+    int PointAvailNow, int QtyVisitAvail,
+    string? NextRankName, int NextRankValue, int PointUpBegin, int QtyVisitUpBegin,
+    int RevenueMiss, int QtyVisitMiss, bool IsMaxRank);
+
 public interface ILoyaltyService
 {
     Task<List<Member>> MembersAsync(string? q, int? rankId);
@@ -125,6 +138,8 @@ public interface ILoyaltyService
     Task<(bool ok, string msg)> FinishPrmVoucherNewCarAsync(int id, string? remark, string? by = null);
     Task<(bool ok, string msg)> CancelPrmVoucherNewCarAsync(int id, string? remark, string? by = null);
     Task<PrmVoucherNewCar?> CalcPrmVoucherNewCarAsync(string? modelCode, DateTime? today = null);
+    /// <summary>Tính toán thẻ / lộ trình lên hạng (Crd_Card_Calc): hạng hiện tại + còn thiếu gì để lên hạng kế tiếp.</summary>
+    Task<CardCalcResult?> CardCalcAsync(int memberId);
 }
 
 public class LoyaltyService(AppDbContext db) : ILoyaltyService
@@ -1866,5 +1881,40 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
         if (active.FlagAllModel) return active;
         if (string.IsNullOrWhiteSpace(modelCode)) return null;
         return active.Specs.Any(s => s.ModelCode == modelCode) ? active : null;
+    }
+
+    /// <summary>
+    /// Tính toán thẻ / lộ trình lên hạng (Crd_Card_Calc, Card.cs): với hội viên, xác định hạng hiện tại
+    /// (theo điểm xét hạng trong kỳ PointCardRank) và hạng kế tiếp (Mst_RankPolicy.Value tăng dần), rồi tính
+    /// phần còn thiếu để lên hạng: doanh thu dịch vụ còn thiếu (RevenueMiss = điểm xét hạng còn thiếu × 1.000đ)
+    /// và số lượt dịch vụ còn thiếu (QtyVisitMiss = QtyVisitUpBegin − QtyVisitAvail). Trả null nếu không thấy hội viên.
+    /// </summary>
+    public async Task<CardCalcResult?> CardCalcAsync(int memberId)
+    {
+        var m = await db.Members.Include(x => x.RankTier).FirstOrDefaultAsync(x => x.Id == memberId);
+        if (m == null) return null;
+
+        var tiers = await db.RankTiers.OrderBy(t => t.SortOrder).ToListAsync();
+        var current = m.RankTier ?? tiers.FirstOrDefault(t => t.Id == m.RankTierId);
+        var currentValue = current?.SortOrder ?? 0;
+
+        // Hạng kế tiếp = hạng có bậc (SortOrder) lớn hơn hạng hiện tại, gần nhất.
+        var next = tiers.Where(t => t.SortOrder > currentValue).OrderBy(t => t.SortOrder).FirstOrDefault();
+
+        var pointAvailNow = m.PointCardRank;   // điểm xét hạng hiện có trong kỳ (Crd_Card.PointAvail quy đổi)
+        var qtyVisitAvail = m.QtyVisitAvail;
+
+        if (next == null)
+            return new CardCalcResult(m.Code, m.Name, current?.Name ?? "—", currentValue,
+                pointAvailNow, qtyVisitAvail, null, 0, 0, 0, 0, 0, true);
+
+        // Doanh thu còn thiếu = số điểm xét hạng còn thiếu × 1.000đ/điểm (UNITPOINTTOMONEY).
+        var pointMiss = Math.Max(0, next.PointUpBegin - pointAvailNow);
+        var revenueMiss = pointMiss * VndPerPoint;
+        var qtyVisitMiss = Math.Max(0, next.QtyVisitUpBegin - qtyVisitAvail);
+
+        return new CardCalcResult(m.Code, m.Name, current?.Name ?? "—", currentValue,
+            pointAvailNow, qtyVisitAvail, next.Name, next.SortOrder, next.PointUpBegin, next.QtyVisitUpBegin,
+            revenueMiss, qtyVisitMiss, false);
     }
 }
