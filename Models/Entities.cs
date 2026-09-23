@@ -394,6 +394,28 @@ public class MemberRegister : IOrgOwned
 }
 
 /// <summary>
+/// Liên kết Đại lý ↔ Hội viên (Map_QueryDealer_Member): ghi nhận đại lý nào đã đăng ký/tra cứu hội viên nào.
+/// Khi hoàn tất đăng ký hội viên (Crd_Member_FinishX), hệ thống ghi 1 dòng map DLCPCode (đại lý đăng ký) ↔ MemberNo
+/// kèm ngày tra cứu (QueryDate) và trạng thái hiệu lực (FlagActive). Dùng để biết hội viên thuộc đại lý nào
+/// và phục vụ tra cứu "đại lý nào đã truy vấn hội viên nào".
+/// </summary>
+public class DealerMemberLink : IOrgOwned
+{
+    public int Id { get; set; }
+    public Guid OrgId { get; set; }
+    public string DLCPCode { get; set; } = "";        // Map_QueryDealer_Member.DLCPCode — mã đại lý
+    public int MemberId { get; set; }                  // Map_QueryDealer_Member.MemberNo — hội viên được liên kết
+    public int NetworkID { get; set; }                 // Map_QueryDealer_Member.NetworkID — mã mạng/đại lý
+    public DateTime QueryDate { get; set; } = DateTime.Now;   // Map_QueryDealer_Member.QueryDate — ngày tra cứu/liên kết
+    public string? Remark { get; set; }                // Map_QueryDealer_Member.Remark — ghi chú
+    public bool FlagActive { get; set; } = true;       // Map_QueryDealer_Member.FlagActive — còn hiệu lực
+    public DateTime CreatedAt { get; set; } = DateTime.Now;   // Map_QueryDealer_Member.LogLUDTimeUTC
+    public string? CreatedBy { get; set; }             // Map_QueryDealer_Member.LogLUBy
+
+    public Member Member { get; set; } = null!;
+}
+
+/// <summary>
 /// Lịch sử xét hạng (Crd_CardRank, DealPointType=LOYALTY): mỗi lần job xét hạng cuối kỳ xử lý 1 hội viên,
 /// hệ thống ghi 1 bản ghi lưu lại hành động (UP/KEEP/DOWN) kèm ảnh chụp TRƯỚC/SAU của hội viên và thẻ
 /// (Crd_MemberBefore/Crd_CardBefore/Crd_MemberAfter/Crd_CardAfter). Đây là audit trail của quá trình xét hạng,

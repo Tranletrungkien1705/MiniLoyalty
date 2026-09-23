@@ -74,6 +74,8 @@ public interface ILoyaltyService
     Task<(bool ok, string msg)> FinishMemberRegisterAsync(int id, string? by = null);
     Task<(bool ok, string msg)> CancelMemberRegisterAsync(int id, string? remark, string? by = null);
     Task<(bool ok, string msg)> RejectMemberRegisterAsync(int id, string? remark, string? by = null);
+    Task<List<DealerMemberLink>> DealerMemberLinksAsync(string? dlcpCode = null, int? memberId = null);
+    Task<(bool ok, string msg, int id)> LinkDealerMemberAsync(string dlcpCode, int memberId, int networkId = 0, string? remark = null, string? by = null);
 }
 
 public class LoyaltyService(AppDbContext db) : ILoyaltyService
@@ -1088,6 +1090,11 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
         r.FinishAt = DateTime.Now;
         r.FinishBy = by;
         await db.SaveChangesAsync();
+
+        // Ghi liên kết Đại lý ↔ Hội viên (Map_QueryDealer_Member): đại lý đăng ký (DLCodeRegis) ↔ hội viên mới.
+        if (!string.IsNullOrWhiteSpace(r.DLCodeRegis))
+            await LinkDealerMemberAsync(r.DLCodeRegis!, m.Id, 0, "Đăng ký hội viên", by);
+
         return (true, $"Đã hoàn tất đăng ký {r.ReqMemberRegisterCode}; tạo hội viên {m.Code} ({m.Name}).");
     }
 
@@ -1131,6 +1138,49 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
 
     private async Task<RankTier> LowestRankAsync() =>
         (await db.RankTiers.OrderBy(t => t.SortOrder).FirstAsync());
+
+    /// <summary>
+    /// Liệt kê liên kết Đại lý ↔ Hội viên (Map_QueryDealer_Member), lọc theo đại lý và/hoặc hội viên.
+    /// </summary>
+    public async Task<List<DealerMemberLink>> DealerMemberLinksAsync(string? dlcpCode = null, int? memberId = null)
+    {
+        var q = db.DealerMemberLinks.Include(x => x.Member).AsQueryable();
+        if (!string.IsNullOrWhiteSpace(dlcpCode)) q = q.Where(x => x.DLCPCode == dlcpCode);
+        if (memberId is { } mid) q = q.Where(x => x.MemberId == mid);
+        return await q.OrderByDescending(x => x.QueryDate).ThenBy(x => x.DLCPCode).ToListAsync();
+    }
+
+    /// <summary>
+    /// Ghi liên kết Đại lý ↔ Hội viên (Map_QueryDealer_Member_Create): nếu đã có liên kết cùng đại lý + hội viên
+    /// thì cập nhật ngày tra cứu/ghi chú (upsert), ngược lại tạo mới. Idempotent theo cặp (DLCPCode, MemberId).
+    /// </summary>
+    public async Task<(bool ok, string msg, int id)> LinkDealerMemberAsync(string dlcpCode, int memberId, int networkId = 0, string? remark = null, string? by = null)
+    {
+        if (string.IsNullOrWhiteSpace(dlcpCode)) return (false, "Cần mã đại lý (DLCPCode).", 0);
+        var m = await db.Members.FirstOrDefaultAsync(x => x.Id == memberId);
+        if (m == null) return (false, "Không tìm thấy hội viên.", 0);
+
+        var link = await db.DealerMemberLinks.FirstOrDefaultAsync(x => x.DLCPCode == dlcpCode && x.MemberId == memberId);
+        if (link != null)
+        {
+            link.QueryDate = DateTime.Now;
+            link.NetworkID = networkId;
+            link.Remark = remark;
+            link.FlagActive = true;
+            link.CreatedBy = by;
+            await db.SaveChangesAsync();
+            return (true, $"Đã cập nhật liên kết đại lý {dlcpCode} ↔ hội viên {m.Code}.", link.Id);
+        }
+
+        link = new DealerMemberLink
+        {
+            DLCPCode = dlcpCode.Trim(), MemberId = memberId, NetworkID = networkId,
+            QueryDate = DateTime.Now, Remark = remark, FlagActive = true, CreatedBy = by
+        };
+        db.DealerMemberLinks.Add(link);
+        await db.SaveChangesAsync();
+        return (true, $"Đã liên kết đại lý {dlcpCode} ↔ hội viên {m.Code}.", link.Id);
+    }
 
     /// <summary>Tính lại hạng thẻ theo điểm tích lũy trọn đời (hạng cao nhất mà hội viên đạt ngưỡng).</summary>
     private async Task RecomputeRankAsync(Member m)

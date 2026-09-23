@@ -1,0 +1,73 @@
+@model List<DealerMemberLink>
+@{
+    ViewData["Title"] = "Liên kết Đại lý ↔ Hội viên";
+    var dlcpCode = (string?)ViewBag.DlcpCode;
+    var memberId = (int?)ViewBag.MemberId;
+    var members = (List<Member>)ViewBag.Members;
+}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div><h5 class="fw-bold mb-0"><i class="bi bi-diagram-3 me-2"></i>Liên kết Đại lý ↔ Hội viên</h5>
+        <small class="text-muted">Map_QueryDealer_Member — đại lý nào đã đăng ký/tra cứu hội viên nào</small></div>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-lg-7">
+        <form method="get" class="row g-2">
+            <div class="col-md-5">
+                <input name="dlcpCode" value="@dlcpCode" class="form-control form-control-sm" placeholder="Mã đại lý (DLCPCode)" />
+            </div>
+            <div class="col-md-5">
+                <select name="memberId" class="form-select form-select-sm">
+                    <option value="">— Tất cả hội viên —</option>
+                    @foreach (var m in members)
+                    {
+                        <option value="@m.Id" selected="@(memberId == m.Id)">@m.Code · @m.Name</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-2"><button class="btn btn-outline-primary btn-sm w-100">Lọc</button></div>
+        </form>
+    </div>
+    <div class="col-lg-5">
+        <form method="post" asp-action="Create" class="row g-2">
+            @Html.AntiForgeryToken()
+            <div class="col-4"><input name="dlcpCode" class="form-control form-control-sm" placeholder="Mã đại lý" required /></div>
+            <div class="col-4">
+                <select name="memberId" class="form-select form-select-sm" required>
+                    <option value="">— Hội viên —</option>
+                    @foreach (var m in members)
+                    {
+                        <option value="@m.Id">@m.Code · @m.Name</option>
+                    }
+                </select>
+            </div>
+            <div class="col-2"><input name="networkId" type="number" value="0" class="form-control form-control-sm" placeholder="Network" /></div>
+            <div class="col-2"><button class="btn btn-primary btn-sm w-100">Liên kết</button></div>
+        </form>
+    </div>
+</div>
+
+<div class="card"><div class="table-responsive"><table class="table table-hover align-middle mb-0">
+    <thead><tr><th>Mã đại lý</th><th>Hội viên</th><th class="text-end">Network</th><th>Ngày tra cứu</th><th>Ghi chú</th><th>Trạng thái</th><th>Người tạo</th></tr></thead>
+    <tbody>
+        @if (Model.Count == 0)
+        {
+            <tr><td colspan="7" class="text-center text-muted small py-4">Chưa có liên kết. Hoàn tất đăng ký hội viên để phát sinh liên kết đại lý.</td></tr>
+        }
+        @foreach (var l in Model)
+        {
+            <tr>
+                <td class="small font-monospace">@l.DLCPCode</td>
+                <td class="small">@l.Member?.Name <span class="text-muted font-monospace">@l.Member?.Code</span></td>
+                <td class="text-end text-muted">@l.NetworkID</td>
+                <td class="small text-muted">@l.QueryDate.ToString("dd/MM/yyyy HH:mm")</td>
+                <td class="small text-muted">@l.Remark</td>
+                <td>
+                    @if (l.FlagActive) { <span class="badge bg-success-subtle text-success">Hiệu lực</span> }
+                    else { <span class="badge bg-secondary-subtle text-secondary">Ngưng</span> }
+                </td>
+                <td class="small text-muted">@l.CreatedBy</td>
+            </tr>
+        }
+    </tbody>
+</table></div></div>

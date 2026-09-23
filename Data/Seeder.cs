@@ -321,6 +321,19 @@ public static class Seeder
                 });
             await db.SaveChangesAsync();
         }
+        if (!await db.DealerMemberLinks.AnyAsync())
+        {
+            // Liên kết Đại lý ↔ Hội viên mẫu (Map_QueryDealer_Member) — minh hoạ đại lý nào đã đăng ký/tra cứu hội viên nào.
+            var ms = await db.Members.OrderBy(x => x.Id).Take(3).ToListAsync();
+            if (ms.Count >= 3)
+            {
+                db.DealerMemberLinks.AddRange(
+                    new DealerMemberLink { DLCPCode = "DL-DEMO-001", MemberId = ms[0].Id, NetworkID = 1, QueryDate = DateTime.Now.AddDays(-10), Remark = "Đăng ký hội viên", FlagActive = true, CreatedBy = "HTV" },
+                    new DealerMemberLink { DLCPCode = "DL-DEMO-001", MemberId = ms[1].Id, NetworkID = 1, QueryDate = DateTime.Now.AddDays(-6), Remark = "Tra cứu điểm", FlagActive = true, CreatedBy = "HTV" },
+                    new DealerMemberLink { DLCPCode = "DL-DEMO-002", MemberId = ms[2].Id, NetworkID = 2, QueryDate = DateTime.Now.AddDays(-3), Remark = "Đăng ký hội viên", FlagActive = true, CreatedBy = "HTV" });
+                await db.SaveChangesAsync();
+            }
+        }
     }
 
     /// <summary>

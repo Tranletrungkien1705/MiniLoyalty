@@ -376,6 +376,27 @@ app.MapPost("/api/memberregister/reject", async (MemberRegisterActionDto dto, IL
     return ok ? Results.Ok(new { ok, msg }) : Results.BadRequest(new { ok, error = msg });
 });
 
+// API liên kết Đại lý ↔ Hội viên (Map_QueryDealer_Member_Create): ghi nhận đại lý nào đăng ký/tra cứu hội viên nào.
+app.MapPost("/api/dealerlink/create", async (DealerLinkDto dto, ILoyaltyService svc) =>
+{
+    var m = dto.Phone is { Length: > 0 } p ? await svc.GetByPhoneAsync(p) : null;
+    if (m == null && dto.MemberId is { } mid) m = await svc.GetAsync(mid);
+    if (m == null) return Results.NotFound(new { error = "Không tìm thấy hội viên" });
+    var (ok, msg, id) = await svc.LinkDealerMemberAsync(dto.DlcpCode ?? "", m.Id, dto.NetworkId, dto.Remark, dto.By);
+    return ok ? Results.Ok(new { ok, msg, linkId = id }) : Results.BadRequest(new { ok, error = msg });
+});
+
+// API danh sách liên kết Đại lý ↔ Hội viên (Map_QueryDealer_Member): lọc theo đại lý và/hoặc hội viên.
+app.MapGet("/api/dealerlink", async (string? dlcpCode, int? memberId, ILoyaltyService svc) =>
+{
+    var list = await svc.DealerMemberLinksAsync(dlcpCode, memberId);
+    return Results.Ok(list.Select(l => new
+    {
+        l.Id, l.DLCPCode, memberCode = l.Member?.Code, memberName = l.Member?.Name,
+        l.NetworkID, l.QueryDate, l.Remark, l.FlagActive, l.CreatedAt, l.CreatedBy
+    }));
+});
+
 app.MapControllerRoute(name: "default", pattern: "{controller=Home}/{action=Index}/{id?}");
 app.Run();
 
@@ -402,3 +423,4 @@ record CardExceptionRequestDto(string? Phone, int? MemberId, string? DlCodeExcep
 record CardExceptionActionDto(int Id, string? RemarkHtv, string? By);
 record MemberRegisterCreateDto(string? DlCodeRegis, DateTime? RegisterDate, string? VIN, string? CarNo, string? TradeMarkName, string? ModelName, string? CustomerName, string? CustomerPhoneNo, DateTime? CustomerDateOfBirth, string? CustomerIDNo, string? CustomerEmail, string? CustomerAddress, string? GenderCode, string? ProvinceName, string? DistrictName, string? MemberNoIntro, string? Remark);
 record MemberRegisterActionDto(int Id, string? Remark, string? By);
+record DealerLinkDto(string? DlcpCode, string? Phone, int? MemberId, int NetworkId, string? Remark, string? By);

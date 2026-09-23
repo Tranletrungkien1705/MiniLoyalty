@@ -28,6 +28,7 @@ public class AppDbContext : DbContext
     public DbSet<CardExceptionDealer> CardExceptionDealers => Set<CardExceptionDealer>();
     public DbSet<RankHistory> RankHistories => Set<RankHistory>();
     public DbSet<MemberRegister> MemberRegisters => Set<MemberRegister>();
+    public DbSet<DealerMemberLink> DealerMemberLinks => Set<DealerMemberLink>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -117,6 +118,12 @@ public class AppDbContext : DbContext
         b.Entity<MemberRegister>(e =>
         {
             e.HasIndex(x => x.ReqMemberRegisterCode).IsUnique();
+            e.HasOne(x => x.Member).WithMany().HasForeignKey(x => x.MemberId);
+            e.HasQueryFilter(x => x.OrgId == _orgId);
+        });
+        b.Entity<DealerMemberLink>(e =>
+        {
+            e.HasIndex(x => new { x.DLCPCode, x.MemberId }).IsUnique();   // 1 liên kết/đại lý-hội viên
             e.HasOne(x => x.Member).WithMany().HasForeignKey(x => x.MemberId);
             e.HasQueryFilter(x => x.OrgId == _orgId);
         });
