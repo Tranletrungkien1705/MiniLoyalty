@@ -49,6 +49,9 @@ public class AppDbContext : DbContext
         {
             e.HasIndex(x => x.Code).IsUnique();
             e.HasOne(x => x.RankTier).WithMany().HasForeignKey(x => x.RankTierId);
+            // Hạng thẻ sử dụng / hạng thực (Crd_Member.CardTypeUse/CardTypeInit) — dùng cho luồng duyệt đăng ký hội viên.
+            e.HasOne<RankTier>().WithMany().HasForeignKey(x => x.CardTypeUseId).OnDelete(DeleteBehavior.NoAction);
+            e.HasOne<RankTier>().WithMany().HasForeignKey(x => x.CardTypeInitId).OnDelete(DeleteBehavior.NoAction);
             e.HasQueryFilter(x => x.OrgId == _orgId);           // cô lập theo tenant
         });
         b.Entity<PointTransaction>(e =>

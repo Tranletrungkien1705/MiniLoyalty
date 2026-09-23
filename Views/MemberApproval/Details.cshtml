@@ -1,0 +1,62 @@
+@model Member
+@{
+    ViewData["Title"] = $"Duyệt đăng ký {Model.Code}";
+    string StName(RegisStatus s) => s switch { RegisStatus.Pending => "Chờ đại lý duyệt", RegisStatus.Approve1 => "Đại lý đã duyệt", RegisStatus.Approve2 => "HTV đã duyệt", RegisStatus.Finish => "Hoàn tất", _ => s.ToString() };
+    string StBadge(RegisStatus s) => s switch { RegisStatus.Pending => "bg-warning-subtle text-warning", RegisStatus.Approve1 => "bg-info-subtle text-info", RegisStatus.Approve2 => "bg-primary-subtle text-primary", RegisStatus.Finish => "bg-success-subtle text-success", _ => "bg-secondary-subtle" };
+    var canApproveByDealer = Model.RegisStatus == RegisStatus.Pending;
+    var canApprove = Model.RegisStatus == RegisStatus.Approve1;
+    var canFinish = Model.RegisStatus == RegisStatus.Approve2;
+}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div><h5 class="fw-bold mb-0"><i class="bi bi-person-check me-2"></i>@Model.Name
+            <span class="badge @StBadge(Model.RegisStatus) ms-1">@StName(Model.RegisStatus)</span></h5>
+        <small class="text-muted font-monospace">@Model.Code · @Model.Phone</small></div>
+    <a asp-action="Index" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left me-1"></i>Danh sách</a>
+</div>
+
+<div class="row g-3">
+    <div class="col-lg-7">
+        <div class="card mb-3"><div class="card-header bg-white fw-semibold"><i class="bi bi-person me-1"></i>Thông tin hội viên</div>
+        <div class="card-body">
+            <div class="row g-2 small">
+                <div class="col-md-6 text-muted">Họ tên: <b class="text-dark">@Model.Name</b></div>
+                <div class="col-md-6 text-muted">SĐT: <b class="text-dark">@(Model.Phone ?? "—")</b></div>
+                <div class="col-md-6 text-muted">Email: <b class="text-dark">@(Model.Email ?? "—")</b></div>
+                <div class="col-md-6 text-muted">Ngày sinh: <b class="text-dark">@(Model.Dob?.ToString("dd/MM/yyyy") ?? "—")</b></div>
+                <div class="col-md-6 text-muted">Hạng thẻ: <b class="text-dark">@(Model.RankTier?.Name ?? "—")</b></div>
+                <div class="col-md-6 text-muted">Đại lý đăng ký: <b class="text-dark">@(Model.DLCodeRegis ?? "—")</b></div>
+                <div class="col-md-6 text-muted">Trạng thái hội viên: <b class="text-dark">@Model.Status</b></div>
+                <div class="col-md-6 text-muted">Trạng thái thẻ: <b class="text-dark">@Model.CardStatus</b></div>
+                <div class="col-md-6 text-muted">Ngày đăng ký: <b class="text-dark">@Model.JoinedAt.ToString("dd/MM/yyyy")</b></div>
+                <div class="col-md-6 text-muted">Ngày hiệu lực: <b class="text-dark">@(Model.MemberActiveDate?.ToString("dd/MM/yyyy") ?? "—")</b></div>
+            </div>
+        </div></div>
+
+        <div class="card"><div class="card-body">
+            <h6 class="fw-bold mb-2"><i class="bi bi-info-circle me-1"></i>Lịch sử xử lý</h6>
+            <div class="small text-muted">Ghi chú: @(Model.Remark ?? "—")</div>
+            @if (Model.RegisAppr1At.HasValue) { <div class="small text-muted">Đại lý duyệt lúc @Model.RegisAppr1At.Value.ToString("dd/MM/yyyy HH:mm") bởi @Model.RegisAppr1By</div> }
+            @if (Model.RegisAppr2At.HasValue) { <div class="small text-muted">HTV duyệt lúc @Model.RegisAppr2At.Value.ToString("dd/MM/yyyy HH:mm") bởi @Model.RegisAppr2By</div> }
+            @if (Model.RegisFinishAt.HasValue) { <div class="small text-muted">Hoàn tất lúc @Model.RegisFinishAt.Value.ToString("dd/MM/yyyy HH:mm") bởi @Model.RegisFinishBy</div> }
+        </div></div>
+    </div>
+
+    <div class="col-lg-5">
+        <div class="card mb-3"><div class="card-body">
+            <h6 class="fw-bold mb-2"><i class="bi bi-check2-square me-1"></i>Duyệt đăng ký</h6>
+            <div class="small text-muted mb-2">Luồng: PENDING → APPROVE1 (đại lý duyệt) → APPROVE2 (HTV duyệt) → FINISH (kích hoạt hội viên + thẻ + liên kết đại lý).</div>
+            <form asp-action="ApproveByDealer" asp-route-id="@Model.Id" method="post" class="row g-2 mb-2">@Html.AntiForgeryToken()
+                <div class="col-12"><input name="remark" class="form-control form-control-sm" placeholder="Ghi chú khi duyệt (đại lý)" /></div>
+                <div class="col-12"><button class="btn btn-info btn-sm w-100" @(canApproveByDealer ? "" : "disabled")><i class="bi bi-shop me-1"></i>Đại lý duyệt (APPROVE1)</button></div>
+            </form>
+            <form asp-action="Approve" asp-route-id="@Model.Id" method="post" class="row g-2 mb-2">@Html.AntiForgeryToken()
+                <div class="col-12"><input name="remark" class="form-control form-control-sm" placeholder="Ghi chú khi duyệt (HTV)" /></div>
+                <div class="col-12"><button class="btn btn-primary btn-sm w-100" @(canApprove ? "" : "disabled")><i class="bi bi-check2 me-1"></i>HTV duyệt (APPROVE2)</button></div>
+            </form>
+            <form asp-action="Finish" asp-route-id="@Model.Id" method="post" class="row g-2">@Html.AntiForgeryToken()
+                <div class="col-12"><input name="remark" class="form-control form-control-sm" placeholder="Ghi chú khi hoàn tất" /></div>
+                <div class="col-12"><button class="btn btn-success btn-sm w-100" @(canFinish ? "" : "disabled")><i class="bi bi-flag me-1"></i>Hoàn tất (FINISH) — kích hoạt hội viên</button></div>
+            </form>
+        </div></div>
+    </div>
+</div>

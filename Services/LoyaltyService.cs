@@ -94,6 +94,11 @@ public interface ILoyaltyService
     Task<(bool ok, string msg)> FinishMemberRegisterAsync(int id, string? by = null);
     Task<(bool ok, string msg)> CancelMemberRegisterAsync(int id, string? remark, string? by = null);
     Task<(bool ok, string msg)> RejectMemberRegisterAsync(int id, string? remark, string? by = null);
+    // Vòng đời duyệt ĐĂNG KÝ hội viên (Crd_Member.RegisStatus): PENDING → APPROVE1 → APPROVE2 → FINISH.
+    Task<List<Member>> MemberApprovalsAsync(RegisStatus? status = null);
+    Task<(bool ok, string msg)> ApproveMemberByDealerAsync(int memberId, string? remark, string? by = null);
+    Task<(bool ok, string msg)> ApproveMemberAsync(int memberId, string? remark, string? by = null);
+    Task<(bool ok, string msg)> FinishMemberAsync(int memberId, string? remark, string? by = null);
     Task<List<DealerMemberLink>> DealerMemberLinksAsync(string? dlcpCode = null, int? memberId = null);
     Task<(bool ok, string msg, int id)> LinkDealerMemberAsync(string dlcpCode, int memberId, int networkId = 0, string? remark = null, string? by = null);
     Task<List<PrmCarNew>> PrmCarNewsAsync(PrmCarNewStatus? status = null, string? dlcpCode = null);
@@ -1258,6 +1263,85 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
 
     private async Task<RankTier> LowestRankAsync() =>
         (await db.RankTiers.OrderBy(t => t.SortOrder).FirstAsync());
+
+    /// <summary>
+    /// Danh sách hội viên đang trong vòng đời duyệt ĐĂNG KÝ (Crd_Member.RegisStatus), lọc theo trạng thái nếu có.
+    /// Chỉ trả các hội viên chưa hoàn tất (RegisStatus != FINISH) khi không lọc, để phục vụ màn "Duyệt đăng ký hội viên".
+    /// </summary>
+    public async Task<List<Member>> MemberApprovalsAsync(RegisStatus? status = null)
+    {
+        var q = db.Members.Include(m => m.RankTier).AsQueryable();
+        if (status.HasValue) q = q.Where(m => m.RegisStatus == status.Value);
+        else q = q.Where(m => m.RegisStatus != RegisStatus.Finish);
+        var list = await q.ToListAsync();
+        return list.OrderBy(m => m.RegisStatus).ThenByDescending(m => m.JoinedAt).ToList();
+    }
+
+    /// <summary>
+    /// Duyệt đăng ký hội viên bởi ĐẠI LÝ (Crd_Member_ApproveByDealerX): chỉ duyệt được hội viên đang
+    /// RegisStatus=PENDING và MemberStatus=PENDING. Đặt RegisStatus=APPROVE1, ghi RegisAppr1At/By.
+    /// </summary>
+    public async Task<(bool ok, string msg)> ApproveMemberByDealerAsync(int memberId, string? remark, string? by = null)
+    {
+        var m = await db.Members.FirstOrDefaultAsync(x => x.Id == memberId);
+        if (m == null) return (false, "Không tìm thấy hội viên.");
+        if (m.RegisStatus != RegisStatus.Pending) return (false, "Chỉ duyệt được hội viên đang PENDING.");
+        if (m.Status != MemberStatus.Pending) return (false, "Hội viên không ở trạng thái chờ duyệt.");
+
+        m.RegisStatus = RegisStatus.Approve1;
+        m.RegisAppr1At = DateTime.Now;
+        m.RegisAppr1By = by;
+        if (!string.IsNullOrWhiteSpace(remark)) m.Remark = remark;
+        await db.SaveChangesAsync();
+        return (true, $"Đại lý đã duyệt đăng ký hội viên {m.Code} (APPROVE1).");
+    }
+
+    /// <summary>
+    /// Duyệt đăng ký hội viên bởi HTV (Crd_Member_ApproveX): chỉ duyệt được hội viên đang
+    /// RegisStatus=APPROVE1 và MemberStatus=PENDING. Đặt RegisStatus=APPROVE2, ghi RegisAppr2At/By.
+    /// </summary>
+    public async Task<(bool ok, string msg)> ApproveMemberAsync(int memberId, string? remark, string? by = null)
+    {
+        var m = await db.Members.FirstOrDefaultAsync(x => x.Id == memberId);
+        if (m == null) return (false, "Không tìm thấy hội viên.");
+        if (m.RegisStatus != RegisStatus.Approve1) return (false, "Chỉ duyệt được hội viên đang APPROVE1 (đại lý đã duyệt).");
+        if (m.Status != MemberStatus.Pending) return (false, "Hội viên không ở trạng thái chờ duyệt.");
+
+        m.RegisStatus = RegisStatus.Approve2;
+        m.RegisAppr2At = DateTime.Now;
+        m.RegisAppr2By = by;
+        if (!string.IsNullOrWhiteSpace(remark)) m.Remark = remark;
+        await db.SaveChangesAsync();
+        return (true, $"HTV đã duyệt đăng ký hội viên {m.Code} (APPROVE2).");
+    }
+
+    /// <summary>
+    /// Hoàn tất đăng ký hội viên (Crd_Member_FinishX): kích hoạt hội viên — đặt RegisStatus=FINISH,
+    /// MemberStatus=APPROVE, CardStatus=APPROVE, ghi MemberActiveDate + RegisFinishAt/By. Ghi liên kết
+    /// Đại lý ↔ Hội viên (Map_QueryDealer_Member) theo DLCodeRegis. Idempotent: hội viên đã FINISH thì bỏ qua.
+    /// </summary>
+    public async Task<(bool ok, string msg)> FinishMemberAsync(int memberId, string? remark, string? by = null)
+    {
+        var m = await db.Members.FirstOrDefaultAsync(x => x.Id == memberId);
+        if (m == null) return (false, "Không tìm thấy hội viên.");
+        if (m.RegisStatus == RegisStatus.Finish) return (false, "Hội viên đã hoàn tất đăng ký.");
+        if (m.Status != MemberStatus.Pending) return (false, "Hội viên không ở trạng thái chờ duyệt.");
+
+        m.RegisStatus = RegisStatus.Finish;
+        m.Status = MemberStatus.Approve;
+        m.CardStatus = CardStatus.Approve;
+        m.MemberActiveDate = DateTime.Today;
+        m.RegisFinishAt = DateTime.Now;
+        m.RegisFinishBy = by;
+        if (!string.IsNullOrWhiteSpace(remark)) m.Remark = remark;
+        await db.SaveChangesAsync();
+
+        // Ghi liên kết Đại lý ↔ Hội viên (Map_QueryDealer_Member): đại lý đăng ký (DLCodeRegis) ↔ hội viên.
+        if (!string.IsNullOrWhiteSpace(m.DLCodeRegis))
+            await LinkDealerMemberAsync(m.DLCodeRegis!, m.Id, 0, "Hoàn tất đăng ký hội viên", by);
+
+        return (true, $"Đã hoàn tất đăng ký hội viên {m.Code} ({m.Name}) — hội viên đã kích hoạt.");
+    }
 
     /// <summary>
     /// Liệt kê liên kết Đại lý ↔ Hội viên (Map_QueryDealer_Member), lọc theo đại lý và/hoặc hội viên.

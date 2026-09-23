@@ -592,6 +592,40 @@ app.MapGet("/api/prmvouchernewcar/calc", async (string? modelCode, ILoyaltyServi
     return Results.Ok(new { p.PrmVoucherCode, p.PrmVoucherName, p.FlagAllModel, p.PointVoucherAllModel, p.PointUseLimitAllModel, p.ValidityPeriod, p.EffDateStart, p.EffDateEnd });
 });
 
+// API danh sách hội viên đang trong vòng đời duyệt ĐĂNG KÝ (Crd_Member.RegisStatus): PENDING → APPROVE1 → APPROVE2 → FINISH.
+app.MapGet("/api/memberapproval", async (RegisStatus? status, ILoyaltyService svc) =>
+{
+    var list = await svc.MemberApprovalsAsync(status);
+    return Results.Ok(list.Select(m => new
+    {
+        m.Id, memberCode = m.Code, memberName = m.Name, m.Phone, m.DLCodeRegis,
+        regisStatus = m.RegisStatus.ToString(), memberStatus = m.Status.ToString(),
+        rank = m.RankTier?.Name, m.RegisAppr1At, m.RegisAppr1By, m.RegisAppr2At, m.RegisAppr2By,
+        m.RegisFinishAt, m.RegisFinishBy, m.MemberActiveDate
+    }));
+});
+
+// API duyệt đăng ký hội viên bởi ĐẠI LÝ (Crd_Member_ApproveByDealerX): PENDING → APPROVE1.
+app.MapPost("/api/memberapproval/approvebydealer", async (MemberApprovalActionDto dto, ILoyaltyService svc) =>
+{
+    var (ok, msg) = await svc.ApproveMemberByDealerAsync(dto.MemberId, dto.Remark, dto.By);
+    return ok ? Results.Ok(new { ok, msg }) : Results.BadRequest(new { ok, error = msg });
+});
+
+// API duyệt đăng ký hội viên bởi HTV (Crd_Member_ApproveX): APPROVE1 → APPROVE2.
+app.MapPost("/api/memberapproval/approve", async (MemberApprovalActionDto dto, ILoyaltyService svc) =>
+{
+    var (ok, msg) = await svc.ApproveMemberAsync(dto.MemberId, dto.Remark, dto.By);
+    return ok ? Results.Ok(new { ok, msg }) : Results.BadRequest(new { ok, error = msg });
+});
+
+// API hoàn tất đăng ký hội viên (Crd_Member_FinishX): APPROVE2 → FINISH, kích hoạt hội viên + thẻ + liên kết đại lý.
+app.MapPost("/api/memberapproval/finish", async (MemberApprovalActionDto dto, ILoyaltyService svc) =>
+{
+    var (ok, msg) = await svc.FinishMemberAsync(dto.MemberId, dto.Remark, dto.By);
+    return ok ? Results.Ok(new { ok, msg }) : Results.BadRequest(new { ok, error = msg });
+});
+
 app.MapControllerRoute(name: "default", pattern: "{controller=Home}/{action=Index}/{id?}");
 app.Run();
 
@@ -630,3 +664,4 @@ record ExpenseTypePolicyDto(string? PolicyExpenseTypeNo, string? ExpenseType, st
 record PrmVoucherNewCarSpecDto(string ModelCode, int PointVoucher, int PointUseLimit);
 record PrmVoucherNewCarCreateDto(string? Name, int QtyDayLimitFDlvDate, int ValidityPeriod, DateTime? EffDateStart, DateTime? EffDateEnd, bool FlagAllModel, int PointVoucherAllModel, int PointUseLimitAllModel, string? Remark, List<PrmVoucherNewCarSpecDto>? Specs);
 record PrmVoucherNewCarActionDto(int Id, string? Remark, string? By);
+record MemberApprovalActionDto(int MemberId, string? Remark, string? By);

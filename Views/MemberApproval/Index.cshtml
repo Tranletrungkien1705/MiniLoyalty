@@ -1,0 +1,42 @@
+@model List<Member>
+@{
+    ViewData["Title"] = "Duyệt đăng ký hội viên";
+    var status = (RegisStatus?)ViewBag.Status;
+    string StName(RegisStatus s) => s switch { RegisStatus.Pending => "Chờ đại lý duyệt", RegisStatus.Approve1 => "Đại lý đã duyệt", RegisStatus.Approve2 => "HTV đã duyệt", RegisStatus.Finish => "Hoàn tất", _ => s.ToString() };
+    string StBadge(RegisStatus s) => s switch { RegisStatus.Pending => "bg-warning-subtle text-warning", RegisStatus.Approve1 => "bg-info-subtle text-info", RegisStatus.Approve2 => "bg-primary-subtle text-primary", RegisStatus.Finish => "bg-success-subtle text-success", _ => "bg-secondary-subtle" };
+}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div><h5 class="fw-bold mb-0"><i class="bi bi-person-check me-2"></i>Duyệt đăng ký hội viên</h5>
+        <small class="text-muted">Crd_Member.RegisStatus — luồng duyệt PENDING → APPROVE1 (đại lý) → APPROVE2 (HTV) → FINISH</small></div>
+</div>
+
+<div class="mb-3">
+    <a asp-action="Index" class="btn btn-sm @(status==null?"btn-primary":"btn-outline-secondary")">Đang chờ xử lý</a>
+    <a asp-action="Index" asp-route-status="@RegisStatus.Pending" class="btn btn-sm @(status==RegisStatus.Pending?"btn-primary":"btn-outline-secondary")">Chờ đại lý duyệt</a>
+    <a asp-action="Index" asp-route-status="@RegisStatus.Approve1" class="btn btn-sm @(status==RegisStatus.Approve1?"btn-primary":"btn-outline-secondary")">Đại lý đã duyệt</a>
+    <a asp-action="Index" asp-route-status="@RegisStatus.Approve2" class="btn btn-sm @(status==RegisStatus.Approve2?"btn-primary":"btn-outline-secondary")">HTV đã duyệt</a>
+    <a asp-action="Index" asp-route-status="@RegisStatus.Finish" class="btn btn-sm @(status==RegisStatus.Finish?"btn-primary":"btn-outline-secondary")">Hoàn tất</a>
+</div>
+
+<div class="card"><div class="table-responsive"><table class="table table-hover align-middle mb-0">
+    <thead><tr><th>Mã hội viên</th><th>Họ tên</th><th>SĐT</th><th>Đại lý đăng ký</th><th>Hạng</th><th>Trạng thái đăng ký</th><th>Ngày ĐK</th><th></th></tr></thead>
+    <tbody>
+        @if (Model.Count == 0)
+        {
+            <tr><td colspan="8" class="text-center text-muted small py-4">Không có hội viên nào đang chờ duyệt đăng ký.</td></tr>
+        }
+        @foreach (var m in Model)
+        {
+            <tr>
+                <td class="small font-monospace">@m.Code</td>
+                <td class="small">@m.Name</td>
+                <td class="small text-muted">@(m.Phone ?? "—")</td>
+                <td class="small text-muted">@(m.DLCodeRegis ?? "—")</td>
+                <td class="small"><span class="rank-chip" style="background:@(m.RankTier?.ColorHex ?? "#94a3b8")">@(m.RankTier?.Name ?? "—")</span></td>
+                <td><span class="badge @StBadge(m.RegisStatus)">@StName(m.RegisStatus)</span></td>
+                <td class="small text-muted">@m.JoinedAt.ToString("dd/MM/yyyy")</td>
+                <td class="text-end"><a asp-action="Details" asp-route-id="@m.Id" class="btn btn-outline-primary btn-sm">Xem</a></td>
+            </tr>
+        }
+    </tbody>
+</table></div></div>

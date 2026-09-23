@@ -215,6 +215,29 @@ public static class Seeder
             sup.Points = 1500;
             sup.LifetimePoints = 1500;
             db.Members.Add(sup);
+            // Hội viên đang trong vòng đời duyệt ĐĂNG KÝ (Crd_Member.RegisStatus) — minh hoạ màn "Duyệt đăng ký hội viên".
+            // PENDING: chờ đại lý duyệt; APPROVE1: đại lý đã duyệt, chờ HTV; APPROVE2: HTV đã duyệt, chờ hoàn tất.
+            var regPending = M("Lê Văn Phúc", "0911888001", 0, 0);
+            regPending.Status = MemberStatus.Pending; regPending.CardStatus = CardStatus.Pending;
+            regPending.RegisStatus = RegisStatus.Pending; regPending.DLCodeRegis = "DL-DEMO-001";
+            regPending.CardTypeUseId = regPending.RankTierId; regPending.CardTypeInitId = regPending.RankTierId;
+            regPending.Remark = "Khách mua xe mới, chờ đại lý duyệt đăng ký";
+            db.Members.Add(regPending);
+            var regAppr1 = M("Nguyễn Thị Thu", "0911888002", 0, 0);
+            regAppr1.Status = MemberStatus.Pending; regAppr1.CardStatus = CardStatus.Pending;
+            regAppr1.RegisStatus = RegisStatus.Approve1; regAppr1.DLCodeRegis = "DL-DEMO-002";
+            regAppr1.CardTypeUseId = regAppr1.RankTierId; regAppr1.CardTypeInitId = regAppr1.RankTierId;
+            regAppr1.RegisAppr1At = DateTime.Now.AddDays(-1); regAppr1.RegisAppr1By = "DL-DEMO-002";
+            regAppr1.Remark = "Đại lý đã duyệt, chờ HTV duyệt";
+            db.Members.Add(regAppr1);
+            var regAppr2 = M("Trần Minh Khoa", "0911888003", 0, 0);
+            regAppr2.Status = MemberStatus.Pending; regAppr2.CardStatus = CardStatus.Pending;
+            regAppr2.RegisStatus = RegisStatus.Approve2; regAppr2.DLCodeRegis = "DL-DEMO-001";
+            regAppr2.CardTypeUseId = regAppr2.RankTierId; regAppr2.CardTypeInitId = regAppr2.RankTierId;
+            regAppr2.RegisAppr1At = DateTime.Now.AddDays(-2); regAppr2.RegisAppr1By = "DL-DEMO-001";
+            regAppr2.RegisAppr2At = DateTime.Now.AddDays(-1); regAppr2.RegisAppr2By = "HTV";
+            regAppr2.Remark = "HTV đã duyệt, chờ hoàn tất kích hoạt";
+            db.Members.Add(regAppr2);
             await db.SaveChangesAsync();
         }
         if (!await db.MemberColumnChanges.AnyAsync())

@@ -13,6 +13,12 @@ public enum MemberStatus { Pending = 0, Approve = 1, Cancel = 2 }   // TConst.Me
 
 /// <summary>Trạng thái thẻ (Crd_Card.CardStatus): PENDING → APPROVE → CANCEL.</summary>
 public enum CardStatus { Pending = 0, Approve = 1, Cancel = 2 }   // TConst.CardStatus.Pending/Approve/Cancel
+/// <summary>
+/// Trạng thái ĐĂNG KÝ hội viên (Crd_Member.RegisStatus / TConst.RegisStatus): vòng đời duyệt đăng ký hội viên
+/// PENDING (đại lý gửi) → APPROVE1 (đại lý duyệt) → APPROVE2 (HTV duyệt) → FINISH (hoàn tất, kích hoạt hội viên).
+/// Khác với MemberStatus (trạng thái hoạt động của hội viên).
+/// </summary>
+public enum RegisStatus { Pending = 0, Approve1 = 1, Approve2 = 2, Finish = 3 }   // TConst.RegisStatus.Pending/Approve1/Approve2/Finish
 
 /// <summary>Trạng thái yêu cầu thay đổi thông tin (Crd_MemberChangeInfo.RequestStatus): PENDING → APPROVE → FINISH, hoặc CANCEL khi từ chối.</summary>
 public enum ChangeRequestStatus { Pending = 0, Approve = 1, Finish = 2, Cancel = 3 }   // TConst.RequestStatus.Pending/Approve/Finish/Cancel
@@ -131,6 +137,23 @@ public class Member : IOrgOwned
     public DateTime? InactiveAt { get; set; }      // Crd_Member.InactiveDTimeUTC — thời điểm vô hiệu hoá
     public string? InactiveBy { get; set; }        // Crd_Member.InactiveBy — người vô hiệu hoá
     public string? Remark { get; set; }            // Crd_Member.Remark — lý do vô hiệu hoá (audit)
+
+    // Vòng đời ĐĂNG KÝ hội viên (Crd_Member.RegisStatus): PENDING → APPROVE1 (đại lý duyệt)
+    // → APPROVE2 (HTV duyệt) → FINISH (hoàn tất, kích hoạt hội viên + thẻ + liên kết đại lý).
+    // Khác MemberStatus (trạng thái hoạt động). Hội viên mới tạo ở RegisStatus=Pending, MemberStatus=Pending.
+    public RegisStatus RegisStatus { get; set; } = RegisStatus.Finish;   // Crd_Member.RegisStatus
+    public DateTime? RegisAppr1At { get; set; }    // Crd_Member.RegisAppr1DTimeUTC — thời điểm đại lý duyệt
+    public string? RegisAppr1By { get; set; }      // Crd_Member.RegisAppr1By — người đại lý duyệt
+    public DateTime? RegisAppr2At { get; set; }    // Crd_Member.RegisAppr2DTimeUTC — thời điểm HTV duyệt
+    public string? RegisAppr2By { get; set; }      // Crd_Member.RegisAppr2By — người HTV duyệt
+    public DateTime? RegisFinishAt { get; set; }   // Crd_Member.RegisFinishDTimeUTC — thời điểm hoàn tất
+    public string? RegisFinishBy { get; set; }     // Crd_Member.RegisFinishBy — người hoàn tất
+    public DateTime? MemberActiveDate { get; set; } // Crd_Member.MemberActiveDate — ngày hội viên có hiệu lực
+    public string? DLCodeRegis { get; set; }       // Crd_Member.DLCodeRegis — đại lý đăng ký (ghi liên kết khi FINISH)
+    // Hạng thẻ sử dụng / hạng thực (Crd_Member.CardTypeUse/CardTypeInit): khi bằng nhau thì duyệt đại lý
+    // chuyển thẳng PENDING → FINISH; khác nhau thì PENDING → APPROVE1 → APPROVE2 → FINISH.
+    public int? CardTypeUseId { get; set; }        // Crd_Member.CardTypeUse — hạng thẻ sử dụng
+    public int? CardTypeInitId { get; set; }       // Crd_Member.CardTypeInit — hạng thẻ thực (khởi tạo)
 
     public RankTier? RankTier { get; set; }
     public List<PointTransaction> Transactions { get; set; } = [];
