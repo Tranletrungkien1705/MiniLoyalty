@@ -1,6 +1,9 @@
 namespace MiniLoyalty.Models;
 
-public enum PointTxType { Earn = 0, Redeem = 1, Birthday = 2, Adjust = 3, Expiry = 4, Introduction = 5, ServiceTurn = 6, Discount = 7, PointUse = 8, Sale = 9, Consumption = 10, Kmbh = 11 }
+public enum PointTxType { Earn = 0, Redeem = 1, Birthday = 2, Adjust = 3, Expiry = 4, Introduction = 5, ServiceTurn = 6, Discount = 7, PointUse = 8, Sale = 9, Consumption = 10, Kmbh = 11, PrProgram = 12 }
+
+/// <summary>Phân loại ghi nhận sử dụng ưu đãi (Crd_DealUsePromotion): POINTUSE trừ điểm, PRPROGRAM chỉ ghi nhận (không đổi điểm).</summary>
+public enum PromotionUseKind { PointUse = 0, PrProgram = 1 }
 
 /// <summary>Loại giao dịch điểm voucher (Crd_MemberVoucherTransaction.DealPointType).</summary>
 public enum VoucherTxType { Award = 0, Use = 1, BirthdayVoucher = 2 }   // VOUCHERXM = tặng, VOUCHERSD = sử dụng, VOUCHERTSN = voucher sinh nhật
@@ -87,6 +90,9 @@ public class PointTransaction : IOrgOwned
     public int QtyVisit { get; set; }          // Crd_CardTransaction.QtyVisitChTotal — số lượt dịch vụ ghi nhận (SERVICETURN)
     public decimal AmountChTotal { get; set; } // Crd_CardTransaction.AmountChTotal — doanh thu dịch vụ (CONSUMPTION)
     public int PointChRankTotal { get; set; }  // Crd_CardTransaction.PointChRankTotal — điểm xét hạng cộng thêm (CONSUMPTION)
+    public string? PrProgramCode { get; set; } // Crd_CardTransaction.PrProgramCode — mã chương trình ưu đãi (PRPROGRAM)
+    public int QtyPrChTotal { get; set; }      // Crd_CardTransaction.QtyPrChTotal — số lượng ưu đãi ghi nhận (PRPROGRAM)
+    public int QtyPrUsed { get; set; }         // Crd_CardTransaction.QtyPrUsed — số lượng ưu đãi đã dùng (PRPROGRAM)
     public DateTime? ExpiresAt { get; set; }   // điểm dương hết hạn vào thời điểm này (PointExpiryDTime)
     public DateTime CreatedAt { get; set; } = DateTime.Now;
 
@@ -182,6 +188,8 @@ public class Promotion : IOrgOwned
 /// <summary>
 /// Giao dịch sử dụng ưu đãi (Crd_DealUsePromotion): hội viên dùng điểm khả dụng để đổi ưu đãi tại đại lý.
 /// Tương ứng Crd_CardTransaction với DealPointType = POINTUSE, PointChTotal &lt; 0 (trừ điểm).
+/// Với Kind = PrProgram (DealPointType = PRPROGRAM): chỉ GHI NHẬN việc dùng ưu đãi (PointChTotal = 0,
+/// không trừ điểm) để tracking số lần dùng — dùng QtyPrChTotal/QtyPrUsed.
 /// </summary>
 public class MemberPromotionUse : IOrgOwned
 {
@@ -189,9 +197,12 @@ public class MemberPromotionUse : IOrgOwned
     public Guid OrgId { get; set; }
     public int MemberId { get; set; }
     public int PromotionId { get; set; }            // ưu đãi được sử dụng
+    public PromotionUseKind Kind { get; set; } = PromotionUseKind.PointUse;   // POINTUSE (trừ điểm) / PRPROGRAM (chỉ ghi nhận)
     public string? PrProgramCode { get; set; }      // Crd_CardTransaction.PrProgramCode — mã ưu đãi
-    public int Points { get; set; }                 // Crd_CardTransaction.PointChTotal — điểm bị trừ (âm)
+    public int Points { get; set; }                 // Crd_CardTransaction.PointChTotal — điểm bị trừ (âm); PRPROGRAM = 0
     public int BalanceAfter { get; set; }           // Crd_Card.PointAvail sau giao dịch
+    public int QtyPrChTotal { get; set; }           // Crd_DealUsePromotionDtl.QtyPrChTotal — số lượng ưu đãi ghi nhận (PRPROGRAM)
+    public int QtyPrUsed { get; set; }              // Crd_DealUsePromotionDtl.QtyPrUsed — số lượng ưu đãi đã dùng (PRPROGRAM)
     public string? RefNo { get; set; }              // Crd_DealUsePromotion.DealUsePrmNo — số phiếu sử dụng ưu đãi
     public string? Note { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.Now;   // Crd_DealUsePromotion.UsePrmDTime

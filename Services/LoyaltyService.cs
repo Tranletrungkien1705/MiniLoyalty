@@ -48,6 +48,7 @@ public interface ILoyaltyService
     Task<List<MemberVoucherTransaction>> VouchersAsync(int memberId);
     Task<List<Promotion>> PromotionsAsync(bool activeOnly = true);
     Task<(bool ok, string msg)> UsePromotionAsync(int memberId, int promotionId, string? refNo);
+    Task<(bool ok, string msg)> RecordPromotionUseAsync(int memberId, int promotionId, int qty, string? refNo);
     Task<List<MemberPromotionUse>> PromotionUsesAsync(int memberId);
 }
 
