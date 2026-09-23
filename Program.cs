@@ -64,6 +64,13 @@ app.MapPost("/api/earn", async (EarnDto dto, ILoyaltyService svc) =>
     return Results.Ok(new { memberCode = member!.Code, earned = tx.Points, balance = member.Points, rank = member.RankTier?.Name });
 });
 
+// API chạy job hết hạn điểm (điểm cộng quá hạn dùng bị trừ). Idempotent.
+app.MapPost("/api/expiry/run", async (ILoyaltyService svc) =>
+{
+    var r = await svc.RunExpiryJobAsync();
+    return Results.Ok(new { date = r.Date, members = r.Members, expiredPoints = r.Points, details = r.Details });
+});
+
 app.MapControllerRoute(name: "default", pattern: "{controller=Home}/{action=Index}/{id?}");
 app.Run();
 

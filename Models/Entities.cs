@@ -44,6 +44,7 @@ public class PointTransaction : IOrgOwned
     public int BalanceAfter { get; set; }
     public string? Note { get; set; }
     public string? RefNo { get; set; }
+    public DateTime? ExpiresAt { get; set; }   // điểm dương hết hạn vào thời điểm này (PointExpiryDTime)
     public DateTime CreatedAt { get; set; } = DateTime.Now;
 
     public Member Member { get; set; } = null!;

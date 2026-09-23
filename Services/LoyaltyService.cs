@@ -10,6 +10,9 @@ public record LoyaltyDash(int Members, int ActivePoints, int LifetimeIssued,
 /// <summary>Kết quả 1 lần chạy job tặng điểm sinh nhật.</summary>
 public record BirthdayRunResult(int Awarded, int Points, List<(string Code, string Name, int Points)> Details);
 
+/// <summary>Kết quả 1 lần chạy job hết hạn điểm.</summary>
+public record ExpiryRunResult(DateTime Date, int Members, int Points, List<(string Code, string Name, int Points)> Details);
+
 public interface ILoyaltyService
 {
     Task<List<Member>> MembersAsync(string? q, int? rankId);
@@ -23,11 +26,13 @@ public interface ILoyaltyService
     Task<List<Reward>> RewardsAsync(bool activeOnly = true);
     Task<LoyaltyDash> DashboardAsync();
     Task<BirthdayRunResult> RunBirthdayJobAsync(DateTime? today = null);
+    Task<ExpiryRunResult> RunExpiryJobAsync(DateTime? today = null);
 }
 
 public class LoyaltyService(AppDbContext db) : ILoyaltyService
 {
     public const int VndPerPoint = 1000;   // 1 điểm / 1.000đ
+    public const int PointValidityMonths = 12;   // điểm cộng có hạn dùng 12 tháng (PointExpiryDTime)
 
     public async Task<List<Member>> MembersAsync(string? q, int? rankId)
     {
@@ -62,6 +67,7 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
         if (points > 0) m.LifetimePoints += points;     // chỉ điểm dương mới tính xếp hạng
         await RecomputeRankAsync(m);
         var tx = new PointTransaction { MemberId = memberId, Type = type, Points = points, BalanceAfter = m.Points, Note = note, RefNo = refNo };
+        if (points > 0) tx.ExpiresAt = DateTime.Now.AddMonths(PointValidityMonths);   // điểm dương có hạn dùng
         db.PointTransactions.Add(tx);
         await db.SaveChangesAsync();
         return tx;
@@ -121,6 +127,48 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
             total += pts;
         }
         return new BirthdayRunResult(details.Count, total, details);
+    }
+
+    /// <summary>
+    /// Job hết hạn điểm (DealPointType = EXPIRY): tìm các giao dịch cộng điểm đã quá hạn
+    /// (ExpiresAt <= ngày chạy) và chưa bị trừ hết, trừ phần điểm còn lại khỏi số dư hội viên.
+    /// Idempotent: giao dịch đã hết hạn được đánh dấu bằng cách gán ExpiresAt = null sau khi xử lý.
+    /// </summary>
+    public async Task<ExpiryRunResult> RunExpiryJobAsync(DateTime? today = null)
+    {
+        var d = (today ?? DateTime.Today).Date;
+        var details = new List<(string, string, int)>();
+        var total = 0;
+
+        // Các giao dịch cộng điểm đã tới hạn (chưa xử lý).
+        var due = await db.PointTransactions
+            .Where(t => t.Points > 0 && t.ExpiresAt != null && t.ExpiresAt <= d)
+            .ToListAsync();
+
+        foreach (var group in due.GroupBy(t => t.MemberId))
+        {
+            var m = await db.Members.FirstOrDefaultAsync(x => x.Id == group.Key);
+            if (m == null) continue;
+
+            var expired = group.Sum(t => t.Points);
+            if (expired <= 0) continue;
+            if (expired > m.Points) expired = m.Points;   // không trừ quá số dư khả dụng
+            if (expired <= 0) continue;
+
+            m.Points -= expired;
+            db.PointTransactions.Add(new PointTransaction
+            {
+                MemberId = m.Id, Type = PointTxType.Expiry, Points = -expired, BalanceAfter = m.Points,
+                Note = $"Điểm hết hạn ({group.Count()} giao dịch)", RefNo = $"EXP.{d:yyyyMMdd}"
+            });
+            // Đánh dấu đã xử lý để lần chạy sau không trừ lại.
+            foreach (var t in group) t.ExpiresAt = null;
+
+            details.Add((m.Code, m.Name, expired));
+            total += expired;
+        }
+        if (details.Count > 0) await db.SaveChangesAsync();
+        return new ExpiryRunResult(d, details.Count, total, details);
     }
 
     public async Task<LoyaltyDash> DashboardAsync()
