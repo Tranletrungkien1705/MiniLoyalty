@@ -234,6 +234,22 @@ app.MapPost("/api/member/inactive", async (InactiveDto dto, ILoyaltyService svc)
     return Results.Ok(new { ok, msg, memberCode = member!.Code, status = member.Status.ToString(), cardStatus = member.CardStatus.ToString() });
 });
 
+// API điều chỉnh điểm hỗ trợ (DealPointType=SUPPORT): nhân viên hỗ trợ cộng/trừ điểm thủ công cho hội viên.
+app.MapPost("/api/support/adjust", async (SupportAdjustDto dto, ILoyaltyService svc) =>
+{
+    var m = dto.Phone is { Length: > 0 } p ? await svc.GetByPhoneAsync(p) : null;
+    if (m == null && dto.MemberId is { } mid) m = await svc.GetAsync(mid);
+    if (m == null) return Results.NotFound(new { error = "Không tìm thấy hội viên" });
+    if (dto.Points == 0) return Results.BadRequest(new { error = "Số điểm điều chỉnh phải khác 0." });
+    try
+    {
+        var tx = await svc.AdjustPointsBySupportAsync(m.Id, dto.Points, dto.Reason, dto.RefNo);
+        var member = await svc.GetAsync(m.Id);
+        return Results.Ok(new { memberCode = member!.Code, adjusted = tx.Points, balance = member.Points, lifetime = member.LifetimePoints, rank = member.RankTier?.Name, reason = tx.FunctionRemark });
+    }
+    catch (Exception ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+
 app.MapControllerRoute(name: "default", pattern: "{controller=Home}/{action=Index}/{id?}");
 app.Run();
 
@@ -251,3 +267,4 @@ record VoucherUseDto(string? Phone, int? MemberId, int Points, string? VoucherCo
 record PromotionUseDto(string? Phone, int? MemberId, int PromotionId, string? RefNo);
 record PointIncreaseDto(string? Phone, int? MemberId, int RankPoints, string? RefNo);
 record InactiveDto(string? Phone, int? MemberId, string? Remark, string? By);
+record SupportAdjustDto(string? Phone, int? MemberId, int Points, string? Reason, string? RefNo);

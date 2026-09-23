@@ -53,6 +53,7 @@ public interface ILoyaltyService
     Task<(bool ok, string msg)> RecordPromotionUseAsync(int memberId, int promotionId, int qty, string? refNo);
     Task<List<MemberPromotionUse>> PromotionUsesAsync(int memberId);
     Task<(bool ok, string msg)> InactivateMemberAsync(int memberId, string? remark, string? by = null);
+    Task<PointTransaction> AdjustPointsBySupportAsync(int memberId, int points, string? reason, string? refNo);
 }
 
 public class LoyaltyService(AppDbContext db) : ILoyaltyService
@@ -649,6 +650,37 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
 
         await db.SaveChangesAsync();
         return (true, $"Đã vô hiệu hoá hội viên {m.Code} ({m.Name}); huỷ thẻ và đặt {pending.Count} giao dịch điểm hết hạn cuối tháng.");
+    }
+
+    /// <summary>
+    /// Điều chỉnh điểm hỗ trợ (DealPointType = SUPPORT, Crd_CardTransaction): nhân viên hỗ trợ idocNet
+    /// cộng/trừ điểm thủ công cho hội viên trong các trường hợp đặc biệt (khiếu nại, sai sót, bù điểm).
+    /// Ghi 1 giao dịch SUPPORT với DLCode = "SUPPORT" (đại lý hỗ trợ) và FunctionRemark = lý do điều chỉnh (audit).
+    /// Điểm dương cộng vào điểm khả dụng + điểm tích lũy trọn đời (ảnh hưởng xét hạng) và có hạn dùng 12 tháng;
+    /// điểm âm chỉ trừ điểm khả dụng (không đụng điểm tích lũy trọn đời), chặn nếu vượt số dư.
+    /// </summary>
+    public async Task<PointTransaction> AdjustPointsBySupportAsync(int memberId, int points, string? reason, string? refNo)
+    {
+        if (points == 0) throw new ArgumentException("Số điểm điều chỉnh phải khác 0.", nameof(points));
+        var m = await db.Members.FirstOrDefaultAsync(x => x.Id == memberId) ?? throw new KeyNotFoundException();
+        if (points < 0 && m.Points + points < 0)
+            throw new InvalidOperationException($"Không đủ điểm để trừ (cần {-points:N0}, có {m.Points:N0}).");
+
+        m.Points += points;
+        if (points > 0) m.LifetimePoints += points;   // chỉ điểm dương mới tính xếp hạng
+        await RecomputeRankAsync(m);
+
+        var tx = new PointTransaction
+        {
+            MemberId = memberId, Type = PointTxType.Support, Points = points, BalanceAfter = m.Points,
+            DLCode = "SUPPORT", FunctionRemark = reason,
+            Note = $"Điều chỉnh điểm hỗ trợ {(points > 0 ? "+" : "")}{points:N0}{(string.IsNullOrWhiteSpace(reason) ? "" : $" — {reason}")}",
+            RefNo = refNo
+        };
+        if (points > 0) tx.ExpiresAt = DateTime.Now.AddMonths(PointValidityMonths);   // điểm dương có hạn dùng
+        db.PointTransactions.Add(tx);
+        await db.SaveChangesAsync();
+        return tx;
     }
 
     public async Task<LoyaltyDash> DashboardAsync()

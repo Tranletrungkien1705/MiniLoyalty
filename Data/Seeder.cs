@@ -185,6 +185,17 @@ public static class Seeder
             inact.InactiveBy = "HTV";
             inact.Remark = "Khách bán xe cũ cho người khác";
             db.Members.Add(inact);
+            // Điều chỉnh điểm hỗ trợ (DealPointType=SUPPORT) — minh hoạ nhân viên hỗ trợ cộng/trừ điểm thủ công.
+            var sup = M("Đoàn Thị Ngọc", "0911666666", 1000, 1000);
+            sup.Transactions.Add(new PointTransaction
+            {
+                Type = PointTxType.Support, Points = 500, BalanceAfter = 1500, DLCode = "SUPPORT",
+                FunctionRemark = "Bù điểm khiếu nại hóa đơn dịch vụ", RefNo = "SUP-DEMO-001",
+                Note = "Điều chỉnh điểm hỗ trợ +500 — Bù điểm khiếu nại hóa đơn dịch vụ", CreatedAt = DateTime.Now.AddDays(-1)
+            });
+            sup.Points = 1500;
+            sup.LifetimePoints = 1500;
+            db.Members.Add(sup);
             await db.SaveChangesAsync();
         }
     }

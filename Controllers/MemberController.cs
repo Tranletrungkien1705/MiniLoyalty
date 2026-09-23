@@ -175,4 +175,17 @@ public class MemberController(ILoyaltyService svc) : Controller
         TempData[ok ? "Success" : "Error"] = msg;
         return RedirectToAction(nameof(Details), new { id });
     }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> SupportAdjust(int id, int points, string? reason, string? note)
+    {
+        if (points == 0) { TempData["Error"] = "Số điểm điều chỉnh phải khác 0."; return RedirectToAction(nameof(Details), new { id }); }
+        try
+        {
+            var tx = await svc.AdjustPointsBySupportAsync(id, points, reason, note);
+            TempData["Success"] = $"Đã điều chỉnh {(tx.Points > 0 ? "+" : "")}{tx.Points:N0} điểm hỗ trợ.";
+        }
+        catch (Exception ex) { TempData["Error"] = ex.Message; }
+        return RedirectToAction(nameof(Details), new { id });
+    }
 }
