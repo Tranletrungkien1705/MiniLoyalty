@@ -54,6 +54,13 @@ public interface ILoyaltyService
     Task<List<MemberPromotionUse>> PromotionUsesAsync(int memberId);
     Task<(bool ok, string msg)> InactivateMemberAsync(int memberId, string? remark, string? by = null);
     Task<PointTransaction> AdjustPointsBySupportAsync(int memberId, int points, string? reason, string? refNo);
+    Task<List<MemberColumnChange>> ChangeableColumnsAsync();
+    Task<List<MemberChangeRequest>> ChangeRequestsAsync(ChangeRequestStatus? status = null);
+    Task<MemberChangeRequest?> ChangeRequestAsync(int id);
+    Task<(bool ok, string msg, int id)> CreateChangeRequestAsync(int memberId, ChangeRequestType type, string? dlCode, string? remark, List<(string ColumnCode, string? ValueNew)> details);
+    Task<(bool ok, string msg)> ApproveChangeRequestAsync(int requestId, string? remarkHtv, string? by = null);
+    Task<(bool ok, string msg)> FinishChangeRequestAsync(int requestId, string? remarkHtv, string? by = null);
+    Task<(bool ok, string msg)> RejectChangeRequestAsync(int requestId, string? remarkHtv, string? by = null);
 }
 
 public class LoyaltyService(AppDbContext db) : ILoyaltyService
@@ -681,6 +688,163 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
         db.PointTransactions.Add(tx);
         await db.SaveChangesAsync();
         return tx;
+    }
+
+    /// <summary>
+    /// Danh mục cột được phép đề nghị thay đổi (Crd_MemberColumnChange): whitelist các cột của Crd_Member
+    /// mà hội viên/đại lý được phép đổi qua yêu cầu Crd_MemberChangeInfo.
+    /// </summary>
+    public Task<List<MemberColumnChange>> ChangeableColumnsAsync() =>
+        db.MemberColumnChanges.Where(c => c.IsActive).OrderBy(c => c.Id).ToListAsync();
+
+    /// <summary>Danh sách yêu cầu thay đổi thông tin (Crd_MemberChangeInfo), lọc theo trạng thái nếu có.</summary>
+    public async Task<List<MemberChangeRequest>> ChangeRequestsAsync(ChangeRequestStatus? status = null)
+    {
+        var q = db.MemberChangeRequests.Include(r => r.Member).Include(r => r.Details).AsQueryable();
+        if (status.HasValue) q = q.Where(r => r.Status == status.Value);
+        var list = await q.ToListAsync();
+        return list.OrderByDescending(r => r.CreatedAt).ToList();
+    }
+
+    public Task<MemberChangeRequest?> ChangeRequestAsync(int id) =>
+        db.MemberChangeRequests.Include(r => r.Member).Include(r => r.Details)
+            .FirstOrDefaultAsync(r => r.Id == id);
+
+    /// <summary>
+    /// Tạo yêu cầu thay đổi thông tin hội viên (Crd_MemberChangeInfo_SaveX): hội viên/đại lý đề nghị đổi
+    /// một số cột (theo whitelist Crd_MemberColumnChange) kèm giá trị mới. Yêu cầu khởi tạo ở trạng thái
+    /// PENDING, mỗi dòng chi tiết cũng PENDING. Chặn tạo trùng khi đã có yêu cầu PENDING/APPROVE cùng loại
+    /// cho hội viên (giống hệ nguồn). Sinh RequestNo dạng CRQ.&lt;năm&gt;.&lt;mã hội viên&gt;.&lt;seq&gt;.
+    /// </summary>
+    public async Task<(bool ok, string msg, int id)> CreateChangeRequestAsync(
+        int memberId, ChangeRequestType type, string? dlCode, string? remark,
+        List<(string ColumnCode, string? ValueNew)> details)
+    {
+        var m = await db.Members.FirstOrDefaultAsync(x => x.Id == memberId);
+        if (m == null) return (false, "Không tìm thấy hội viên.", 0);
+        if (m.Status == MemberStatus.Cancel) return (false, "Hội viên đã bị vô hiệu hoá.", 0);
+
+        // Chỉ 1 yêu cầu đang mở (PENDING/APPROVE) cho mỗi hội viên + loại yêu cầu.
+        var open = await db.MemberChangeRequests.AnyAsync(r =>
+            r.MemberId == memberId && r.RequestType == type &&
+            (r.Status == ChangeRequestStatus.Pending || r.Status == ChangeRequestStatus.Approve));
+        if (open) return (false, "Đã có yêu cầu đang xử lý (PENDING/APPROVE) cho hội viên này.", 0);
+
+        // Đổi thông tin: phải có ít nhất 1 dòng và mọi cột phải nằm trong whitelist.
+        if (type == ChangeRequestType.ChangeInfo)
+        {
+            details = details.Where(d => !string.IsNullOrWhiteSpace(d.ColumnCode)).ToList();
+            if (details.Count == 0) return (false, "Cần ít nhất 1 cột đề nghị thay đổi.", 0);
+            var allowed = await db.MemberColumnChanges.Where(c => c.IsActive).Select(c => c.ColumnCode).ToListAsync();
+            var bad = details.FirstOrDefault(d => !allowed.Contains(d.ColumnCode));
+            if (bad.ColumnCode != null) return (false, $"Cột {bad.ColumnCode} không được phép thay đổi.", 0);
+        }
+
+        var seq = await db.MemberChangeRequests.CountAsync() + 1;
+        var req = new MemberChangeRequest
+        {
+            RequestNo = $"CRQ.{DateTime.Now:yyyy}.{m.Code}.{seq:D3}",
+            MemberId = memberId, RequestType = type, Status = ChangeRequestStatus.Pending,
+            DLCodeRequest = dlCode, Remark = remark, CreatedAt = DateTime.Now
+        };
+        foreach (var d in details)
+            req.Details.Add(new MemberChangeRequestDtl { ColumnCode = d.ColumnCode, ColumnValueNew = d.ValueNew });
+        db.MemberChangeRequests.Add(req);
+        await db.SaveChangesAsync();
+        return (true, $"Đã tạo yêu cầu {req.RequestNo} (PENDING).", req.Id);
+    }
+
+    /// <summary>
+    /// Duyệt yêu cầu thay đổi (Crd_MemberChangeInfo_ApproveX): chỉ duyệt được yêu cầu đang PENDING.
+    /// Đặt RequestStatus = APPROVE, ghi ApproveAt/ApproveBy/RemarkHTV; các dòng chi tiết chuyển APPROVE.
+    /// Chưa áp thay đổi vào hội viên (đó là bước FINISH).
+    /// </summary>
+    public async Task<(bool ok, string msg)> ApproveChangeRequestAsync(int requestId, string? remarkHtv, string? by = null)
+    {
+        var r = await db.MemberChangeRequests.Include(x => x.Details).FirstOrDefaultAsync(x => x.Id == requestId);
+        if (r == null) return (false, "Không tìm thấy yêu cầu.");
+        if (r.Status != ChangeRequestStatus.Pending) return (false, "Chỉ duyệt được yêu cầu đang PENDING.");
+
+        r.Status = ChangeRequestStatus.Approve;
+        r.ApproveAt = DateTime.Now;
+        r.ApproveBy = by;
+        r.RemarkHTV = remarkHtv;
+        foreach (var d in r.Details) d.DtlStatus = ChangeRequestStatus.Approve;
+        await db.SaveChangesAsync();
+        return (true, $"Đã duyệt yêu cầu {r.RequestNo} (APPROVE).");
+    }
+
+    /// <summary>
+    /// Hoàn tất yêu cầu thay đổi (Crd_MemberChangeInfo_FinishX): chỉ hoàn tất được yêu cầu đang APPROVE.
+    /// Với ChangeInfo: áp giá trị mới của các dòng đã APPROVE vào hội viên (theo whitelist cột), rồi đặt
+    /// RequestStatus = FINISH. Với CancelMember: vô hiệu hoá hội viên (MemberStatus = Cancel, huỷ thẻ,
+    /// dời hạn điểm về cuối tháng) — tái dùng InactivateMemberAsync. Ghi FinishAt/FinishBy/RemarkHTV.
+    /// </summary>
+    public async Task<(bool ok, string msg)> FinishChangeRequestAsync(int requestId, string? remarkHtv, string? by = null)
+    {
+        var r = await db.MemberChangeRequests.Include(x => x.Details).FirstOrDefaultAsync(x => x.Id == requestId);
+        if (r == null) return (false, "Không tìm thấy yêu cầu.");
+        if (r.Status != ChangeRequestStatus.Approve) return (false, "Chỉ hoàn tất được yêu cầu đang APPROVE.");
+
+        var m = await db.Members.FirstOrDefaultAsync(x => x.Id == r.MemberId);
+        if (m == null) return (false, "Không tìm thấy hội viên.");
+
+        if (r.RequestType == ChangeRequestType.ChangeInfo)
+        {
+            // Áp giá trị mới của các dòng đã APPROVE vào hội viên (chỉ các cột trong whitelist).
+            var allowed = await db.MemberColumnChanges.Where(c => c.IsActive).Select(c => c.ColumnCode).ToListAsync();
+            foreach (var d in r.Details.Where(x => x.DtlStatus == ChangeRequestStatus.Approve))
+            {
+                if (!allowed.Contains(d.ColumnCode)) continue;
+                ApplyColumn(m, d.ColumnCode, d.ColumnValueNew);
+            }
+        }
+        else if (r.RequestType == ChangeRequestType.CancelMember)
+        {
+            if (m.Status != MemberStatus.Cancel)
+            {
+                var (ok, msg) = await InactivateMemberAsync(m.Id, r.Remark, by);
+                if (!ok) return (false, msg);
+            }
+        }
+
+        r.Status = ChangeRequestStatus.Finish;
+        r.FinishAt = DateTime.Now;
+        r.FinishBy = by;
+        r.RemarkHTV = remarkHtv;
+        await db.SaveChangesAsync();
+        return (true, $"Đã hoàn tất yêu cầu {r.RequestNo} (FINISH).");
+    }
+
+    /// <summary>
+    /// Từ chối yêu cầu thay đổi (Crd_MemberChangeInfo_RejectX): chỉ từ chối được yêu cầu đang PENDING/APPROVE.
+    /// Đặt RequestStatus = CANCEL, ghi RemarkHTV. Không áp thay đổi vào hội viên.
+    /// </summary>
+    public async Task<(bool ok, string msg)> RejectChangeRequestAsync(int requestId, string? remarkHtv, string? by = null)
+    {
+        var r = await db.MemberChangeRequests.FirstOrDefaultAsync(x => x.Id == requestId);
+        if (r == null) return (false, "Không tìm thấy yêu cầu.");
+        if (r.Status != ChangeRequestStatus.Pending && r.Status != ChangeRequestStatus.Approve)
+            return (false, "Chỉ từ chối được yêu cầu đang PENDING/APPROVE.");
+
+        r.Status = ChangeRequestStatus.Cancel;
+        r.RemarkHTV = remarkHtv;
+        await db.SaveChangesAsync();
+        return (true, $"Đã từ chối yêu cầu {r.RequestNo} (CANCEL).");
+    }
+
+    /// <summary>Áp 1 cột thay đổi vào hội viên theo ColumnCode (whitelist Crd_MemberColumnChange).</summary>
+    private static void ApplyColumn(Member m, string columnCode, string? value)
+    {
+        switch (columnCode)
+        {
+            case "MemberName": m.Name = value ?? m.Name; break;
+            case "PhoneNo": m.Phone = value; break;
+            case "Email": m.Email = value; break;
+            case "DateOfBirth":
+                if (DateTime.TryParse(value, out var dob)) m.Dob = dob;
+                break;
+        }
     }
 
     public async Task<LoyaltyDash> DashboardAsync()

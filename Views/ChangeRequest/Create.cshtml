@@ -1,0 +1,63 @@
+@{
+    ViewData["Title"] = "Tạo yêu cầu thay đổi";
+    var columns = (List<MemberColumnChange>)ViewBag.Columns;
+    var members = (List<Member>)ViewBag.Members;
+    var memberId = (int?)ViewBag.MemberId;
+}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div><h5 class="fw-bold mb-0"><i class="bi bi-plus-square me-2"></i>Tạo yêu cầu thay đổi thông tin</h5>
+        <small class="text-muted">Crd_MemberChangeInfo_SaveX — khởi tạo ở trạng thái PENDING</small></div>
+    <a asp-action="Index" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left me-1"></i>Danh sách</a>
+</div>
+
+<div class="card"><div class="card-body">
+    <form asp-action="Create" method="post" class="row g-3">@Html.AntiForgeryToken()
+        <div class="col-md-6">
+            <label class="form-label small fw-semibold">Hội viên</label>
+            <select name="memberId" class="form-select form-select-sm" required>
+                <option value="">— Chọn hội viên —</option>
+                @foreach (var m in members)
+                {
+                    <option value="@m.Id" selected="@(memberId == m.Id)">@m.Code · @m.Name (@m.Phone)</option>
+                }
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small fw-semibold">Loại yêu cầu</label>
+            <select name="requestType" class="form-select form-select-sm">
+                <option value="@ChangeRequestType.ChangeInfo">Đổi thông tin</option>
+                <option value="@ChangeRequestType.CancelMember">Huỷ hội viên</option>
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small fw-semibold">Đại lý gửi</label>
+            <input name="dlCode" class="form-control form-control-sm" placeholder="DLCodeRequest" />
+        </div>
+        <div class="col-12">
+            <label class="form-label small fw-semibold">Ghi chú đại lý</label>
+            <input name="remark" class="form-control form-control-sm" placeholder="Remark" />
+        </div>
+
+        <div class="col-12">
+            <label class="form-label small fw-semibold">Cột đề nghị thay đổi (chỉ cột trong whitelist Crd_MemberColumnChange)</label>
+            <div class="table-responsive"><table class="table table-sm align-middle mb-0">
+                <thead><tr><th style="width:40%">Cột</th><th>Giá trị mới</th></tr></thead>
+                <tbody>
+                    @foreach (var c in columns)
+                    {
+                        <tr>
+                            <td><div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="columnCode" value="@c.ColumnCode" id="col_@c.ColumnCode" />
+                                <label class="form-check-label small" for="col_@c.ColumnCode">@c.ColumnName <span class="text-muted font-monospace">(@c.ColumnCode)</span></label>
+                            </div></td>
+                            <td><input name="valueNew" class="form-control form-control-sm" placeholder="Giá trị mới" /></td>
+                        </tr>
+                    }
+                </tbody>
+            </table></div>
+            <div class="form-text">Chỉ các dòng được tick mới được gửi. Với "Huỷ hội viên" không cần chọn cột.</div>
+        </div>
+
+        <div class="col-12"><button class="btn btn-primary btn-sm"><i class="bi bi-send me-1"></i>Tạo yêu cầu</button></div>
+    </form>
+</div></div>

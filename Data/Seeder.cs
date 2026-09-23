@@ -210,6 +210,31 @@ public static class Seeder
             db.Members.Add(sup);
             await db.SaveChangesAsync();
         }
+        if (!await db.MemberColumnChanges.AnyAsync())
+        {
+            // Whitelist cột được phép đề nghị thay đổi (Crd_MemberColumnChange) — dùng cho yêu cầu Crd_MemberChangeInfo.
+            db.MemberColumnChanges.AddRange(
+                new MemberColumnChange { ColumnCode = "MemberName", ColumnName = "Họ tên" },
+                new MemberColumnChange { ColumnCode = "PhoneNo", ColumnName = "Số điện thoại" },
+                new MemberColumnChange { ColumnCode = "Email", ColumnName = "Email" },
+                new MemberColumnChange { ColumnCode = "DateOfBirth", ColumnName = "Ngày sinh" });
+            await db.SaveChangesAsync();
+        }
+        if (!await db.MemberChangeRequests.AnyAsync())
+        {
+            // Yêu cầu thay đổi thông tin mẫu (Crd_MemberChangeInfo) — minh hoạ luồng duyệt PENDING → APPROVE → FINISH.
+            var m = await db.Members.OrderBy(x => x.Id).FirstAsync();
+            var req = new MemberChangeRequest
+            {
+                RequestNo = $"CRQ.{DateTime.Now:yyyy}.{m.Code}.001",
+                MemberId = m.Id, RequestType = ChangeRequestType.ChangeInfo, Status = ChangeRequestStatus.Pending,
+                DLCodeRequest = "DL-DEMO-001", Remark = "Khách đổi số điện thoại và email", CreatedAt = DateTime.Now.AddDays(-1)
+            };
+            req.Details.Add(new MemberChangeRequestDtl { ColumnCode = "PhoneNo", ColumnValueNew = "0988777666" });
+            req.Details.Add(new MemberChangeRequestDtl { ColumnCode = "Email", ColumnValueNew = "an.nguyen@example.com" });
+            db.MemberChangeRequests.Add(req);
+            await db.SaveChangesAsync();
+        }
     }
 
     /// <summary>

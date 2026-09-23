@@ -262,6 +262,38 @@ app.MapPost("/api/support/adjust", async (SupportAdjustDto dto, ILoyaltyService 
     catch (Exception ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
+// API tạo yêu cầu thay đổi thông tin hội viên (Crd_MemberChangeInfo_SaveX): PENDING, chờ duyệt.
+app.MapPost("/api/changerequest/create", async (ChangeRequestCreateDto dto, ILoyaltyService svc) =>
+{
+    var m = dto.Phone is { Length: > 0 } p ? await svc.GetByPhoneAsync(p) : null;
+    if (m == null && dto.MemberId is { } mid) m = await svc.GetAsync(mid);
+    if (m == null) return Results.NotFound(new { error = "Không tìm thấy hội viên" });
+    var details = (dto.Details ?? []).Select(d => (d.ColumnCode, d.ValueNew)).ToList();
+    var (ok, msg, id) = await svc.CreateChangeRequestAsync(m.Id, dto.RequestType, dto.DlCode, dto.Remark, details);
+    return ok ? Results.Ok(new { ok, msg, requestId = id }) : Results.BadRequest(new { ok, error = msg });
+});
+
+// API duyệt yêu cầu thay đổi (Crd_MemberChangeInfo_ApproveX): PENDING → APPROVE.
+app.MapPost("/api/changerequest/approve", async (ChangeRequestActionDto dto, ILoyaltyService svc) =>
+{
+    var (ok, msg) = await svc.ApproveChangeRequestAsync(dto.RequestId, dto.RemarkHtv, dto.By);
+    return ok ? Results.Ok(new { ok, msg }) : Results.BadRequest(new { ok, error = msg });
+});
+
+// API hoàn tất yêu cầu thay đổi (Crd_MemberChangeInfo_FinishX): APPROVE → FINISH, áp thay đổi vào hội viên.
+app.MapPost("/api/changerequest/finish", async (ChangeRequestActionDto dto, ILoyaltyService svc) =>
+{
+    var (ok, msg) = await svc.FinishChangeRequestAsync(dto.RequestId, dto.RemarkHtv, dto.By);
+    return ok ? Results.Ok(new { ok, msg }) : Results.BadRequest(new { ok, error = msg });
+});
+
+// API từ chối yêu cầu thay đổi (Crd_MemberChangeInfo_RejectX): PENDING/APPROVE → CANCEL.
+app.MapPost("/api/changerequest/reject", async (ChangeRequestActionDto dto, ILoyaltyService svc) =>
+{
+    var (ok, msg) = await svc.RejectChangeRequestAsync(dto.RequestId, dto.RemarkHtv, dto.By);
+    return ok ? Results.Ok(new { ok, msg }) : Results.BadRequest(new { ok, error = msg });
+});
+
 app.MapControllerRoute(name: "default", pattern: "{controller=Home}/{action=Index}/{id?}");
 app.Run();
 
@@ -281,3 +313,6 @@ record PromotionRecordDto(string? Phone, int? MemberId, int PromotionId, int Qty
 record PointIncreaseDto(string? Phone, int? MemberId, int RankPoints, string? RefNo);
 record InactiveDto(string? Phone, int? MemberId, string? Remark, string? By);
 record SupportAdjustDto(string? Phone, int? MemberId, int Points, string? Reason, string? RefNo);
+record ChangeRequestDetailDto(string ColumnCode, string? ValueNew);
+record ChangeRequestCreateDto(string? Phone, int? MemberId, ChangeRequestType RequestType, string? DlCode, string? Remark, List<ChangeRequestDetailDto>? Details);
+record ChangeRequestActionDto(int RequestId, string? RemarkHtv, string? By);

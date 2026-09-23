@@ -1,0 +1,68 @@
+@model MemberChangeRequest
+@{
+    ViewData["Title"] = $"Yêu cầu {Model.RequestNo}";
+    string StName(ChangeRequestStatus s) => s switch { ChangeRequestStatus.Pending => "Chờ duyệt", ChangeRequestStatus.Approve => "Đã duyệt", ChangeRequestStatus.Finish => "Hoàn tất", ChangeRequestStatus.Cancel => "Từ chối", _ => s.ToString() };
+    string StBadge(ChangeRequestStatus s) => s switch { ChangeRequestStatus.Pending => "bg-warning-subtle text-warning", ChangeRequestStatus.Approve => "bg-info-subtle text-info", ChangeRequestStatus.Finish => "bg-success-subtle text-success", ChangeRequestStatus.Cancel => "bg-danger-subtle text-danger", _ => "bg-secondary-subtle" };
+    var canApprove = Model.Status == ChangeRequestStatus.Pending;
+    var canFinish = Model.Status == ChangeRequestStatus.Approve;
+    var canReject = Model.Status == ChangeRequestStatus.Pending || Model.Status == ChangeRequestStatus.Approve;
+}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div><h5 class="fw-bold mb-0"><i class="bi bi-pencil-square me-2"></i>@Model.RequestNo
+            <span class="badge @StBadge(Model.Status) ms-1">@StName(Model.Status)</span></h5>
+        <small class="text-muted">@(Model.RequestType == ChangeRequestType.ChangeInfo ? "Đổi thông tin" : "Huỷ hội viên") · tạo @Model.CreatedAt.ToString("dd/MM/yyyy HH:mm")</small></div>
+    <a asp-action="Index" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left me-1"></i>Danh sách</a>
+</div>
+
+<div class="row g-3">
+    <div class="col-lg-7">
+        <div class="card mb-3"><div class="card-header bg-white fw-semibold"><i class="bi bi-list-check me-1"></i>Chi tiết đề nghị thay đổi</div>
+        <div class="table-responsive"><table class="table table-hover align-middle mb-0">
+            <thead><tr><th>Cột</th><th>Giá trị mới</th><th>Trạng thái dòng</th></tr></thead>
+            <tbody>
+                @if (Model.Details.Count == 0)
+                {
+                    <tr><td colspan="3" class="text-center text-muted small py-3">Không có dòng chi tiết.</td></tr>
+                }
+                @foreach (var d in Model.Details)
+                {
+                    <tr>
+                        <td class="small font-monospace">@d.ColumnCode</td>
+                        <td class="small">@d.ColumnValueNew</td>
+                        <td><span class="badge @StBadge(d.DtlStatus)">@StName(d.DtlStatus)</span></td>
+                    </tr>
+                }
+            </tbody>
+        </table></div></div>
+
+        <div class="card"><div class="card-body">
+            <h6 class="fw-bold mb-2"><i class="bi bi-info-circle me-1"></i>Thông tin xử lý</h6>
+            <div class="small text-muted">Hội viên: <b>@Model.Member?.Name</b> <span class="font-monospace">@Model.Member?.Code</span></div>
+            <div class="small text-muted">Đại lý gửi: <b>@(Model.DLCodeRequest ?? "—")</b></div>
+            <div class="small text-muted">Ghi chú đại lý: @(Model.Remark ?? "—")</div>
+            <div class="small text-muted">Ghi chú HTV: @(Model.RemarkHTV ?? "—")</div>
+            @if (Model.ApproveAt.HasValue) { <div class="small text-muted">Duyệt lúc @Model.ApproveAt.Value.ToString("dd/MM/yyyy HH:mm") bởi @Model.ApproveBy</div> }
+            @if (Model.FinishAt.HasValue) { <div class="small text-muted">Hoàn tất lúc @Model.FinishAt.Value.ToString("dd/MM/yyyy HH:mm") bởi @Model.FinishBy</div> }
+        </div></div>
+    </div>
+
+    <div class="col-lg-5">
+        <div class="card mb-3"><div class="card-body">
+            <h6 class="fw-bold mb-2"><i class="bi bi-check2-square me-1"></i>Duyệt / Hoàn tất</h6>
+            <div class="small text-muted mb-2">Luồng: PENDING → APPROVE (duyệt) → FINISH (áp thay đổi vào hội viên). Từ chối ở bước PENDING/APPROVE → CANCEL.</div>
+            <form asp-action="Approve" asp-route-id="@Model.Id" method="post" class="row g-2 mb-2">@Html.AntiForgeryToken()
+                <div class="col-12"><input name="remarkHtv" class="form-control form-control-sm" placeholder="Ghi chú HTV khi duyệt" /></div>
+                <div class="col-12"><button class="btn btn-info btn-sm w-100" @(canApprove ? "" : "disabled")><i class="bi bi-check2 me-1"></i>Duyệt (APPROVE)</button></div>
+            </form>
+            <form asp-action="Finish" asp-route-id="@Model.Id" method="post" class="row g-2 mb-2">@Html.AntiForgeryToken()
+                <div class="col-12"><input name="remarkHtv" class="form-control form-control-sm" placeholder="Ghi chú HTV khi hoàn tất" /></div>
+                <div class="col-12"><button class="btn btn-success btn-sm w-100" @(canFinish ? "" : "disabled")><i class="bi bi-flag me-1"></i>Hoàn tất (FINISH)</button></div>
+            </form>
+            <hr class="my-2" />
+            <form asp-action="Reject" asp-route-id="@Model.Id" method="post" class="row g-2">@Html.AntiForgeryToken()
+                <div class="col-12"><input name="remarkHtv" class="form-control form-control-sm" placeholder="Lý do từ chối" /></div>
+                <div class="col-12"><button class="btn btn-outline-danger btn-sm w-100" @(canReject ? "" : "disabled")><i class="bi bi-x-circle me-1"></i>Từ chối (CANCEL)</button></div>
+            </form>
+        </div></div>
+    </div>
+</div>
