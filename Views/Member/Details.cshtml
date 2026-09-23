@@ -93,6 +93,19 @@
         </div></div>
 
         <div class="card mb-3"><div class="card-body">
+            <h6 class="fw-bold mb-2"><i class="bi bi-car-front-fill me-1"></i>Tính điểm khuyến mại bán hàng Creta</h6>
+            <div class="small text-muted mb-2">Kiểm tra điều kiện tặng điểm khuyến mại bán hàng Creta (WA_Crd_MemberRegis_CalcPointBuyCreta): dòng xe + hạng thẻ sử dụng + ngày giao xe trong khoảng hiệu lực + CCCD/MST trùng + giao dịch chưa áp dụng.</div>
+            <form asp-action="CalcCreta" asp-route-id="@Model.Id" method="post" class="row g-2">@Html.AntiForgeryToken()
+                <div class="col-6"><input name="modelCode" class="form-control form-control-sm" placeholder="Dòng xe (vd SU2ID-CKD)" /></div>
+                <div class="col-6"><input name="cardTypeUse" class="form-control form-control-sm" placeholder="Hạng thẻ sử dụng (vd P)" /></div>
+                <div class="col-6"><input name="deliveryDate" type="date" class="form-control form-control-sm" placeholder="Ngày giao xe" /></div>
+                <div class="col-6"><input name="idCardNo" class="form-control form-control-sm" placeholder="CCCD/MST chủ thẻ" /></div>
+                <div class="col-12"><input name="dealNo" class="form-control form-control-sm" placeholder="Số giao dịch mua xe (DealNo)" /></div>
+                <div class="col-12"><button class="btn btn-outline-primary btn-sm w-100"><i class="bi bi-calculator me-1"></i>Kiểm tra điều kiện</button></div>
+            </form>
+        </div></div>
+
+        <div class="card mb-3"><div class="card-body">
             <h6 class="fw-bold mb-2"><i class="bi bi-credit-card-2-front me-1"></i>Tặng điểm mở thẻ mới</h6>
             <div class="small text-muted mb-2">Điểm tặng mở thẻ (PointOpenCard): <b>@Model.PointOpenCard.ToString("N0")</b> điểm — tặng khi hội viên hoàn tất đăng ký (đại lý HTV)</div>
             <form asp-action="OpenCard" asp-route-id="@Model.Id" method="post" class="row g-2">@Html.AntiForgeryToken()

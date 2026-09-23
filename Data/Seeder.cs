@@ -113,6 +113,10 @@ public static class Seeder
             var kmbh = M("Đặng Quốc Huy", "0910555555", 0, 0);
             kmbh.PointBuyCreta = 3000;
             db.Members.Add(kmbh);
+            // Hội viên mua xe Creta (DealNo) — minh hoạ tính điểm khuyến mại bán hàng Creta (WA_Crd_MemberRegis_CalcPointBuyCreta).
+            var creta = M("Võ Minh Creta", "0910888888", 0, 0);
+            creta.DealNo = "DEAL-CRETA-2025-001";
+            db.Members.Add(creta);
             // Hội viên mới có điểm tặng mở thẻ (Crd_Member.PointOpenCard) — minh hoạ nghiệp vụ tặng điểm mở thẻ (DealPointType=OPENCARD).
             var openCard = M("Nguyễn Thị Bích", "0910666666", 0, 0);
             openCard.PointOpenCard = 150000;
@@ -361,6 +365,17 @@ public static class Seeder
             pending.Specs.Add(new PrmCarNewSpec { Idx = 1, ModelCode = "VIOS", PointVal = 2000 });
             pending.Specs.Add(new PrmCarNewSpec { Idx = 2, ModelCode = "CRV", PointVal = 3000 });
             db.PrmCarNews.Add(pending);
+            await db.SaveChangesAsync();
+        }
+        if (!await db.CretaBuyCarPolicies.AnyAsync())
+        {
+            // Chính sách tặng điểm khuyến mại bán hàng Creta (WA_Crd_MemberRegis_CalcPointBuyCreta):
+            // dòng xe SU2ID-CKD (Creta) + hạng thẻ P + ngày giao xe trong khoảng hiệu lực → tặng 3.000.000 điểm.
+            db.CretaBuyCarPolicies.Add(new CretaBuyCarPolicy
+            {
+                PolicyCode = "CRETA", ModelCode = "SU2ID-CKD", CardTypeUse = "P", PointBuyCreta = 3_000_000,
+                EffDateStart = new DateTime(2025, 6, 3), EffDateEnd = new DateTime(2025, 6, 30), IsActive = true
+            });
             await db.SaveChangesAsync();
         }
     }

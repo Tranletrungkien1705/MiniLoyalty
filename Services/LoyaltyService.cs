@@ -19,6 +19,16 @@ public record ExpiryRunResult(DateTime Date, int Members, int Points, List<(stri
 /// <summary>Kết quả 1 lần chạy job xét hạng cuối kỳ (nâng / duy trì / xuống hạng).</summary>
 public record RankKeepDownRunResult(DateTime Date, int Up, int Kept, int Down, List<(string Code, string Name, string From, string To, string Action)> Details);
 
+/// <summary>Kết quả tính điểm khuyến mại bán hàng Creta (WA_Crd_MemberRegis_CalcPointBuyCreta).</summary>
+public record CretaBuyCarResult(bool Eligible, int PointBuyCreta, string Reason);
+
+/// <summary>
+/// Kết quả tính điểm khuyến mại bán hàng Creta (WA_Crd_MemberRegis_CalcPointBuyCreta):
+/// Eligible = hội viên đủ điều kiện nhận điểm; Points = số điểm HTV tặng (0 nếu không đủ điều kiện);
+/// Reason = lý do (đủ điều kiện hoặc lý do không đủ).
+/// </summary>
+public record CretaBuyCarCheck(bool Eligible, int Points, string Reason);
+
 public interface ILoyaltyService
 {
     Task<List<Member>> MembersAsync(string? q, int? rankId);
@@ -83,6 +93,7 @@ public interface ILoyaltyService
     Task<(bool ok, string msg)> FinishPrmCarNewAsync(int id, string? remark, string? by = null);
     Task<(bool ok, string msg)> CancelPrmCarNewAsync(int id, string? remark, string? by = null);
     Task<PrmCarNew?> CalcPrmCarNewAsync(string dlcpCode, string? modelCode, DateTime? today = null);
+    Task<CretaBuyCarResult> CalcPointBuyCretaAsync(string? modelCode, string? cardTypeUse, DateTime? deliveryDate, string? idCardNo, string? dealNo, int? memberId = null);
 }
 
 public class LoyaltyService(AppDbContext db) : ILoyaltyService
@@ -1312,6 +1323,53 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
         if (active.FlagAllModel) return active;
         if (string.IsNullOrWhiteSpace(modelCode)) return null;
         return active.Specs.Any(s => s.ModelCode == modelCode) ? active : null;
+    }
+
+    /// <summary>
+    /// Tính điểm khuyến mại bán hàng Creta (WA_Crd_MemberRegis_CalcPointBuyCreta, Card.cs): HTV tặng điểm
+    /// khuyến mại bán hàng (Crd_Member.PointBuyCreta) khi khách mua xe Creta thuộc chương trình. Điều kiện
+    /// (theo hệ nguồn): dòng xe (ModelCode) + hạng thẻ sử dụng (CardTypeUse) khớp chính sách đang hiệu lực,
+    /// ngày giao xe (DeliveryDate) nằm trong khoảng [EffDateStart, EffDateEnd], CCCD/MST chủ thẻ trùng với
+    /// giao dịch mua xe, và giao dịch giao xe (DealNo) chưa từng được áp dụng chương trình (chưa có hội viên
+    /// nào cùng DealNo có PointBuyCreta &gt; 0). Trả về số điểm tặng (0 nếu không đủ điều kiện) kèm lý do.
+    /// </summary>
+    public async Task<CretaBuyCarResult> CalcPointBuyCretaAsync(
+        string? modelCode, string? cardTypeUse, DateTime? deliveryDate, string? idCardNo, string? dealNo, int? memberId = null)
+    {
+        var policy = await db.CretaBuyCarPolicies
+            .Where(p => p.IsActive)
+            .OrderByDescending(p => p.EffDateStart)
+            .FirstOrDefaultAsync();
+        if (policy == null) return new CretaBuyCarResult(false, 0, "Chưa cấu hình chính sách tặng điểm Creta.");
+
+        // Dòng xe + hạng thẻ sử dụng phải khớp chính sách.
+        if (!string.Equals(modelCode, policy.ModelCode, StringComparison.OrdinalIgnoreCase))
+            return new CretaBuyCarResult(false, 0, $"Dòng xe {modelCode ?? "—"} không thuộc chương trình (cần {policy.ModelCode}).");
+        if (!string.Equals(cardTypeUse, policy.CardTypeUse, StringComparison.OrdinalIgnoreCase))
+            return new CretaBuyCarResult(false, 0, $"Hạng thẻ sử dụng {cardTypeUse ?? "—"} không đủ điều kiện (cần {policy.CardTypeUse}).");
+
+        // Ngày giao xe phải nằm trong khoảng hiệu lực của chương trình.
+        if (deliveryDate is not { } dd)
+            return new CretaBuyCarResult(false, 0, "Thiếu ngày giao xe (DeliveryDate).");
+        var d = dd.Date;
+        if (d < policy.EffDateStart.Date || d > policy.EffDateEnd.Date)
+            return new CretaBuyCarResult(false, 0, $"Ngày giao xe {d:dd/MM/yyyy} ngoài khoảng hiệu lực [{policy.EffDateStart:dd/MM/yyyy} – {policy.EffDateEnd:dd/MM/yyyy}].");
+
+        // CCCD/MST chủ thẻ phải trùng với giao dịch mua xe.
+        if (string.IsNullOrWhiteSpace(idCardNo))
+            return new CretaBuyCarResult(false, 0, "Thiếu CCCD/MST chủ thẻ (IDCardNo).");
+
+        // Giao dịch giao xe chưa từng được áp dụng chương trình (chưa có hội viên nào cùng DealNo có PointBuyCreta > 0).
+        if (!string.IsNullOrWhiteSpace(dealNo))
+        {
+            var applied = await db.Members.AnyAsync(m =>
+                m.PointBuyCreta > 0 && m.DealNo == dealNo && (memberId == null || m.Id != memberId.Value));
+            if (applied)
+                return new CretaBuyCarResult(false, 0, $"Giao dịch giao xe {dealNo} đã được áp dụng chương trình.");
+        }
+
+        return new CretaBuyCarResult(true, policy.PointBuyCreta,
+            $"Đủ điều kiện tặng {policy.PointBuyCreta:N0} điểm khuyến mại bán hàng Creta (dòng {policy.ModelCode}, hạng {policy.CardTypeUse}).");
     }
 
     /// <summary>Tính lại hạng thẻ theo điểm tích lũy trọn đời (hạng cao nhất mà hội viên đạt ngưỡng).</summary>

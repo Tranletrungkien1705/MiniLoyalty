@@ -197,4 +197,13 @@ public class MemberController(ILoyaltyService svc) : Controller
         catch (Exception ex) { TempData["Error"] = ex.Message; }
         return RedirectToAction(nameof(Details), new { id });
     }
+
+    // Tính điểm khuyến mại bán hàng Creta (WA_Crd_MemberRegis_CalcPointBuyCreta): kiểm tra điều kiện và báo kết quả.
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> CalcCreta(int id, string? modelCode, string? cardTypeUse, DateTime? deliveryDate, string? idCardNo, string? dealNo)
+    {
+        var r = await svc.CalcPointBuyCretaAsync(modelCode, cardTypeUse, deliveryDate, idCardNo, dealNo, id);
+        TempData[r.Eligible ? "Success" : "Error"] = r.Reason;
+        return RedirectToAction(nameof(Details), new { id });
+    }
 }

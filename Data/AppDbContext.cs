@@ -31,6 +31,7 @@ public class AppDbContext : DbContext
     public DbSet<DealerMemberLink> DealerMemberLinks => Set<DealerMemberLink>();
     public DbSet<PrmCarNew> PrmCarNews => Set<PrmCarNew>();
     public DbSet<PrmCarNewSpec> PrmCarNewSpecs => Set<PrmCarNewSpec>();
+    public DbSet<CretaBuyCarPolicy> CretaBuyCarPolicies => Set<CretaBuyCarPolicy>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -137,6 +138,11 @@ public class AppDbContext : DbContext
         b.Entity<PrmCarNewSpec>(e =>
         {
             e.HasOne(x => x.PrmCarNew).WithMany(x => x.Specs).HasForeignKey(x => x.PrmCarNewId);
+            e.HasQueryFilter(x => x.OrgId == _orgId);
+        });
+        b.Entity<CretaBuyCarPolicy>(e =>
+        {
+            e.HasIndex(x => x.PolicyCode).IsUnique();
             e.HasQueryFilter(x => x.OrgId == _orgId);
         });
     }

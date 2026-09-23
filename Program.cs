@@ -440,6 +440,14 @@ app.MapGet("/api/prmcarnew/calc", async (string dlcpCode, string? modelCode, ILo
     return Results.Ok(new { p.PRMCNCodeSys, p.PRMCNName, p.DLCPCode, p.FlagAllModel, p.PointValAllModel, p.EffDateStart, p.EffDateEnd });
 });
 
+// API tính điểm khuyến mại bán hàng Creta (WA_Crd_MemberRegis_CalcPointBuyCreta): kiểm tra điều kiện
+// (dòng xe + hạng thẻ + ngày giao xe + CCCD + chưa áp dụng) và trả về số điểm HTV tặng (0 nếu không đủ).
+app.MapPost("/api/creta/calc", async (CretaCalcDto dto, ILoyaltyService svc) =>
+{
+    var r = await svc.CalcPointBuyCretaAsync(dto.ModelCode, dto.CardTypeUse, dto.DeliveryDate, dto.IdCardNo, dto.DealNo, dto.MemberId);
+    return Results.Ok(new { eligible = r.Eligible, pointBuyCreta = r.PointBuyCreta, reason = r.Reason });
+});
+
 app.MapControllerRoute(name: "default", pattern: "{controller=Home}/{action=Index}/{id?}");
 app.Run();
 
@@ -470,3 +478,4 @@ record DealerLinkDto(string? DlcpCode, string? Phone, int? MemberId, int Network
 record PrmCarNewSpecDto(string ModelCode, int PointVal);
 record PrmCarNewCreateDto(string? Name, string? DlcpCode, DateTime? EffDateStart, DateTime? EffDateEnd, bool FlagAllModel, int PointValAllModel, string? Remark, List<PrmCarNewSpecDto>? Specs);
 record PrmCarNewActionDto(int Id, string? Remark, string? By);
+record CretaCalcDto(string? ModelCode, string? CardTypeUse, DateTime? DeliveryDate, string? IdCardNo, string? DealNo, int? MemberId);

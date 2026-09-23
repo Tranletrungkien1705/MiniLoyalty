@@ -93,6 +93,9 @@ public class Member : IOrgOwned
     // hội viên mua xe thuộc chương trình khuyến mại. Khi đủ điều kiện, hệ thống cộng PointBuyCreta
     // điểm (DealPointType=KMBH) — khác với SALES (điểm thưởng của đại lý).
     public int PointBuyCreta { get; set; }       // Crd_Member.PointBuyCreta — điểm khuyến mại bán hàng (HTV)
+    // Số giao dịch mua xe (Crd_Member.DealNo): dùng để chặn áp dụng trùng chương trình tặng điểm
+    // khuyến mại bán hàng Creta cho cùng một giao dịch giao xe.
+    public string? DealNo { get; set; }          // Crd_Member.DealNo — số giao dịch mua xe
     // Điểm tặng mở thẻ mới (Crd_Member.PointOpenCard): khi hội viên hoàn tất đăng ký (Finish),
     // hệ thống tặng PointOpenCard điểm chào mừng (DealPointType=OPENCARD, DLCode=HTV).
     public int PointOpenCard { get; set; }       // Crd_Member.PointOpenCard — điểm tặng mở thẻ mới
@@ -505,4 +508,24 @@ public class PrmCarNewSpec : IOrgOwned
     public string ModelCode { get; set; } = "";            // Prm_CarNewSpec.ModelCode — mã dòng xe
     public int PointVal { get; set; }                      // Prm_CarNewSpec.PointVal — điểm tặng cho dòng xe này
     public PrmCarNew PrmCarNew { get; set; } = null!;
+}
+
+/// <summary>
+/// Chính sách tặng điểm khuyến mại bán hàng Creta (WA_Crd_MemberRegis_CalcPointBuyCreta, Card.cs):
+/// HTV tặng điểm khuyến mại bán hàng (Crd_Member.PointBuyCreta) khi khách mua xe Creta thuộc chương trình.
+/// Điều kiện (theo hệ nguồn): dòng xe (ModelCode) + hạng thẻ sử dụng (CardTypeUse) khớp, ngày giao xe
+/// (DeliveryDate) nằm trong khoảng [EffDateStart, EffDateEnd], CCCD/MST chủ thẻ trùng với giao dịch mua xe,
+/// và giao dịch giao xe chưa từng được áp dụng chương trình (chưa có hội viên nào cùng DealNo có PointBuyCreta &gt; 0).
+/// </summary>
+public class CretaBuyCarPolicy : IOrgOwned
+{
+    public int Id { get; set; }
+    public Guid OrgId { get; set; }
+    public string PolicyCode { get; set; } = "CRETA";      // mã chính sách
+    public string ModelCode { get; set; } = "SU2ID-CKD";   // dòng xe áp dụng (Creta)
+    public string CardTypeUse { get; set; } = "P";        // hạng thẻ sử dụng phải khớp
+    public int PointBuyCreta { get; set; } = 3_000_000;    // điểm khuyến mại tặng khi đủ điều kiện
+    public DateTime EffDateStart { get; set; }             // ngày giao xe sớm nhất được áp dụng
+    public DateTime EffDateEnd { get; set; }               // ngày giao xe muộn nhất được áp dụng
+    public bool IsActive { get; set; } = true;             // FlagActive
 }
