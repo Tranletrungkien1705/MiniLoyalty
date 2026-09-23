@@ -43,6 +43,15 @@ public class MemberController(ILoyaltyService svc) : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> ServiceTurn(int id, int qty, string? note)
+    {
+        if (qty <= 0) { TempData["Error"] = "Số lượt phải > 0."; return RedirectToAction(nameof(Details), new { id }); }
+        var tx = await svc.RecordServiceTurnAsync(id, qty, note);
+        TempData["Success"] = $"Đã ghi nhận {tx.QtyVisit} lượt dịch vụ.";
+        return RedirectToAction(nameof(Details), new { id });
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
     public async Task<IActionResult> Earn(int id, decimal amount, string? note)
     {
         if (amount <= 0) { TempData["Error"] = "Số tiền phải > 0."; return RedirectToAction(nameof(Details), new { id }); }

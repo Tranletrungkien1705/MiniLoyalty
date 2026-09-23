@@ -79,6 +79,11 @@ public static class Seeder
             intro.MemberNoIntro = db.Members.Local.First().Code;   // người giới thiệu = hội viên đầu tiên
             intro.PointIntro = 200;
             db.Members.Add(intro);
+            // Ghi nhận lượt dịch vụ (DealPointType=SERVICETURN) — minh hoạ nghiệp vụ cộng lượt vào QtyVisitAvail.
+            var svcTurn = M("Bùi Thanh Tùng", "0908888888", 300, 300);
+            svcTurn.QtyVisitAvail = 2;
+            svcTurn.Transactions.Add(new PointTransaction { Type = PointTxType.ServiceTurn, Points = 0, QtyVisit = 2, BalanceAfter = 300, Note = "Ghi nhận 2 lượt dịch vụ", RefNo = "RO-DEMO-001" });
+            db.Members.Add(svcTurn);
             await db.SaveChangesAsync();
         }
     }

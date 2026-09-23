@@ -2,7 +2,7 @@
 @{
     ViewData["Title"] = $"Hội viên {Model.Code}";
     var rewards = (List<Reward>)ViewBag.Rewards;
-    string TxName(PointTxType t) => t switch { PointTxType.Earn=>"Tích điểm", PointTxType.Redeem=>"Đổi quà", PointTxType.Birthday=>"Sinh nhật", PointTxType.Adjust=>"Điều chỉnh", PointTxType.Expiry=>"Hết hạn", PointTxType.Introduction=>"Giới thiệu", _=>t.ToString() };
+    string TxName(PointTxType t) => t switch { PointTxType.Earn=>"Tích điểm", PointTxType.Redeem=>"Đổi quà", PointTxType.Birthday=>"Sinh nhật", PointTxType.Adjust=>"Điều chỉnh", PointTxType.Expiry=>"Hết hạn", PointTxType.Introduction=>"Giới thiệu", PointTxType.ServiceTurn=>"Lượt dịch vụ", _=>t.ToString() };
 }
 <div class="d-flex justify-content-between align-items-center mb-3">
     <div><h5 class="fw-bold mb-0"><i class="bi bi-person-badge me-2"></i>@Model.Name</h5>
@@ -19,6 +19,7 @@
             <div style="font-size:34px;font-weight:800;line-height:1.1">@Model.Points.ToString("N0")</div>
             <div class="mt-2" style="font-size:13px;opacity:.9">Tích lũy trọn đời: <b>@Model.LifetimePoints.ToString("N0")</b></div>
             <div style="font-size:13px;opacity:.9">Chiết khấu hạng: <b>@Model.RankTier?.DiscountPercent%</b></div>
+            <div style="font-size:13px;opacity:.9">Lượt dịch vụ trong kỳ: <b>@Model.QtyVisitAvail</b></div>
             <div class="mt-2" style="font-size:12px;opacity:.75">Tham gia @Model.JoinedAt.ToString("dd/MM/yyyy")@if(Model.Dob.HasValue){<span> · Sinh nhật @Model.Dob.Value.ToString("dd/MM")</span>}</div>
         </div></div>
 
@@ -33,6 +34,12 @@
             <form asp-action="Adjust" asp-route-id="@Model.Id" method="post" class="row g-2">@Html.AntiForgeryToken()
                 <div class="col-7"><input name="points" type="number" class="form-control form-control-sm" placeholder="+/- điểm điều chỉnh" required /></div>
                 <div class="col-5"><button class="btn btn-outline-primary btn-sm w-100">Điều chỉnh</button></div>
+            </form>
+            <hr class="my-2" />
+            <form asp-action="ServiceTurn" asp-route-id="@Model.Id" method="post" class="row g-2">@Html.AntiForgeryToken()
+                <div class="col-7"><input name="qty" type="number" value="1" min="1" class="form-control form-control-sm" placeholder="Số lượt dịch vụ" required /></div>
+                <div class="col-5"><button class="btn btn-outline-primary btn-sm w-100"><i class="bi bi-tools me-1"></i>Ghi lượt DV</button></div>
+                <div class="col-12"><input name="note" class="form-control form-control-sm" placeholder="Ghi chú / số RO" /></div>
             </form>
         </div></div>
 

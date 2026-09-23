@@ -88,9 +88,21 @@ app.MapPost("/api/introduction/award", async (IntroDto dto, ILoyaltyService svc)
     return ok ? Results.Ok(new { ok, msg }) : Results.BadRequest(new { ok, error = msg });
 });
 
+// API ghi nhận lượt dịch vụ (DealPointType=SERVICETURN): cộng lượt vào QtyVisitAvail, không đổi điểm.
+app.MapPost("/api/serviceturn", async (ServiceTurnDto dto, ILoyaltyService svc) =>
+{
+    var m = dto.Phone is { Length: > 0 } p ? await svc.GetByPhoneAsync(p) : null;
+    if (m == null && dto.MemberId is { } mid) m = await svc.GetAsync(mid);
+    if (m == null) return Results.NotFound(new { error = "Không tìm thấy hội viên" });
+    var tx = await svc.RecordServiceTurnAsync(m.Id, dto.Qty, dto.RefNo);
+    var member = await svc.GetAsync(m.Id);
+    return Results.Ok(new { memberCode = member!.Code, qtyVisit = tx.QtyVisit, qtyVisitAvail = member.QtyVisitAvail, points = member.Points });
+});
+
 app.MapControllerRoute(name: "default", pattern: "{controller=Home}/{action=Index}/{id?}");
 app.Run();
 
 record EarnDto(string? Phone, int? MemberId, decimal Amount, string? RefNo);
 record RegisterOrgDto(string Name);
 record IntroDto(string? Phone, int? MemberId);
+record ServiceTurnDto(string? Phone, int? MemberId, int Qty, string? RefNo);

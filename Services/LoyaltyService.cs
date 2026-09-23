@@ -32,6 +32,7 @@ public interface ILoyaltyService
     Task<ExpiryRunResult> RunExpiryJobAsync(DateTime? today = null);
     Task<RankKeepDownRunResult> RunRankKeepDownJobAsync(DateTime? today = null);
     Task<(bool ok, string msg)> AwardIntroductionAsync(int newMemberId);
+    Task<PointTransaction> RecordServiceTurnAsync(int memberId, int qty, string? refNo);
 }
 
 public class LoyaltyService(AppDbContext db) : ILoyaltyService
@@ -257,6 +258,26 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
         await EarnAsync(referrer.Id, m.PointIntro, PointTxType.Introduction,
             $"Thưởng điểm giới thiệu hội viên {m.Code} ({m.Name})", refNo);
         return (true, $"Đã thưởng {m.PointIntro:N0} điểm cho người giới thiệu {referrer.Code} ({referrer.Name}).");
+    }
+
+    /// <summary>
+    /// Ghi nhận lượt dịch vụ (DealPointType = SERVICETURN, Crd_DealSerRO_Add): hội viên đưa xe vào
+    /// đại lý làm dịch vụ → cộng số lượt vào QtyVisitAvail (Crd_Card.QtyVisitAvail) để phục vụ xét hạng
+    /// theo lượt. KHÔNG cộng điểm (PointChTotal = 0). Mỗi lượt ghi 1 giao dịch SERVICETURN.
+    /// </summary>
+    public async Task<PointTransaction> RecordServiceTurnAsync(int memberId, int qty, string? refNo)
+    {
+        if (qty <= 0) qty = 1;
+        var m = await db.Members.FirstOrDefaultAsync(x => x.Id == memberId) ?? throw new KeyNotFoundException();
+        m.QtyVisitAvail += qty;   // cộng lượt dịch vụ trong kỳ (không đổi điểm)
+        var tx = new PointTransaction
+        {
+            MemberId = memberId, Type = PointTxType.ServiceTurn, Points = 0, QtyVisit = qty,
+            BalanceAfter = m.Points, Note = $"Ghi nhận {qty} lượt dịch vụ", RefNo = refNo
+        };
+        db.PointTransactions.Add(tx);
+        await db.SaveChangesAsync();
+        return tx;
     }
 
     public async Task<LoyaltyDash> DashboardAsync()
