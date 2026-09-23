@@ -334,6 +334,35 @@ public static class Seeder
                 await db.SaveChangesAsync();
             }
         }
+        if (!await db.PrmCarNews.AnyAsync())
+        {
+            // Chương trình tặng điểm xe mới mẫu (Prm_CarNew) — minh hoạ luồng duyệt PENDING → APPROVE → FINISH.
+            // 1 chương trình đang hiệu lực (FINISH, tất cả dòng xe) + 1 chương trình theo dòng xe (PENDING).
+            var active = new PrmCarNew
+            {
+                PRMCNCodeSys = $"PRMCN.{DateTime.Now:yyyy}.0001", PRMCNCode = $"PRMCN.{DateTime.Now:yyyy}.0001",
+                PRMCNName = "Tặng điểm xe mới Q3", DLCPCode = "DL-DEMO-001",
+                EffDateStart = DateTime.Today.AddMonths(-1), EffDateEnd = new DateTime(9999, 12, 31),
+                FlagAllModel = true, PointValAllModel = 2000, Status = PrmCarNewStatus.Finish,
+                Remark = "Chương trình đang hiệu lực — tất cả dòng xe",
+                CreatedAt = DateTime.Now.AddMonths(-1), CreatedBy = "HTV",
+                ApproveAt = DateTime.Now.AddMonths(-1), ApproveBy = "HTV",
+                FinishAt = DateTime.Now.AddMonths(-1), FinishBy = "HTV"
+            };
+            db.PrmCarNews.Add(active);
+            var pending = new PrmCarNew
+            {
+                PRMCNCodeSys = $"PRMCN.{DateTime.Now:yyyy}.0002", PRMCNCode = $"PRMCN.{DateTime.Now:yyyy}.0002",
+                PRMCNName = "Tặng điểm xe mới theo dòng xe", DLCPCode = "DL-DEMO-002",
+                EffDateStart = DateTime.Today.AddDays(7), EffDateEnd = new DateTime(9999, 12, 31),
+                FlagAllModel = false, PointValAllModel = 0, Status = PrmCarNewStatus.Pending,
+                Remark = "Chờ duyệt — áp dụng cho một số dòng xe", CreatedAt = DateTime.Now.AddDays(-1), CreatedBy = "DL-DEMO-002"
+            };
+            pending.Specs.Add(new PrmCarNewSpec { Idx = 1, ModelCode = "VIOS", PointVal = 2000 });
+            pending.Specs.Add(new PrmCarNewSpec { Idx = 2, ModelCode = "CRV", PointVal = 3000 });
+            db.PrmCarNews.Add(pending);
+            await db.SaveChangesAsync();
+        }
     }
 
     /// <summary>

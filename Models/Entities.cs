@@ -34,6 +34,12 @@ public enum MemberRegisterStatus { Pending = 0, Approve = 1, Finish = 2, Cancel 
 /// </summary>
 public enum RankActionType { Up = 0, Keep = 1, Down = 2 }   // TConst.RankActionType.Up/Keep/Down
 
+/// <summary>
+/// Trạng thái chương trình tặng điểm xe mới (Prm_CarNew.PRMCNStatus / TConst.PRMCNStatus):
+/// PENDING (đại lý tạo) → APPROVE (HTV duyệt) → FINISH (hoàn tất, chương trình có hiệu lực), hoặc CANCEL khi huỷ.
+/// </summary>
+public enum PrmCarNewStatus { Pending = 0, Approve = 1, Finish = 2, Cancel = 3 }   // TConst.PRMCNStatus
+
 /// <summary>Hạng thẻ — xếp theo điểm tích lũy trọn đời (lifetime), kèm % chiết khấu.</summary>
 public class RankTier
 {
@@ -451,4 +457,52 @@ public class RankHistory : IOrgOwned
     public Member Member { get; set; } = null!;
     public RankTier? RankTierBefore { get; set; }
     public RankTier? RankTierAfter { get; set; }
+}
+
+/// <summary>
+/// Chương trình tặng điểm xe mới (Prm_CarNew): HTV/đại lý cấu hình chương trình tặng điểm cho hội viên
+/// mua xe mới theo từng đại lý (DLCPCode) và dòng xe (ModelCode). Đi qua luồng duyệt
+/// PENDING (tạo) → APPROVE (duyệt) → FINISH (hoàn tất, chương trình có hiệu lực), hoặc CANCEL khi huỷ.
+/// Khi hoàn tất, chương trình áp dụng cho khoảng thời gian [EffDateStart, EffDateEnd]; nếu có chương trình
+/// trước đó đang hiệu lực cùng đại lý thì bị cắt hiệu lực (EffDateEnd = ngày trước ngày bắt đầu chương trình mới).
+/// </summary>
+public class PrmCarNew : IOrgOwned
+{
+    public int Id { get; set; }
+    public Guid OrgId { get; set; }
+    public string PRMCNCodeSys { get; set; } = "";        // Prm_CarNew.PRMCNCodeSys — mã hệ thống chương trình
+    public string PRMCNCode { get; set; } = "";           // Prm_CarNew.PRMCNCode — mã chương trình
+    public string PRMCNName { get; set; } = "";           // Prm_CarNew.PRMCNName — tên chương trình
+    public string DLCPCode { get; set; } = "";            // Prm_CarNew.DLCPCode — đại lý áp dụng
+    public DateTime EffDateStart { get; set; }             // Prm_CarNew.EffDateStart — ngày bắt đầu hiệu lực
+    public DateTime EffDateEnd { get; set; }               // Prm_CarNew.EffDateEnd — ngày kết thúc hiệu lực
+    public bool FlagAllModel { get; set; } = true;         // Prm_CarNew.FlagAllModel — áp dụng cho tất cả dòng xe
+    public int PointValAllModel { get; set; }              // Prm_CarNew.PointValAllModel — điểm tặng khi áp dụng tất cả dòng xe
+    public PrmCarNewStatus Status { get; set; } = PrmCarNewStatus.Pending;   // Prm_CarNew.PRMCNStatus
+    public string? Remark { get; set; }                    // Prm_CarNew.Remark — ghi chú
+    public DateTime CreatedAt { get; set; } = DateTime.Now;   // Prm_CarNew.CreateDTimeUTC
+    public string? CreatedBy { get; set; }                 // Prm_CarNew.CreateBy
+    public DateTime? ApproveAt { get; set; }               // Prm_CarNew.ApprDTimeUTC
+    public string? ApproveBy { get; set; }                 // Prm_CarNew.ApprBy
+    public DateTime? FinishAt { get; set; }                // Prm_CarNew.FinishDTimeUTC
+    public string? FinishBy { get; set; }                  // Prm_CarNew.FinishBy
+    public DateTime? CancelAt { get; set; }                // Prm_CarNew.CancelDTimeUTC
+    public string? CancelBy { get; set; }                  // Prm_CarNew.CancelBy
+
+    public List<PrmCarNewSpec> Specs { get; set; } = [];   // Prm_CarNewSpec — danh sách dòng xe + điểm (khi FlagAllModel = false)
+}
+
+/// <summary>
+/// Dòng xe áp dụng chương trình tặng điểm xe mới (Prm_CarNewSpec): khi chương trình KHÔNG áp dụng cho tất cả
+/// dòng xe (FlagAllModel = false), mỗi dòng là 1 dòng xe (ModelCode) kèm số điểm tặng (PointVal).
+/// </summary>
+public class PrmCarNewSpec : IOrgOwned
+{
+    public int Id { get; set; }
+    public Guid OrgId { get; set; }
+    public int PrmCarNewId { get; set; }                   // Prm_CarNewSpec.PRMCNCodeSys (FK tới chương trình)
+    public int Idx { get; set; }                           // Prm_CarNewSpec.Idx — thứ tự dòng
+    public string ModelCode { get; set; } = "";            // Prm_CarNewSpec.ModelCode — mã dòng xe
+    public int PointVal { get; set; }                      // Prm_CarNewSpec.PointVal — điểm tặng cho dòng xe này
+    public PrmCarNew PrmCarNew { get; set; } = null!;
 }

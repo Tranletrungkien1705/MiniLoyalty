@@ -397,6 +397,49 @@ app.MapGet("/api/dealerlink", async (string? dlcpCode, int? memberId, ILoyaltySe
     }));
 });
 
+// API tạo chương trình tặng điểm xe mới (Prm_CarNew_SaveX): đại lý/HTV cấu hình chương trình, PENDING.
+app.MapPost("/api/prmcarnew/create", async (PrmCarNewCreateDto dto, ILoyaltyService svc) =>
+{
+    var prm = new PrmCarNew
+    {
+        PRMCNName = dto.Name ?? "", DLCPCode = dto.DlcpCode ?? "",
+        EffDateStart = dto.EffDateStart ?? DateTime.Today, EffDateEnd = dto.EffDateEnd ?? new DateTime(9999, 12, 31),
+        FlagAllModel = dto.FlagAllModel, PointValAllModel = dto.PointValAllModel, Remark = dto.Remark,
+        Specs = (dto.Specs ?? []).Select((s, i) => new PrmCarNewSpec { Idx = i + 1, ModelCode = s.ModelCode, PointVal = s.PointVal }).ToList()
+    };
+    var (ok, msg, id) = await svc.CreatePrmCarNewAsync(prm);
+    return ok ? Results.Ok(new { ok, msg, id }) : Results.BadRequest(new { ok, error = msg });
+});
+
+// API duyệt chương trình tặng điểm xe mới (Prm_CarNew_ApprX): PENDING → APPROVE.
+app.MapPost("/api/prmcarnew/approve", async (PrmCarNewActionDto dto, ILoyaltyService svc) =>
+{
+    var (ok, msg) = await svc.ApprovePrmCarNewAsync(dto.Id, dto.Remark, dto.By);
+    return ok ? Results.Ok(new { ok, msg }) : Results.BadRequest(new { ok, error = msg });
+});
+
+// API hoàn tất chương trình tặng điểm xe mới (Prm_CarNew_FinishX): APPROVE → FINISH, chương trình có hiệu lực.
+app.MapPost("/api/prmcarnew/finish", async (PrmCarNewActionDto dto, ILoyaltyService svc) =>
+{
+    var (ok, msg) = await svc.FinishPrmCarNewAsync(dto.Id, dto.Remark, dto.By);
+    return ok ? Results.Ok(new { ok, msg }) : Results.BadRequest(new { ok, error = msg });
+});
+
+// API huỷ chương trình tặng điểm xe mới (Prm_CarNew_CancelX): PENDING/APPROVE → CANCEL.
+app.MapPost("/api/prmcarnew/cancel", async (PrmCarNewActionDto dto, ILoyaltyService svc) =>
+{
+    var (ok, msg) = await svc.CancelPrmCarNewAsync(dto.Id, dto.Remark, dto.By);
+    return ok ? Results.Ok(new { ok, msg }) : Results.BadRequest(new { ok, error = msg });
+});
+
+// API tra chương trình tặng điểm xe mới đang hiệu lực (Prm_CarNew_CalcPrmX) theo đại lý + dòng xe.
+app.MapGet("/api/prmcarnew/calc", async (string dlcpCode, string? modelCode, ILoyaltyService svc) =>
+{
+    var p = await svc.CalcPrmCarNewAsync(dlcpCode, modelCode);
+    if (p == null) return Results.NotFound(new { error = "Không có chương trình tặng điểm xe mới đang hiệu lực." });
+    return Results.Ok(new { p.PRMCNCodeSys, p.PRMCNName, p.DLCPCode, p.FlagAllModel, p.PointValAllModel, p.EffDateStart, p.EffDateEnd });
+});
+
 app.MapControllerRoute(name: "default", pattern: "{controller=Home}/{action=Index}/{id?}");
 app.Run();
 
@@ -424,3 +467,6 @@ record CardExceptionActionDto(int Id, string? RemarkHtv, string? By);
 record MemberRegisterCreateDto(string? DlCodeRegis, DateTime? RegisterDate, string? VIN, string? CarNo, string? TradeMarkName, string? ModelName, string? CustomerName, string? CustomerPhoneNo, DateTime? CustomerDateOfBirth, string? CustomerIDNo, string? CustomerEmail, string? CustomerAddress, string? GenderCode, string? ProvinceName, string? DistrictName, string? MemberNoIntro, string? Remark);
 record MemberRegisterActionDto(int Id, string? Remark, string? By);
 record DealerLinkDto(string? DlcpCode, string? Phone, int? MemberId, int NetworkId, string? Remark, string? By);
+record PrmCarNewSpecDto(string ModelCode, int PointVal);
+record PrmCarNewCreateDto(string? Name, string? DlcpCode, DateTime? EffDateStart, DateTime? EffDateEnd, bool FlagAllModel, int PointValAllModel, string? Remark, List<PrmCarNewSpecDto>? Specs);
+record PrmCarNewActionDto(int Id, string? Remark, string? By);

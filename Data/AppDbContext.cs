@@ -29,6 +29,8 @@ public class AppDbContext : DbContext
     public DbSet<RankHistory> RankHistories => Set<RankHistory>();
     public DbSet<MemberRegister> MemberRegisters => Set<MemberRegister>();
     public DbSet<DealerMemberLink> DealerMemberLinks => Set<DealerMemberLink>();
+    public DbSet<PrmCarNew> PrmCarNews => Set<PrmCarNew>();
+    public DbSet<PrmCarNewSpec> PrmCarNewSpecs => Set<PrmCarNewSpec>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -125,6 +127,16 @@ public class AppDbContext : DbContext
         {
             e.HasIndex(x => new { x.DLCPCode, x.MemberId }).IsUnique();   // 1 liên kết/đại lý-hội viên
             e.HasOne(x => x.Member).WithMany().HasForeignKey(x => x.MemberId);
+            e.HasQueryFilter(x => x.OrgId == _orgId);
+        });
+        b.Entity<PrmCarNew>(e =>
+        {
+            e.HasIndex(x => x.PRMCNCodeSys).IsUnique();
+            e.HasQueryFilter(x => x.OrgId == _orgId);
+        });
+        b.Entity<PrmCarNewSpec>(e =>
+        {
+            e.HasOne(x => x.PrmCarNew).WithMany(x => x.Specs).HasForeignKey(x => x.PrmCarNewId);
             e.HasQueryFilter(x => x.OrgId == _orgId);
         });
     }
