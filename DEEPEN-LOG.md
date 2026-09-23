@@ -1,0 +1,1 @@
+- 2026: Port job tang diem sinh nhat (DealPointType=BIRTHDAY) tu 2022.7.Loyalty. Them RankTier.BirthdayPoints (Mst_BirthPolicyDtl.Point theo hang), ILoyaltyService.RunBirthdayJobAsync (khop MM-dd, chong trung 1 lan/nam), JobController + Views/Job/Index + nav. Build 0 error, commit 0dedbe4.
