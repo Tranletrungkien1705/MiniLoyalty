@@ -73,6 +73,12 @@ public static class Seeder
             // Hội viên có sinh nhật đúng hôm nay — để minh hoạ job tặng điểm sinh nhật.
             var bd = db.Members.Local.First();
             bd.Dob = new DateTime(1992, DateTime.Today.Month, DateTime.Today.Day);
+            // Hội viên mới có khai báo người giới thiệu (MemberNoIntro) + điểm thưởng (PointIntro)
+            // — để minh hoạ nghiệp vụ thưởng điểm giới thiệu (DealPointType=INTRODUCTION).
+            var intro = M("Hoàng Văn Khoa", "0907777777", 0, 0);
+            intro.MemberNoIntro = db.Members.Local.First().Code;   // người giới thiệu = hội viên đầu tiên
+            intro.PointIntro = 200;
+            db.Members.Add(intro);
             await db.SaveChangesAsync();
         }
     }

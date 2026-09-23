@@ -1,6 +1,6 @@
 namespace MiniLoyalty.Models;
 
-public enum PointTxType { Earn = 0, Redeem = 1, Birthday = 2, Adjust = 3, Expiry = 4 }
+public enum PointTxType { Earn = 0, Redeem = 1, Birthday = 2, Adjust = 3, Expiry = 4, Introduction = 5 }
 
 /// <summary>Hạng thẻ — xếp theo điểm tích lũy trọn đời (lifetime), kèm % chiết khấu.</summary>
 public class RankTier
@@ -38,6 +38,11 @@ public class Member : IOrgOwned
     public int LifetimePoints { get; set; }    // điểm tích lũy trọn đời (xếp hạng)
     public int RankTierId { get; set; }
     public DateTime JoinedAt { get; set; } = DateTime.Now;
+
+    // Giới thiệu mua xe (Crd_Member.MemberNoIntro/PointIntro): hội viên này do ai giới thiệu,
+    // và số điểm thưởng cho người giới thiệu khi hội viên này hoàn tất đăng ký.
+    public string? MemberNoIntro { get; set; }   // Crd_Member.MemberNoIntro — mã hội viên người giới thiệu
+    public int PointIntro { get; set; }          // Crd_Member.PointIntro — điểm thưởng cho người giới thiệu
 
     // Dữ liệu kỳ xét hạng hiện tại (Crd_Member/Crd_Card): reset về 0 khi sang kỳ mới.
     public int PointCardRank { get; set; }     // Crd_Member.PointCardRank — điểm xét hạng tích trong kỳ

@@ -78,8 +78,19 @@ app.MapPost("/api/rank/keepdown/run", async (ILoyaltyService svc) =>
     return Results.Ok(new { date = r.Date, up = r.Up, kept = r.Kept, down = r.Down, details = r.Details });
 });
 
+// API thưởng điểm giới thiệu (DealPointType=INTRODUCTION): cộng điểm cho người giới thiệu của hội viên mới.
+app.MapPost("/api/introduction/award", async (IntroDto dto, ILoyaltyService svc) =>
+{
+    var m = dto.Phone is { Length: > 0 } p ? await svc.GetByPhoneAsync(p) : null;
+    if (m == null && dto.MemberId is { } mid) m = await svc.GetAsync(mid);
+    if (m == null) return Results.NotFound(new { error = "Không tìm thấy hội viên" });
+    var (ok, msg) = await svc.AwardIntroductionAsync(m.Id);
+    return ok ? Results.Ok(new { ok, msg }) : Results.BadRequest(new { ok, error = msg });
+});
+
 app.MapControllerRoute(name: "default", pattern: "{controller=Home}/{action=Index}/{id?}");
 app.Run();
 
 record EarnDto(string? Phone, int? MemberId, decimal Amount, string? RefNo);
 record RegisterOrgDto(string Name);
+record IntroDto(string? Phone, int? MemberId);

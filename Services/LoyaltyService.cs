@@ -31,6 +31,7 @@ public interface ILoyaltyService
     Task<BirthdayRunResult> RunBirthdayJobAsync(DateTime? today = null);
     Task<ExpiryRunResult> RunExpiryJobAsync(DateTime? today = null);
     Task<RankKeepDownRunResult> RunRankKeepDownJobAsync(DateTime? today = null);
+    Task<(bool ok, string msg)> AwardIntroductionAsync(int newMemberId);
 }
 
 public class LoyaltyService(AppDbContext db) : ILoyaltyService
@@ -227,6 +228,35 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
         }
         if (details.Count > 0) await db.SaveChangesAsync();
         return new RankKeepDownRunResult(d, up, kept, down, details);
+    }
+
+    /// <summary>
+    /// Thưởng điểm giới thiệu (DealPointType = INTRODUCTION, Crd_Member_Finish): khi hội viên mới
+    /// hoàn tất đăng ký và có khai báo người giới thiệu (MemberNoIntro) kèm số điểm thưởng (PointIntro),
+    /// hệ thống cộng PointIntro điểm cho NGƯỜI GIỚI THIỆU (không phải hội viên mới).
+    /// Idempotent: mỗi hội viên mới chỉ thưởng 1 lần (chặn bằng giao dịch INTRODUCTION đã có theo RefNo).
+    /// </summary>
+    public async Task<(bool ok, string msg)> AwardIntroductionAsync(int newMemberId)
+    {
+        var m = await db.Members.FirstOrDefaultAsync(x => x.Id == newMemberId);
+        if (m == null) return (false, "Không tìm thấy hội viên.");
+        if (string.IsNullOrWhiteSpace(m.MemberNoIntro)) return (false, "Hội viên không khai báo người giới thiệu.");
+        if (m.PointIntro <= 0) return (false, "Không có điểm thưởng giới thiệu.");
+
+        // Người giới thiệu phải là hội viên đã tồn tại (đã hoàn tất đăng ký).
+        var referrer = await db.Members.FirstOrDefaultAsync(x => x.Code == m.MemberNoIntro);
+        if (referrer == null) return (false, $"Không tìm thấy người giới thiệu {m.MemberNoIntro}.");
+        if (referrer.Id == m.Id) return (false, "Không thể tự giới thiệu chính mình.");
+
+        // Đã thưởng cho hội viên mới này chưa? (chặn thưởng trùng)
+        var refNo = $"INT.{m.Code}";
+        var already = await db.PointTransactions.AnyAsync(t =>
+            t.MemberId == referrer.Id && t.Type == PointTxType.Introduction && t.RefNo == refNo);
+        if (already) return (false, "Đã thưởng điểm giới thiệu cho hội viên này rồi.");
+
+        await EarnAsync(referrer.Id, m.PointIntro, PointTxType.Introduction,
+            $"Thưởng điểm giới thiệu hội viên {m.Code} ({m.Name})", refNo);
+        return (true, $"Đã thưởng {m.PointIntro:N0} điểm cho người giới thiệu {referrer.Code} ({referrer.Name}).");
     }
 
     public async Task<LoyaltyDash> DashboardAsync()

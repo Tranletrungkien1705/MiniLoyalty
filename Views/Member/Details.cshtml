@@ -2,7 +2,7 @@
 @{
     ViewData["Title"] = $"Hội viên {Model.Code}";
     var rewards = (List<Reward>)ViewBag.Rewards;
-    string TxName(PointTxType t) => t switch { PointTxType.Earn=>"Tích điểm", PointTxType.Redeem=>"Đổi quà", PointTxType.Birthday=>"Sinh nhật", PointTxType.Adjust=>"Điều chỉnh", PointTxType.Expiry=>"Hết hạn", _=>t.ToString() };
+    string TxName(PointTxType t) => t switch { PointTxType.Earn=>"Tích điểm", PointTxType.Redeem=>"Đổi quà", PointTxType.Birthday=>"Sinh nhật", PointTxType.Adjust=>"Điều chỉnh", PointTxType.Expiry=>"Hết hạn", PointTxType.Introduction=>"Giới thiệu", _=>t.ToString() };
 }
 <div class="d-flex justify-content-between align-items-center mb-3">
     <div><h5 class="fw-bold mb-0"><i class="bi bi-person-badge me-2"></i>@Model.Name</h5>
@@ -35,6 +35,17 @@
                 <div class="col-5"><button class="btn btn-outline-primary btn-sm w-100">Điều chỉnh</button></div>
             </form>
         </div></div>
+
+        @if (!string.IsNullOrWhiteSpace(Model.MemberNoIntro) || Model.PointIntro > 0)
+        {
+            <div class="card mb-3"><div class="card-body">
+                <h6 class="fw-bold mb-2"><i class="bi bi-people me-1"></i>Giới thiệu mua xe</h6>
+                <div class="small text-muted mb-2">Người giới thiệu: <b class="font-monospace">@(Model.MemberNoIntro ?? "—")</b> · Điểm thưởng: <b>@Model.PointIntro.ToString("N0")</b></div>
+                <form asp-action="AwardIntro" asp-route-id="@Model.Id" method="post">@Html.AntiForgeryToken()
+                    <button class="btn btn-outline-primary btn-sm"><i class="bi bi-gift me-1"></i>Thưởng điểm cho người giới thiệu</button>
+                </form>
+            </div></div>
+        }
     </div>
 
     <div class="col-lg-8">

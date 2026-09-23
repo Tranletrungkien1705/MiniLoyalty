@@ -28,7 +28,17 @@ public class MemberController(ILoyaltyService svc) : Controller
     {
         if (string.IsNullOrWhiteSpace(model.Name)) { TempData["Error"] = "Cần tên hội viên."; return View(model); }
         var id = await svc.CreateAsync(model);
-        TempData["Success"] = "Đã tạo hội viên.";
+        // Thưởng điểm giới thiệu cho người giới thiệu (nếu hội viên mới có khai báo).
+        var (ok, msg) = await svc.AwardIntroductionAsync(id);
+        TempData["Success"] = ok ? $"Đã tạo hội viên. {msg}" : "Đã tạo hội viên.";
+        return RedirectToAction(nameof(Details), new { id });
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> AwardIntro(int id)
+    {
+        var (ok, msg) = await svc.AwardIntroductionAsync(id);
+        TempData[ok ? "Success" : "Error"] = msg;
         return RedirectToAction(nameof(Details), new { id });
     }
 
