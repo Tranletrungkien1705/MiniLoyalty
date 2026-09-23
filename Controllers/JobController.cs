@@ -5,7 +5,7 @@ namespace MiniLoyalty.Controllers;
 
 /// <summary>
 /// Màn hình chạy các job nghiệp vụ (tương đương Task Scheduler bên hệ nguồn).
-/// Hiện có: tặng điểm sinh nhật (BIRTHDAY), hết hạn điểm (EXPIRY).
+/// Hiện có: tặng điểm sinh nhật (BIRTHDAY), hết hạn điểm (EXPIRY), xét hạng cuối kỳ (KEEP/DOWN).
 /// </summary>
 public class JobController(ILoyaltyService svc) : Controller
 {
@@ -28,6 +28,16 @@ public class JobController(ILoyaltyService svc) : Controller
         TempData["Success"] = r.Members == 0
             ? "Không có điểm nào hết hạn hôm nay."
             : $"Đã trừ {r.Points:N0} điểm hết hạn của {r.Members} hội viên.";
+        return RedirectToAction(nameof(Index));
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> RunRankKeepDown()
+    {
+        var r = await svc.RunRankKeepDownJobAsync();
+        TempData["Success"] = (r.Kept + r.Down) == 0
+            ? "Không có hội viên nào tới kỳ xét hạng."
+            : $"Xét hạng cuối kỳ: {r.Kept} duy trì, {r.Down} xuống hạng.";
         return RedirectToAction(nameof(Index));
     }
 }

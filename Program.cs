@@ -71,6 +71,13 @@ app.MapPost("/api/expiry/run", async (ILoyaltyService svc) =>
     return Results.Ok(new { date = r.Date, members = r.Members, expiredPoints = r.Points, details = r.Details });
 });
 
+// API chạy job xét hạng cuối kỳ (duy trì/xuống hạng theo ngưỡng Mst_RankPolicy). Idempotent theo kỳ.
+app.MapPost("/api/rank/keepdown/run", async (ILoyaltyService svc) =>
+{
+    var r = await svc.RunRankKeepDownJobAsync();
+    return Results.Ok(new { date = r.Date, kept = r.Kept, down = r.Down, details = r.Details });
+});
+
 app.MapControllerRoute(name: "default", pattern: "{controller=Home}/{action=Index}/{id?}");
 app.Run();
 

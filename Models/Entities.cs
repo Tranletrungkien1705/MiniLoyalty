@@ -12,6 +12,11 @@ public class RankTier
     public int BirthdayPoints { get; set; }   // điểm tặng sinh nhật theo hạng (Mst_BirthPolicyDtl.Point)
     public string ColorHex { get; set; } = "#94a3b8";
     public int SortOrder { get; set; }
+
+    // Chính sách xét hạng cuối kỳ (Mst_RankPolicy): ngưỡng để DUY TRÌ hạng trong kỳ.
+    // Không đạt ngưỡng duy trì → xuống 1 hạng (DOWN); đạt → giữ hạng (KEEP).
+    public int PointKeepBegin { get; set; }      // Mst_RankPolicy.PointKeepBegin — điểm xét hạng tối thiểu để duy trì
+    public int QtyVisitKeepBegin { get; set; }   // Mst_RankPolicy.QtyVisitKeepBegin — số lượt dịch vụ tối thiểu để duy trì
 }
 
 /// <summary>Hội viên.</summary>
@@ -28,6 +33,13 @@ public class Member : IOrgOwned
     public int LifetimePoints { get; set; }    // điểm tích lũy trọn đời (xếp hạng)
     public int RankTierId { get; set; }
     public DateTime JoinedAt { get; set; } = DateTime.Now;
+
+    // Dữ liệu kỳ xét hạng hiện tại (Crd_Member/Crd_Card): reset về 0 khi sang kỳ mới.
+    public int PointCardRank { get; set; }     // Crd_Member.PointCardRank — điểm xét hạng tích trong kỳ
+    public int QtyVisitAvail { get; set; }     // Crd_Member.QtyVisitAvail — số lượt dịch vụ trong kỳ
+    public DateTime? EffDateStart { get; set; }   // Crd_Card.EffDateStart — đầu kỳ xét hạng
+    public DateTime? EffDateEnd { get; set; }     // Crd_Card.EffDateEnd — cuối kỳ xét hạng
+    public string CardSourceCode { get; set; } = "NEW";   // Crd_Card.CardSourceCode: NEW/UP/DOWN/KEEP/RENEW
 
     public RankTier? RankTier { get; set; }
     public List<PointTransaction> Transactions { get; set; } = [];

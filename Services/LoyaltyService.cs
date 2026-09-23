@@ -13,6 +13,9 @@ public record BirthdayRunResult(int Awarded, int Points, List<(string Code, stri
 /// <summary>Kết quả 1 lần chạy job hết hạn điểm.</summary>
 public record ExpiryRunResult(DateTime Date, int Members, int Points, List<(string Code, string Name, int Points)> Details);
 
+/// <summary>Kết quả 1 lần chạy job xét hạng cuối kỳ (duy trì / xuống hạng).</summary>
+public record RankKeepDownRunResult(DateTime Date, int Kept, int Down, List<(string Code, string Name, string From, string To, string Action)> Details);
+
 public interface ILoyaltyService
 {
     Task<List<Member>> MembersAsync(string? q, int? rankId);
@@ -27,6 +30,7 @@ public interface ILoyaltyService
     Task<LoyaltyDash> DashboardAsync();
     Task<BirthdayRunResult> RunBirthdayJobAsync(DateTime? today = null);
     Task<ExpiryRunResult> RunExpiryJobAsync(DateTime? today = null);
+    Task<RankKeepDownRunResult> RunRankKeepDownJobAsync(DateTime? today = null);
 }
 
 public class LoyaltyService(AppDbContext db) : ILoyaltyService
@@ -169,6 +173,51 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
         }
         if (details.Count > 0) await db.SaveChangesAsync();
         return new ExpiryRunResult(d, details.Count, total, details);
+    }
+
+    /// <summary>
+    /// Job xét hạng cuối kỳ (WA_Crd_Card_RankKeepDownAuto): với mỗi hội viên, so điểm xét hạng
+    /// trong kỳ (PointCardRank) và số lượt dịch vụ (QtyVisitAvail) với ngưỡng DUY TRÌ của hạng hiện tại
+    /// (Mst_RankPolicy.PointKeepBegin / QtyVisitKeepBegin).
+    ///   - Đạt cả hai ngưỡng → KEEP: giữ nguyên hạng, mở kỳ mới.
+    ///   - Không đạt → DOWN: tụt xuống 1 hạng liền kề thấp hơn (sàn là hạng thấp nhất).
+    /// Sang kỳ mới: reset PointCardRank/QtyVisitAvail về 0, đặt EffDateStart/End cho kỳ kế tiếp,
+    /// ghi CardSourceCode = KEEP/DOWN. Idempotent theo kỳ: hội viên đã xét trong kỳ (EffDateEnd &gt;= ngày chạy) bị bỏ qua.
+    /// </summary>
+    public async Task<RankKeepDownRunResult> RunRankKeepDownJobAsync(DateTime? today = null)
+    {
+        var d = (today ?? DateTime.Today).Date;
+        var tiers = await db.RankTiers.OrderBy(t => t.SortOrder).ToListAsync();
+        var members = await db.Members.Include(m => m.RankTier).ToListAsync();
+        var details = new List<(string, string, string, string, string)>();
+        int kept = 0, down = 0;
+
+        foreach (var m in members)
+        {
+            // Đã xét kỳ này rồi? (kỳ hiện tại còn hiệu lực tới tương lai) → bỏ qua, tránh xét trùng.
+            if (m.EffDateEnd is { } end && end.Date >= d) continue;
+
+            var current = m.RankTier ?? tiers.First();
+            var idx = tiers.FindIndex(t => t.Id == current.Id);
+            if (idx < 0) idx = 0;
+
+            // Đạt ngưỡng duy trì của hạng hiện tại?
+            var keep = m.PointCardRank >= current.PointKeepBegin && m.QtyVisitAvail >= current.QtyVisitKeepBegin;
+            var target = keep ? current : tiers[Math.Max(0, idx - 1)];   // không đạt → xuống 1 hạng (sàn = hạng thấp nhất)
+            var action = keep ? "KEEP" : "DOWN";
+
+            m.RankTierId = target.Id;
+            m.CardSourceCode = action;
+            m.EffDateStart = d;
+            m.EffDateEnd = d.AddMonths(12);   // kỳ xét hạng 12 tháng
+            m.PointCardRank = 0;              // reset điểm xét hạng cho kỳ mới
+            m.QtyVisitAvail = 0;              // reset lượt dịch vụ cho kỳ mới
+
+            details.Add((m.Code, m.Name, current.Name, target.Name, action));
+            if (keep) kept++; else down++;
+        }
+        if (details.Count > 0) await db.SaveChangesAsync();
+        return new RankKeepDownRunResult(d, kept, down, details);
     }
 
     public async Task<LoyaltyDash> DashboardAsync()
