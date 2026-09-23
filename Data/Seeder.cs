@@ -109,6 +109,10 @@ public static class Seeder
             var buyCar = M("Trịnh Văn Sơn", "0909990000", 0, 0);
             buyCar.PointBuyCar = 5000;
             db.Members.Add(buyCar);
+            // Hội viên mua xe khuyến mại có điểm khuyến mại bán hàng (Crd_Member.PointBuyCreta) — minh hoạ nghiệp vụ HTV tặng điểm (DealPointType=KMBH).
+            var kmbh = M("Đặng Quốc Huy", "0910555555", 0, 0);
+            kmbh.PointBuyCreta = 3000;
+            db.Members.Add(kmbh);
             // Ghi nhận lượt dịch vụ (DealPointType=SERVICETURN) — minh hoạ nghiệp vụ cộng lượt vào QtyVisitAvail.
             var svcTurn = M("Bùi Thanh Tùng", "0908888888", 300, 300);
             svcTurn.QtyVisitAvail = 2;

@@ -1,6 +1,6 @@
 namespace MiniLoyalty.Models;
 
-public enum PointTxType { Earn = 0, Redeem = 1, Birthday = 2, Adjust = 3, Expiry = 4, Introduction = 5, ServiceTurn = 6, Discount = 7, PointUse = 8, Sale = 9, Consumption = 10 }
+public enum PointTxType { Earn = 0, Redeem = 1, Birthday = 2, Adjust = 3, Expiry = 4, Introduction = 5, ServiceTurn = 6, Discount = 7, PointUse = 8, Sale = 9, Consumption = 10, Kmbh = 11 }
 
 /// <summary>Loại giao dịch điểm voucher (Crd_MemberVoucherTransaction.DealPointType).</summary>
 public enum VoucherTxType { Award = 0, Use = 1, BirthdayVoucher = 2 }   // VOUCHERXM = tặng, VOUCHERSD = sử dụng, VOUCHERTSN = voucher sinh nhật
@@ -54,6 +54,10 @@ public class Member : IOrgOwned
     // Tặng điểm mua xe mới (Crd_Member.PointBuyCar): số điểm thưởng khi hội viên mua xe mới.
     // Khi hoàn tất mua xe, hệ thống cộng PointBuyCar điểm (DealPointType=SALES).
     public int PointBuyCar { get; set; }         // Crd_Member.PointBuyCar — điểm thưởng mua xe mới
+    // Điểm khuyến mại bán hàng (Crd_Member.PointBuyCreta): HTV (nhà sản xuất) tặng thêm điểm khi
+    // hội viên mua xe thuộc chương trình khuyến mại. Khi đủ điều kiện, hệ thống cộng PointBuyCreta
+    // điểm (DealPointType=KMBH) — khác với SALES (điểm thưởng của đại lý).
+    public int PointBuyCreta { get; set; }       // Crd_Member.PointBuyCreta — điểm khuyến mại bán hàng (HTV)
 
     // Dữ liệu kỳ xét hạng hiện tại (Crd_Member/Crd_Card): reset về 0 khi sang kỳ mới.
     public int PointCardRank { get; set; }     // Crd_Member.PointCardRank — điểm xét hạng tích trong kỳ

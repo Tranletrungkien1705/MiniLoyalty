@@ -6,7 +6,7 @@
     var vouchers = (List<MemberVoucherTransaction>)ViewBag.Vouchers;
     var promotions = (List<Promotion>)ViewBag.Promotions;
     var promotionUses = (List<MemberPromotionUse>)ViewBag.PromotionUses;
-    string TxName(PointTxType t) => t switch { PointTxType.Earn=>"Tích điểm", PointTxType.Redeem=>"Đổi quà", PointTxType.Birthday=>"Sinh nhật", PointTxType.Adjust=>"Điều chỉnh", PointTxType.Expiry=>"Hết hạn", PointTxType.Introduction=>"Giới thiệu", PointTxType.ServiceTurn=>"Lượt dịch vụ", PointTxType.PointUse=>"Dùng ưu đãi", PointTxType.Sale=>"Mua xe mới", PointTxType.Consumption=>"Tiêu dùng dịch vụ", _=>t.ToString() };
+    string TxName(PointTxType t) => t switch { PointTxType.Earn=>"Tích điểm", PointTxType.Redeem=>"Đổi quà", PointTxType.Birthday=>"Sinh nhật", PointTxType.Adjust=>"Điều chỉnh", PointTxType.Expiry=>"Hết hạn", PointTxType.Introduction=>"Giới thiệu", PointTxType.ServiceTurn=>"Lượt dịch vụ", PointTxType.PointUse=>"Dùng ưu đãi", PointTxType.Sale=>"Mua xe mới", PointTxType.Consumption=>"Tiêu dùng dịch vụ", PointTxType.Kmbh=>"Khuyến mại bán hàng", _=>t.ToString() };
 }
 <div class="d-flex justify-content-between align-items-center mb-3">
     <div><h5 class="fw-bold mb-0"><i class="bi bi-person-badge me-2"></i>@Model.Name</h5>
@@ -65,6 +65,16 @@
             <div class="small text-muted mb-2">Điểm thưởng mua xe (PointBuyCar): <b>@Model.PointBuyCar.ToString("N0")</b> điểm</div>
             <form asp-action="BuyNewCar" asp-route-id="@Model.Id" method="post" class="row g-2">@Html.AntiForgeryToken()
                 <div class="col-7"><input name="points" type="number" min="1" value="@(Model.PointBuyCar > 0 ? Model.PointBuyCar : (int?)null)" class="form-control form-control-sm" placeholder="Điểm thưởng (mặc định PointBuyCar)" /></div>
+                <div class="col-5"><button class="btn btn-outline-success btn-sm w-100"><i class="bi bi-gift me-1"></i>Tặng điểm</button></div>
+                <div class="col-12"><input name="note" class="form-control form-control-sm" placeholder="Số HĐ / VIN / ghi chú" /></div>
+            </form>
+        </div></div>
+
+        <div class="card mb-3"><div class="card-body">
+            <h6 class="fw-bold mb-2"><i class="bi bi-megaphone me-1"></i>Điểm khuyến mại bán hàng (HTV)</h6>
+            <div class="small text-muted mb-2">Điểm khuyến mại (PointBuyCreta): <b>@Model.PointBuyCreta.ToString("N0")</b> điểm — HTV tặng thêm khi mua xe khuyến mại</div>
+            <form asp-action="Kmbh" asp-route-id="@Model.Id" method="post" class="row g-2">@Html.AntiForgeryToken()
+                <div class="col-7"><input name="points" type="number" min="1" value="@(Model.PointBuyCreta > 0 ? Model.PointBuyCreta : (int?)null)" class="form-control form-control-sm" placeholder="Điểm khuyến mại (mặc định PointBuyCreta)" /></div>
                 <div class="col-5"><button class="btn btn-outline-success btn-sm w-100"><i class="bi bi-gift me-1"></i>Tặng điểm</button></div>
                 <div class="col-12"><input name="note" class="form-control form-control-sm" placeholder="Số HĐ / VIN / ghi chú" /></div>
             </form>

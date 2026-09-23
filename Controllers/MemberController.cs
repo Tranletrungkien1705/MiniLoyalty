@@ -59,6 +59,18 @@ public class MemberController(ILoyaltyService svc) : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> Kmbh(int id, int? points, string? note)
+    {
+        try
+        {
+            var tx = await svc.AwardKmbhAsync(id, points, note);
+            TempData["Success"] = $"Đã tặng {tx.Points:N0} điểm khuyến mại bán hàng (HTV).";
+        }
+        catch (Exception ex) { TempData["Error"] = ex.Message; }
+        return RedirectToAction(nameof(Details), new { id });
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
     public async Task<IActionResult> ServiceTurn(int id, int qty, string? note)
     {
         if (qty <= 0) { TempData["Error"] = "Số lượt phải > 0."; return RedirectToAction(nameof(Details), new { id }); }

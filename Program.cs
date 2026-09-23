@@ -156,6 +156,21 @@ app.MapPost("/api/sales/award", async (BuyNewCarDto dto, ILoyaltyService svc) =>
     catch (Exception ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
+// API tặng điểm khuyến mại bán hàng (DealPointType=KMBH): HTV tặng thêm điểm cho hội viên mua xe khuyến mại.
+app.MapPost("/api/kmbh/award", async (KmbhDto dto, ILoyaltyService svc) =>
+{
+    var m = dto.Phone is { Length: > 0 } p ? await svc.GetByPhoneAsync(p) : null;
+    if (m == null && dto.MemberId is { } mid) m = await svc.GetAsync(mid);
+    if (m == null) return Results.NotFound(new { error = "Không tìm thấy hội viên" });
+    try
+    {
+        var tx = await svc.AwardKmbhAsync(m.Id, dto.Points, dto.RefNo);
+        var member = await svc.GetAsync(m.Id);
+        return Results.Ok(new { memberCode = member!.Code, awarded = tx.Points, balance = member.Points, lifetime = member.LifetimePoints, rank = member.RankTier?.Name });
+    }
+    catch (Exception ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+
 // API sử dụng điểm voucher (DealPointType=VOUCHERSD): trừ điểm voucher khi hội viên quy đổi tại đại lý.
 app.MapPost("/api/voucher/use", async (VoucherUseDto dto, ILoyaltyService svc) =>
 {
@@ -187,6 +202,7 @@ record EarnDto(string? Phone, int? MemberId, decimal Amount, string? RefNo);
 record RegisterOrgDto(string Name);
 record IntroDto(string? Phone, int? MemberId);
 record BuyNewCarDto(string? Phone, int? MemberId, int? Points, string? RefNo);
+record KmbhDto(string? Phone, int? MemberId, int? Points, string? RefNo);
 record ServiceTurnDto(string? Phone, int? MemberId, int Qty, string? RefNo);
 record ConsumptionDto(string? Phone, int? MemberId, decimal Amount, string? RefNo);
 record DiscountDto(string? Phone, int? MemberId, decimal Amount, string? RefNo);
