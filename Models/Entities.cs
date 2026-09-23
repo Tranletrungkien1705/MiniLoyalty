@@ -601,3 +601,30 @@ public class PrmCarRecommendDtl : IOrgOwned
     public string? Remark { get; set; }                    // Prm_CarRecommendDtl.Remark
     public PrmCarRecommend PrmCarRecommend { get; set; } = null!;
 }
+
+/// <summary>
+/// Chính sách đối tượng tích điểm dịch vụ (Mst_PolicyExpenseType): cấu hình cho từng LOẠI CHI PHÍ dịch vụ
+/// (ExpenseType: LOCAL nội bộ / ROINSURANCE bảo hiểm / ROREPAIR khách hàng / ROWARRANTY bảo hành) xem
+/// doanh thu loại đó có được TÍCH ĐIỂM tiêu dùng (FlagPoint), có tính ĐIỂM XÉT HẠNG (FlagPointRank),
+/// có tính 1 LƯỢT DỊCH VỤ (FlagCountService), có được CHIẾT KHẤU (FlagDiscount + DiscountRate) hay không,
+/// kèm hệ số nhân doanh thu (AmountRate) và trần điểm (MaxRankReviewPoint / MaxAccumulationPoint).
+/// Đây là bảng tham số dùng khi tính điểm từ lệnh sửa chữa (Crd_DealSerRO_Add, Card.Deal.cs).
+/// </summary>
+public class ExpenseTypePolicy : IOrgOwned
+{
+    public int Id { get; set; }
+    public Guid OrgId { get; set; }
+    public string PolicyExpenseTypeNo { get; set; } = "";   // Mst_PolicyExpenseType.PolicyExpenseTypeNo — mã chính sách
+    public string ExpenseType { get; set; } = "";            // Mst_PolicyExpenseType.ExpenseType — loại chi phí (LOCAL/ROINSURANCE/ROREPAIR/ROWARRANTY)
+    public string ExpenseTypeNameActual { get; set; } = "";  // Mst_PolicyExpenseType.ExpenseTypeNameActual — tên hiển thị
+    public bool FlagPoint { get; set; }                      // Mst_PolicyExpenseType.FlagPoint — có tích điểm tiêu dùng
+    public bool FlagPointRank { get; set; }                  // Mst_PolicyExpenseType.FlagPointRank — có tính điểm xét hạng
+    public bool FlagCountService { get; set; }               // Mst_PolicyExpenseType.FlagCountService — có tính 1 lượt dịch vụ
+    public bool FlagDiscount { get; set; }                   // Mst_PolicyExpenseType.FlagDiscount — có áp chiết khấu
+    public decimal AmountRate { get; set; } = 1m;            // Mst_PolicyExpenseType.AmountRate — hệ số nhân doanh thu
+    public decimal MaxRankReviewPoint { get; set; }          // Mst_PolicyExpenseType.MaxRankReviewPoint — trần điểm xét hạng
+    public decimal MaxAccumulationPoint { get; set; }        // Mst_PolicyExpenseType.MaxAccumulationPoint — trần điểm tích lũy
+    public decimal DiscountRate { get; set; }                // Mst_PolicyExpenseType.DiscountRate — % chiết khấu (0..100)
+    public bool IsActive { get; set; } = true;               // Mst_PolicyExpenseType.FlagActive
+    public string? Remark { get; set; }                      // Mst_PolicyExpenseType.Remark
+}

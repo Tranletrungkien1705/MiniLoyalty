@@ -109,6 +109,8 @@ public interface ILoyaltyService
     Task<(bool ok, string msg)> CancelPrmCarRecommendAsync(int id, string? remark, string? by = null);
     Task<PrmCarRecommend?> CalcPrmCarRecommendAsync(string dlcpCode, string? modelCode, DateTime? today = null);
     Task<CretaBuyCarResult> CalcPointBuyCretaAsync(string? modelCode, string? cardTypeUse, DateTime? deliveryDate, string? idCardNo, string? dealNo, int? memberId = null);
+    Task<List<ExpenseTypePolicy>> ExpenseTypePoliciesAsync();
+    Task<(bool ok, string msg, int id)> SaveExpenseTypePolicyAsync(ExpenseTypePolicy policy);
 }
 
 public class LoyaltyService(AppDbContext db) : ILoyaltyService
@@ -1541,5 +1543,56 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
         var tiers = await db.RankTiers.OrderBy(t => t.SortOrder).ToListAsync();
         var newTier = tiers.Last(t => m.LifetimePoints >= t.MinLifetimePoints);
         m.RankTierId = newTier.Id;
+    }
+
+    /// <summary>
+    /// Liệt kê chính sách đối tượng tích điểm dịch vụ (Mst_PolicyExpenseType) — cấu hình cho từng loại chi phí
+    /// dịch vụ (LOCAL/ROINSURANCE/ROREPAIR/ROWARRANTY) xem có tích điểm / tính điểm xét hạng / tính lượt dịch vụ /
+    /// áp chiết khấu hay không. Sắp theo mã loại chi phí.
+    /// </summary>
+    public Task<List<ExpenseTypePolicy>> ExpenseTypePoliciesAsync() =>
+        db.ExpenseTypePolicies.OrderBy(p => p.ExpenseType).ToListAsync();
+
+    /// <summary>
+    /// Lưu chính sách đối tượng tích điểm dịch vụ (Mst_PolicyExpenseType_SaveX, Master.Loyalty.cs):
+    /// kiểm tra loại chi phí (ExpenseType) bắt buộc, DiscountRate trong [0,100], và luật chéo
+    /// "FlagDiscount = 0 ⇒ DiscountRate phải = 0". Upsert theo ExpenseType (1 chính sách/loại chi phí).
+    /// </summary>
+    public async Task<(bool ok, string msg, int id)> SaveExpenseTypePolicyAsync(ExpenseTypePolicy policy)
+    {
+        if (string.IsNullOrWhiteSpace(policy.ExpenseType))
+            return (false, "Cần loại chi phí (ExpenseType).", 0);
+        if (policy.DiscountRate < 0 || policy.DiscountRate > 100)
+            return (false, "Tỉ lệ chiết khấu phải trong khoảng 0..100.", 0);
+        // Luật chéo (Mst_PolicyExpenseType_SaveX): không bật chiết khấu thì tỉ lệ phải = 0.
+        if (!policy.FlagDiscount && policy.DiscountRate != 0)
+            return (false, "Không bật chiết khấu (FlagDiscount=0) thì tỉ lệ chiết khấu phải = 0.", 0);
+
+        var code = policy.ExpenseType.Trim();
+        var existing = await db.ExpenseTypePolicies.FirstOrDefaultAsync(p => p.ExpenseType == code);
+        if (existing == null)
+        {
+            policy.ExpenseType = code;
+            policy.PolicyExpenseTypeNo = string.IsNullOrWhiteSpace(policy.PolicyExpenseTypeNo)
+                ? $"PET.{DateTime.Now:yyyy}.{code}" : policy.PolicyExpenseTypeNo;
+            policy.ExpenseTypeNameActual = string.IsNullOrWhiteSpace(policy.ExpenseTypeNameActual) ? code : policy.ExpenseTypeNameActual;
+            policy.IsActive = true;
+            db.ExpenseTypePolicies.Add(policy);
+            await db.SaveChangesAsync();
+            return (true, $"Đã tạo chính sách đối tượng tích điểm {code}.", policy.Id);
+        }
+
+        existing.ExpenseTypeNameActual = string.IsNullOrWhiteSpace(policy.ExpenseTypeNameActual) ? existing.ExpenseTypeNameActual : policy.ExpenseTypeNameActual;
+        existing.FlagPoint = policy.FlagPoint;
+        existing.FlagPointRank = policy.FlagPointRank;
+        existing.FlagCountService = policy.FlagCountService;
+        existing.FlagDiscount = policy.FlagDiscount;
+        existing.AmountRate = policy.AmountRate;
+        existing.MaxRankReviewPoint = policy.MaxRankReviewPoint;
+        existing.MaxAccumulationPoint = policy.MaxAccumulationPoint;
+        existing.DiscountRate = policy.DiscountRate;
+        existing.Remark = policy.Remark;
+        await db.SaveChangesAsync();
+        return (true, $"Đã cập nhật chính sách đối tượng tích điểm {code}.", existing.Id);
     }
 }

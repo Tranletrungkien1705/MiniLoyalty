@@ -1,0 +1,103 @@
+@model List<MiniLoyalty.Models.ExpenseTypePolicy>
+@{
+    ViewData["Title"] = "Đối tượng tích điểm dịch vụ";
+    var policies = Model ?? new List<MiniLoyalty.Models.ExpenseTypePolicy>();
+}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h5 class="fw-bold mb-0"><i class="bi bi-sliders me-2"></i>Đối tượng tích điểm dịch vụ</h5>
+        <small class="text-muted">Mst_PolicyExpenseType — cấu hình tích điểm / xét hạng / lượt dịch vụ / chiết khấu theo từng loại chi phí dịch vụ</small>
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th class="ps-3">Loại chi phí</th>
+                        <th>Tên hiển thị</th>
+                        <th class="text-center">Tích điểm</th>
+                        <th class="text-center">Xét hạng</th>
+                        <th class="text-center">Lượt DV</th>
+                        <th class="text-center">Chiết khấu</th>
+                        <th class="text-end">Hệ số</th>
+                        <th class="text-end">Trần xét hạng</th>
+                        <th class="text-end">Trần tích lũy</th>
+                        <th class="text-end pe-3">% CK</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @if (policies.Count == 0)
+                {
+                    <tr><td colspan="10" class="text-center text-muted py-4">Chưa có chính sách nào.</td></tr>
+                }
+                @foreach (var p in policies)
+                {
+                    <tr>
+                        <td class="ps-3"><span class="font-monospace fw-semibold">@p.ExpenseType</span></td>
+                        <td>@p.ExpenseTypeNameActual</td>
+                        <td class="text-center">@Flag(p.FlagPoint)</td>
+                        <td class="text-center">@Flag(p.FlagPointRank)</td>
+                        <td class="text-center">@Flag(p.FlagCountService)</td>
+                        <td class="text-center">@Flag(p.FlagDiscount)</td>
+                        <td class="text-end">@p.AmountRate.ToString("0.##")</td>
+                        <td class="text-end">@p.MaxRankReviewPoint.ToString("N0")</td>
+                        <td class="text-end">@p.MaxAccumulationPoint.ToString("N0")</td>
+                        <td class="text-end pe-3">@p.DiscountRate.ToString("0.##")%</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <h6 class="fw-bold mb-3"><i class="bi bi-pencil-square me-1"></i>Thêm / cập nhật chính sách</h6>
+        <form asp-action="Save" method="post" class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label small fw-semibold">Loại chi phí (ExpenseType)</label>
+                <input name="ExpenseType" class="form-control form-control-sm" placeholder="ROREPAIR" required />
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small fw-semibold">Tên hiển thị</label>
+                <input name="ExpenseTypeNameActual" class="form-control form-control-sm" placeholder="Khách hàng" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small fw-semibold">Hệ số doanh thu</label>
+                <input name="AmountRate" type="number" step="0.01" value="1" class="form-control form-control-sm" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small fw-semibold">Trần xét hạng</label>
+                <input name="MaxRankReviewPoint" type="number" step="1" value="0" class="form-control form-control-sm" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small fw-semibold">Trần tích lũy</label>
+                <input name="MaxAccumulationPoint" type="number" step="1" value="0" class="form-control form-control-sm" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small fw-semibold">% chiết khấu (0..100)</label>
+                <input name="DiscountRate" type="number" step="0.01" value="0" class="form-control form-control-sm" />
+            </div>
+            <div class="col-md-10 d-flex align-items-end gap-4">
+                <div class="form-check"><input class="form-check-input" type="checkbox" name="FlagPoint" value="true" id="fp" /><label class="form-check-label small" for="fp">Tích điểm</label></div>
+                <div class="form-check"><input class="form-check-input" type="checkbox" name="FlagPointRank" value="true" id="fpr" /><label class="form-check-label small" for="fpr">Xét hạng</label></div>
+                <div class="form-check"><input class="form-check-input" type="checkbox" name="FlagCountService" value="true" id="fcs" /><label class="form-check-label small" for="fcs">Lượt dịch vụ</label></div>
+                <div class="form-check"><input class="form-check-input" type="checkbox" name="FlagDiscount" value="true" id="fd" /><label class="form-check-label small" for="fd">Chiết khấu</label></div>
+            </div>
+            <div class="col-12">
+                <button class="btn btn-primary btn-sm"><i class="bi bi-save me-1"></i>Lưu chính sách</button>
+                <span class="small text-muted ms-2">Luật chéo: không bật chiết khấu thì % chiết khấu phải = 0.</span>
+            </div>
+        </form>
+    </div>
+</div>
+
+@functions {
+    Microsoft.AspNetCore.Html.IHtmlContent Flag(bool on) => on
+        ? new Microsoft.AspNetCore.Html.HtmlString("<span class=\"badge bg-success-subtle text-success\"><i class=\"bi bi-check2\"></i></span>")
+        : new Microsoft.AspNetCore.Html.HtmlString("<span class=\"badge bg-secondary-subtle text-secondary\"><i class=\"bi bi-dash\"></i></span>");
+}

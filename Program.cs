@@ -508,6 +508,35 @@ app.MapGet("/api/member/dms-lookup", async (string? carNo, string? vin, string? 
     });
 });
 
+// API liệt kê chính sách đối tượng tích điểm dịch vụ (Mst_PolicyExpenseType): cấu hình cho từng loại chi phí
+// dịch vụ (LOCAL/ROINSURANCE/ROREPAIR/ROWARRANTY) xem có tích điểm / tính điểm xét hạng / tính lượt dịch vụ / áp chiết khấu.
+app.MapGet("/api/expensetypepolicy", async (ILoyaltyService svc) =>
+{
+    var list = await svc.ExpenseTypePoliciesAsync();
+    return Results.Ok(list.Select(p => new
+    {
+        p.Id, p.PolicyExpenseTypeNo, p.ExpenseType, p.ExpenseTypeNameActual,
+        p.FlagPoint, p.FlagPointRank, p.FlagCountService, p.FlagDiscount,
+        p.AmountRate, p.MaxRankReviewPoint, p.MaxAccumulationPoint, p.DiscountRate, p.IsActive, p.Remark
+    }));
+});
+
+// API lưu chính sách đối tượng tích điểm dịch vụ (Mst_PolicyExpenseType_SaveX): upsert theo ExpenseType,
+// validate DiscountRate 0..100 + luật chéo FlagDiscount=0 ⇒ DiscountRate=0.
+app.MapPost("/api/expensetypepolicy/save", async (ExpenseTypePolicyDto dto, ILoyaltyService svc) =>
+{
+    var policy = new ExpenseTypePolicy
+    {
+        PolicyExpenseTypeNo = dto.PolicyExpenseTypeNo ?? "", ExpenseType = dto.ExpenseType ?? "",
+        ExpenseTypeNameActual = dto.ExpenseTypeNameActual ?? "",
+        FlagPoint = dto.FlagPoint, FlagPointRank = dto.FlagPointRank, FlagCountService = dto.FlagCountService,
+        FlagDiscount = dto.FlagDiscount, AmountRate = dto.AmountRate, MaxRankReviewPoint = dto.MaxRankReviewPoint,
+        MaxAccumulationPoint = dto.MaxAccumulationPoint, DiscountRate = dto.DiscountRate, Remark = dto.Remark
+    };
+    var (ok, msg, id) = await svc.SaveExpenseTypePolicyAsync(policy);
+    return ok ? Results.Ok(new { ok, msg, id }) : Results.BadRequest(new { ok, error = msg });
+});
+
 app.MapControllerRoute(name: "default", pattern: "{controller=Home}/{action=Index}/{id?}");
 app.Run();
 
@@ -542,3 +571,4 @@ record PrmCarRecommendSpecDto(string ModelCode, int PointVal);
 record PrmCarRecommendCreateDto(string? Name, string? DlcpCode, DateTime? EffDateStart, DateTime? EffDateEnd, bool FlagAllModel, int PointValAllModel, string? Remark, List<PrmCarRecommendSpecDto>? Specs);
 record PrmCarRecommendActionDto(int Id, string? Remark, string? By);
 record CretaCalcDto(string? ModelCode, string? CardTypeUse, DateTime? DeliveryDate, string? IdCardNo, string? DealNo, int? MemberId);
+record ExpenseTypePolicyDto(string? PolicyExpenseTypeNo, string? ExpenseType, string? ExpenseTypeNameActual, bool FlagPoint, bool FlagPointRank, bool FlagCountService, bool FlagDiscount, decimal AmountRate, decimal MaxRankReviewPoint, decimal MaxAccumulationPoint, decimal DiscountRate, string? Remark);

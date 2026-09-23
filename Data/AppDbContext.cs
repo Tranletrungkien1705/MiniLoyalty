@@ -35,6 +35,7 @@ public class AppDbContext : DbContext
     public DbSet<PrmCarRecommendSpec> PrmCarRecommendSpecs => Set<PrmCarRecommendSpec>();
     public DbSet<PrmCarRecommendDtl> PrmCarRecommendDtls => Set<PrmCarRecommendDtl>();
     public DbSet<CretaBuyCarPolicy> CretaBuyCarPolicies => Set<CretaBuyCarPolicy>();
+    public DbSet<ExpenseTypePolicy> ExpenseTypePolicies => Set<ExpenseTypePolicy>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -161,6 +162,15 @@ public class AppDbContext : DbContext
         b.Entity<CretaBuyCarPolicy>(e =>
         {
             e.HasIndex(x => x.PolicyCode).IsUnique();
+            e.HasQueryFilter(x => x.OrgId == _orgId);
+        });
+        b.Entity<ExpenseTypePolicy>(e =>
+        {
+            e.HasIndex(x => x.ExpenseType).IsUnique();   // 1 chính sách/loại chi phí
+            e.Property(x => x.AmountRate).HasPrecision(18, 2);
+            e.Property(x => x.MaxRankReviewPoint).HasPrecision(18, 2);
+            e.Property(x => x.MaxAccumulationPoint).HasPrecision(18, 2);
+            e.Property(x => x.DiscountRate).HasPrecision(5, 2);
             e.HasQueryFilter(x => x.OrgId == _orgId);
         });
     }

@@ -416,6 +416,18 @@ public static class Seeder
             });
             await db.SaveChangesAsync();
         }
+        if (!await db.ExpenseTypePolicies.AnyAsync())
+        {
+            // Chính sách đối tượng tích điểm dịch vụ (Mst_PolicyExpenseType) — cấu hình theo từng loại chi phí dịch vụ:
+            // LOCAL (nội bộ) không tích điểm; ROINSURANCE (bảo hiểm) tích điểm + xét hạng + lượt DV + chiết khấu 10%;
+            // ROREPAIR (khách hàng) tích điểm + xét hạng + lượt DV + chiết khấu 12%; ROWARRANTY (bảo hành) không tích điểm.
+            db.ExpenseTypePolicies.AddRange(
+                new ExpenseTypePolicy { PolicyExpenseTypeNo = "PET.LOCAL", ExpenseType = "LOCAL", ExpenseTypeNameActual = "Nội bộ", FlagPoint = false, FlagPointRank = false, FlagCountService = false, FlagDiscount = false, AmountRate = 1m, MaxRankReviewPoint = 0, MaxAccumulationPoint = 0, DiscountRate = 0 },
+                new ExpenseTypePolicy { PolicyExpenseTypeNo = "PET.ROINSURANCE", ExpenseType = "ROINSURANCE", ExpenseTypeNameActual = "Bảo hiểm", FlagPoint = false, FlagPointRank = true, FlagCountService = true, FlagDiscount = true, AmountRate = 1m, MaxRankReviewPoint = 1000, MaxAccumulationPoint = 2000, DiscountRate = 10 },
+                new ExpenseTypePolicy { PolicyExpenseTypeNo = "PET.ROREPAIR", ExpenseType = "ROREPAIR", ExpenseTypeNameActual = "Khách hàng", FlagPoint = true, FlagPointRank = true, FlagCountService = true, FlagDiscount = true, AmountRate = 1m, MaxRankReviewPoint = 4000, MaxAccumulationPoint = 5000, DiscountRate = 12 },
+                new ExpenseTypePolicy { PolicyExpenseTypeNo = "PET.ROWARRANTY", ExpenseType = "ROWARRANTY", ExpenseTypeNameActual = "Bảo hành", FlagPoint = false, FlagPointRank = false, FlagCountService = false, FlagDiscount = false, AmountRate = 0m, MaxRankReviewPoint = 0, MaxAccumulationPoint = 0, DiscountRate = 0 });
+            await db.SaveChangesAsync();
+        }
     }
 
     /// <summary>
