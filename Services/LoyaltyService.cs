@@ -7,6 +7,9 @@ namespace MiniLoyalty.Services;
 public record LoyaltyDash(int Members, int ActivePoints, int LifetimeIssued,
     List<(string Rank, string Color, int Count)> ByRank);
 
+/// <summary>Kết quả 1 lần chạy job tặng điểm sinh nhật.</summary>
+public record BirthdayRunResult(int Awarded, int Points, List<(string Code, string Name, int Points)> Details);
+
 public interface ILoyaltyService
 {
     Task<List<Member>> MembersAsync(string? q, int? rankId);
@@ -19,6 +22,7 @@ public interface ILoyaltyService
     Task<List<RankTier>> RanksAsync();
     Task<List<Reward>> RewardsAsync(bool activeOnly = true);
     Task<LoyaltyDash> DashboardAsync();
+    Task<BirthdayRunResult> RunBirthdayJobAsync(DateTime? today = null);
 }
 
 public class LoyaltyService(AppDbContext db) : ILoyaltyService
@@ -87,6 +91,37 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
     public Task<List<RankTier>> RanksAsync() => db.RankTiers.OrderBy(t => t.SortOrder).ToListAsync();
     public Task<List<Reward>> RewardsAsync(bool activeOnly = true) =>
         (activeOnly ? db.Rewards.Where(r => r.IsActive) : db.Rewards).OrderBy(r => r.PointCost).ToListAsync();
+
+    /// <summary>
+    /// Job tặng điểm sinh nhật (DealPointType = BIRTHDAY): tặng điểm cho hội viên có ngày sinh
+    /// trùng ngày chạy (so khớp MM-dd), theo số điểm của hạng hiện tại. Mỗi hội viên chỉ nhận
+    /// 1 lần/năm (chặn trùng bằng giao dịch BIRTHDAY đã có trong năm). Idempotent.
+    /// </summary>
+    public async Task<BirthdayRunResult> RunBirthdayJobAsync(DateTime? today = null)
+    {
+        var d = (today ?? DateTime.Today).Date;
+        var year = d.Year;
+        var members = await db.Members.Include(m => m.RankTier).ToListAsync();
+        var details = new List<(string, string, int)>();
+        var total = 0;
+
+        foreach (var m in members)
+        {
+            if (m.Dob is not { } dob || dob.Month != d.Month || dob.Day != d.Day) continue;
+            var pts = m.RankTier?.BirthdayPoints ?? 0;
+            if (pts <= 0) continue;
+
+            // Đã nhận điểm sinh nhật trong năm nay chưa? (chặn tặng trùng)
+            var already = await db.PointTransactions.AnyAsync(t =>
+                t.MemberId == m.Id && t.Type == PointTxType.Birthday && t.CreatedAt.Year == year);
+            if (already) continue;
+
+            await EarnAsync(m.Id, pts, PointTxType.Birthday, $"Tặng điểm sinh nhật {d:dd/MM} (hạng {m.RankTier?.Name})", null);
+            details.Add((m.Code, m.Name, pts));
+            total += pts;
+        }
+        return new BirthdayRunResult(details.Count, total, details);
+    }
 
     public async Task<LoyaltyDash> DashboardAsync()
     {

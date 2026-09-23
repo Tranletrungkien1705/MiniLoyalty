@@ -9,6 +9,7 @@ public class RankTier
     public string Name { get; set; } = "";
     public int MinLifetimePoints { get; set; }
     public decimal DiscountPercent { get; set; }
+    public int BirthdayPoints { get; set; }   // điểm tặng sinh nhật theo hạng (Mst_BirthPolicyDtl.Point)
     public string ColorHex { get; set; } = "#94a3b8";
     public int SortOrder { get; set; }
 }

@@ -1,0 +1,25 @@
+@{
+    ViewData["Title"] = "Job nghiệp vụ";
+}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div><h5 class="fw-bold mb-0"><i class="bi bi-gear-wide-connected me-2"></i>Job nghiệp vụ</h5>
+        <small class="text-muted">Các tác vụ tự động chạy định kỳ (bên hệ nguồn là Task Scheduler).</small></div>
+</div>
+
+<div class="row g-3">
+    <div class="col-lg-6">
+        <div class="card h-100"><div class="card-body">
+            <div class="d-flex align-items-center mb-2">
+                <i class="bi bi-balloon-heart-fill fs-4 me-2" style="color:var(--accent)"></i>
+                <h6 class="fw-bold mb-0">Tặng điểm sinh nhật</h6>
+            </div>
+            <p class="text-muted small mb-2">
+                Tặng điểm cho hội viên có ngày sinh trùng ngày chạy (so khớp MM-dd), theo số điểm
+                của hạng hiện tại. Mỗi hội viên chỉ nhận <b>1 lần/năm</b> — chạy lại không tặng trùng.
+            </p>
+            <form asp-action="RunBirthday" method="post">@Html.AntiForgeryToken()
+                <button class="btn btn-primary btn-sm"><i class="bi bi-play-fill me-1"></i>Chạy job hôm nay</button>
+            </form>
+        </div></div>
+    </div>
+</div>

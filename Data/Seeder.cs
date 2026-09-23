@@ -20,11 +20,11 @@ public static class Seeder
         if (!await db.RankTiers.AnyAsync())
         {
             db.RankTiers.AddRange(
-                new RankTier { Name = "Thành viên", MinLifetimePoints = 0, DiscountPercent = 0, ColorHex = "#94a3b8", SortOrder = 0 },
-                new RankTier { Name = "Bạc", MinLifetimePoints = 500, DiscountPercent = 3, ColorHex = "#9ca3af", SortOrder = 1 },
-                new RankTier { Name = "Vàng", MinLifetimePoints = 2000, DiscountPercent = 5, ColorHex = "#f59e0b", SortOrder = 2 },
-                new RankTier { Name = "Bạch kim", MinLifetimePoints = 5000, DiscountPercent = 8, ColorHex = "#6366f1", SortOrder = 3 },
-                new RankTier { Name = "Kim cương", MinLifetimePoints = 10000, DiscountPercent = 10, ColorHex = "#06b6d4", SortOrder = 4 });
+                new RankTier { Name = "Thành viên", MinLifetimePoints = 0, DiscountPercent = 0, BirthdayPoints = 50, ColorHex = "#94a3b8", SortOrder = 0 },
+                new RankTier { Name = "Bạc", MinLifetimePoints = 500, DiscountPercent = 3, BirthdayPoints = 100, ColorHex = "#9ca3af", SortOrder = 1 },
+                new RankTier { Name = "Vàng", MinLifetimePoints = 2000, DiscountPercent = 5, BirthdayPoints = 200, ColorHex = "#f59e0b", SortOrder = 2 },
+                new RankTier { Name = "Bạch kim", MinLifetimePoints = 5000, DiscountPercent = 8, BirthdayPoints = 300, ColorHex = "#6366f1", SortOrder = 3 },
+                new RankTier { Name = "Kim cương", MinLifetimePoints = 10000, DiscountPercent = 10, BirthdayPoints = 500, ColorHex = "#06b6d4", SortOrder = 4 });
             await db.SaveChangesAsync();
         }
         if (!await db.Rewards.AnyAsync())
@@ -60,6 +60,9 @@ public static class Seeder
                 M("Phạm Thu Dung", "0904444444", 700, 350),
                 M("Vũ Minh Đức", "0905555555", 120, 120)
             );
+            // Hội viên có sinh nhật đúng hôm nay — để minh hoạ job tặng điểm sinh nhật.
+            var bd = db.Members.Local.First();
+            bd.Dob = new DateTime(1992, DateTime.Today.Month, DateTime.Today.Day);
             await db.SaveChangesAsync();
         }
     }
