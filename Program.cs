@@ -537,6 +537,52 @@ app.MapPost("/api/expensetypepolicy/save", async (ExpenseTypePolicyDto dto, ILoy
     return ok ? Results.Ok(new { ok, msg, id }) : Results.BadRequest(new { ok, error = msg });
 });
 
+// API tạo chương trình tặng điểm voucher xe mới (Prm_VoucherNewCar_SaveX): HTV cấu hình chương trình, PENDING.
+app.MapPost("/api/prmvouchernewcar/create", async (PrmVoucherNewCarCreateDto dto, ILoyaltyService svc) =>
+{
+    var prm = new PrmVoucherNewCar
+    {
+        PrmVoucherName = dto.Name ?? "",
+        QtyDayLimitFDlvDate = dto.QtyDayLimitFDlvDate, ValidityPeriod = dto.ValidityPeriod,
+        EffDateStart = dto.EffDateStart ?? DateTime.Today, EffDateEnd = dto.EffDateEnd ?? new DateTime(9999, 12, 31),
+        FlagAllModel = dto.FlagAllModel, PointVoucherAllModel = dto.PointVoucherAllModel,
+        PointUseLimitAllModel = dto.PointUseLimitAllModel, Remark = dto.Remark,
+        Specs = (dto.Specs ?? []).Select((s, i) => new PrmVoucherNewCarSpec { Idx = i + 1, ModelCode = s.ModelCode }).ToList(),
+        Details = (dto.Specs ?? []).Select((s, i) => new PrmVoucherNewCarDtl { Idx = i + 1, PointVoucher = s.PointVoucher, PointUseLimit = s.PointUseLimit }).ToList()
+    };
+    var (ok, msg, id) = await svc.CreatePrmVoucherNewCarAsync(prm);
+    return ok ? Results.Ok(new { ok, msg, id }) : Results.BadRequest(new { ok, error = msg });
+});
+
+// API duyệt chương trình tặng điểm voucher xe mới (Prm_VoucherNewCar_ApprX): PENDING → APPROVE.
+app.MapPost("/api/prmvouchernewcar/approve", async (PrmVoucherNewCarActionDto dto, ILoyaltyService svc) =>
+{
+    var (ok, msg) = await svc.ApprovePrmVoucherNewCarAsync(dto.Id, dto.Remark, dto.By);
+    return ok ? Results.Ok(new { ok, msg }) : Results.BadRequest(new { ok, error = msg });
+});
+
+// API hoàn tất chương trình tặng điểm voucher xe mới (Prm_VoucherNewCar_FinishX): APPROVE → FINISH, chương trình có hiệu lực.
+app.MapPost("/api/prmvouchernewcar/finish", async (PrmVoucherNewCarActionDto dto, ILoyaltyService svc) =>
+{
+    var (ok, msg) = await svc.FinishPrmVoucherNewCarAsync(dto.Id, dto.Remark, dto.By);
+    return ok ? Results.Ok(new { ok, msg }) : Results.BadRequest(new { ok, error = msg });
+});
+
+// API huỷ chương trình tặng điểm voucher xe mới (Prm_VoucherNewCar_CancelX): PENDING/APPROVE → CANCEL.
+app.MapPost("/api/prmvouchernewcar/cancel", async (PrmVoucherNewCarActionDto dto, ILoyaltyService svc) =>
+{
+    var (ok, msg) = await svc.CancelPrmVoucherNewCarAsync(dto.Id, dto.Remark, dto.By);
+    return ok ? Results.Ok(new { ok, msg }) : Results.BadRequest(new { ok, error = msg });
+});
+
+// API tra chương trình tặng điểm voucher xe mới đang hiệu lực (Prm_VoucherNewCar_CalcPrmX) theo dòng xe.
+app.MapGet("/api/prmvouchernewcar/calc", async (string? modelCode, ILoyaltyService svc) =>
+{
+    var p = await svc.CalcPrmVoucherNewCarAsync(modelCode);
+    if (p == null) return Results.NotFound(new { error = "Không có chương trình tặng điểm voucher xe mới đang hiệu lực." });
+    return Results.Ok(new { p.PrmVoucherCode, p.PrmVoucherName, p.FlagAllModel, p.PointVoucherAllModel, p.PointUseLimitAllModel, p.ValidityPeriod, p.EffDateStart, p.EffDateEnd });
+});
+
 app.MapControllerRoute(name: "default", pattern: "{controller=Home}/{action=Index}/{id?}");
 app.Run();
 
@@ -572,3 +618,6 @@ record PrmCarRecommendCreateDto(string? Name, string? DlcpCode, DateTime? EffDat
 record PrmCarRecommendActionDto(int Id, string? Remark, string? By);
 record CretaCalcDto(string? ModelCode, string? CardTypeUse, DateTime? DeliveryDate, string? IdCardNo, string? DealNo, int? MemberId);
 record ExpenseTypePolicyDto(string? PolicyExpenseTypeNo, string? ExpenseType, string? ExpenseTypeNameActual, bool FlagPoint, bool FlagPointRank, bool FlagCountService, bool FlagDiscount, decimal AmountRate, decimal MaxRankReviewPoint, decimal MaxAccumulationPoint, decimal DiscountRate, string? Remark);
+record PrmVoucherNewCarSpecDto(string ModelCode, int PointVoucher, int PointUseLimit);
+record PrmVoucherNewCarCreateDto(string? Name, int QtyDayLimitFDlvDate, int ValidityPeriod, DateTime? EffDateStart, DateTime? EffDateEnd, bool FlagAllModel, int PointVoucherAllModel, int PointUseLimitAllModel, string? Remark, List<PrmVoucherNewCarSpecDto>? Specs);
+record PrmVoucherNewCarActionDto(int Id, string? Remark, string? By);

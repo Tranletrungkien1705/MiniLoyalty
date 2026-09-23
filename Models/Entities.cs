@@ -46,6 +46,12 @@ public enum PrmCarNewStatus { Pending = 0, Approve = 1, Finish = 2, Cancel = 3 }
 /// </summary>
 public enum PrmCarRecommendStatus { Pending = 0, Approve = 1, Finish = 2, Cancel = 3 }   // TConst.PRMCRStatus
 
+/// <summary>
+/// Trạng thái chương trình tặng điểm voucher xe mới (Prm_VoucherNewCar.PrmVoucherStatus / TConst.PrmVoucherStatus):
+/// PENDING (tạo) → APPROVE (duyệt) → FINISH (hoàn tất, chương trình có hiệu lực), hoặc CANCEL khi huỷ.
+/// </summary>
+public enum PrmVoucherNewCarStatus { Pending = 0, Approve = 1, Finish = 2, Cancel = 3 }   // TConst.PrmVoucherStatus
+
 /// <summary>Hạng thẻ — xếp theo điểm tích lũy trọn đời (lifetime), kèm % chiết khấu.</summary>
 public class RankTier
 {
@@ -627,4 +633,70 @@ public class ExpenseTypePolicy : IOrgOwned
     public decimal DiscountRate { get; set; }                // Mst_PolicyExpenseType.DiscountRate — % chiết khấu (0..100)
     public bool IsActive { get; set; } = true;               // Mst_PolicyExpenseType.FlagActive
     public string? Remark { get; set; }                      // Mst_PolicyExpenseType.Remark
+}
+
+/// <summary>
+/// Chương trình tặng điểm voucher xe mới (Prm_VoucherNewCar): HTV cấu hình chương trình tặng ĐIỂM VOUCHER
+/// cho khách mua xe mới theo dòng xe (ModelCode). Đi qua luồng duyệt PENDING (tạo) → APPROVE (duyệt) →
+/// FINISH (hoàn tất, chương trình có hiệu lực), hoặc CANCEL khi huỷ. Khi hoàn tất, chương trình áp dụng
+/// cho khoảng [EffDateStart, EffDateEnd]; nếu có chương trình FINISH trước đó đang hiệu lực thì bị cắt
+/// hiệu lực (EffDateEnd = ngày trước ngày bắt đầu chương trình mới). Điểm voucher KHÔNG dùng để xét hạng.
+/// </summary>
+public class PrmVoucherNewCar : IOrgOwned
+{
+    public int Id { get; set; }
+    public Guid OrgId { get; set; }
+    public string PrmVoucherCode { get; set; } = "";        // Prm_VoucherNewCar.PrmVoucherCode — mã chương trình
+    public string PrmVoucherName { get; set; } = "";        // Prm_VoucherNewCar.PrmVoucherName — tên chương trình
+    public int QtyDayLimitFDlvDate { get; set; }             // Prm_VoucherNewCar.QtyDayLimitFDlvDate — số ngày giới hạn từ ngày giao xe
+    public DateTime EffDateStart { get; set; }               // Prm_VoucherNewCar.EffDateStart — ngày hiệu lực từ
+    public DateTime EffDateEnd { get; set; }                 // Prm_VoucherNewCar.EffDateEnd — ngày hiệu lực đến
+    public int ValidityPeriod { get; set; }                  // Prm_VoucherNewCar.ValidityPeriod — thời hạn voucher (ngày)
+    public bool FlagAllModel { get; set; } = true;           // Prm_VoucherNewCar.FlagAllModel — áp dụng cho tất cả dòng xe
+    public int PointVoucherAllModel { get; set; }            // Prm_VoucherNewCar.PointVoucherAllModel — điểm voucher tặng khi áp dụng tất cả dòng xe
+    public int PointUseLimitAllModel { get; set; }           // Prm_VoucherNewCar.PointUseLimitAllModel — điểm sử dụng tối đa mỗi lần dịch vụ (tất cả dòng xe)
+    public PrmVoucherNewCarStatus Status { get; set; } = PrmVoucherNewCarStatus.Pending;   // Prm_VoucherNewCar.PrmVoucherStatus
+    public string? Remark { get; set; }                      // Prm_VoucherNewCar.Remark — ghi chú
+    public DateTime CreatedAt { get; set; } = DateTime.Now;  // Prm_VoucherNewCar.CreateDTimeUTC
+    public string? CreatedBy { get; set; }                   // Prm_VoucherNewCar.CreateBy
+    public DateTime? ApproveAt { get; set; }                 // Prm_VoucherNewCar.ApprDTimeUTC
+    public string? ApproveBy { get; set; }                   // Prm_VoucherNewCar.ApprBy
+    public DateTime? FinishAt { get; set; }                  // Prm_VoucherNewCar.FinishDTimeUTC
+    public string? FinishBy { get; set; }                    // Prm_VoucherNewCar.FinishBy
+    public DateTime? CancelAt { get; set; }                  // Prm_VoucherNewCar.CancelDTimeUTC
+    public string? CancelBy { get; set; }                    // Prm_VoucherNewCar.CancelBy
+
+    public List<PrmVoucherNewCarSpec> Specs { get; set; } = [];   // Prm_VoucherNewCarSpec — danh sách dòng xe (khi FlagAllModel = false)
+    public List<PrmVoucherNewCarDtl> Details { get; set; } = [];  // Prm_VoucherNewCarDtl — điểm voucher theo từng dòng (Idx)
+}
+
+/// <summary>
+/// Dòng xe áp dụng chương trình tặng điểm voucher xe mới (Prm_VoucherNewCarSpec): khi chương trình KHÔNG
+/// áp dụng cho tất cả dòng xe (FlagAllModel = false), mỗi dòng là 1 dòng xe (ModelCode) theo thứ tự (Idx).
+/// </summary>
+public class PrmVoucherNewCarSpec : IOrgOwned
+{
+    public int Id { get; set; }
+    public Guid OrgId { get; set; }
+    public int PrmVoucherNewCarId { get; set; }             // Prm_VoucherNewCarSpec.PrmVoucherCode (FK tới chương trình)
+    public int Idx { get; set; }                            // Prm_VoucherNewCarSpec.Idx — thứ tự dòng
+    public string ModelCode { get; set; } = "";             // Prm_VoucherNewCarSpec.ModelCode — mã dòng xe
+    public PrmVoucherNewCar PrmVoucherNewCar { get; set; } = null!;
+}
+
+/// <summary>
+/// Chi tiết điểm voucher theo dòng của chương trình tặng điểm voucher xe mới (Prm_VoucherNewCarDtl):
+/// mỗi dòng (Idx) kèm điểm voucher tặng (PointVoucher) và điểm sử dụng tối đa mỗi lần dịch vụ (PointUseLimit)
+/// cho dòng xe tương ứng trong Prm_VoucherNewCarSpec.
+/// </summary>
+public class PrmVoucherNewCarDtl : IOrgOwned
+{
+    public int Id { get; set; }
+    public Guid OrgId { get; set; }
+    public int PrmVoucherNewCarId { get; set; }             // Prm_VoucherNewCarDtl.PrmVoucherCode (FK tới chương trình)
+    public int Idx { get; set; }                            // Prm_VoucherNewCarDtl.Idx — thứ tự dòng
+    public int PointVoucher { get; set; }                   // Prm_VoucherNewCarDtl.PointVoucher — điểm voucher tặng cho dòng xe này
+    public int PointUseLimit { get; set; }                  // Prm_VoucherNewCarDtl.PointUseLimit — điểm sử dụng tối đa mỗi lần dịch vụ
+    public string? Remark { get; set; }                     // Prm_VoucherNewCarDtl.Remark
+    public PrmVoucherNewCar PrmVoucherNewCar { get; set; } = null!;
 }

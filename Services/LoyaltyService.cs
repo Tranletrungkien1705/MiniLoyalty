@@ -111,6 +111,13 @@ public interface ILoyaltyService
     Task<CretaBuyCarResult> CalcPointBuyCretaAsync(string? modelCode, string? cardTypeUse, DateTime? deliveryDate, string? idCardNo, string? dealNo, int? memberId = null);
     Task<List<ExpenseTypePolicy>> ExpenseTypePoliciesAsync();
     Task<(bool ok, string msg, int id)> SaveExpenseTypePolicyAsync(ExpenseTypePolicy policy);
+    Task<List<PrmVoucherNewCar>> PrmVoucherNewCarsAsync(PrmVoucherNewCarStatus? status = null);
+    Task<PrmVoucherNewCar?> PrmVoucherNewCarAsync(int id);
+    Task<(bool ok, string msg, int id)> CreatePrmVoucherNewCarAsync(PrmVoucherNewCar prm);
+    Task<(bool ok, string msg)> ApprovePrmVoucherNewCarAsync(int id, string? remark, string? by = null);
+    Task<(bool ok, string msg)> FinishPrmVoucherNewCarAsync(int id, string? remark, string? by = null);
+    Task<(bool ok, string msg)> CancelPrmVoucherNewCarAsync(int id, string? remark, string? by = null);
+    Task<PrmVoucherNewCar?> CalcPrmVoucherNewCarAsync(string? modelCode, DateTime? today = null);
 }
 
 public class LoyaltyService(AppDbContext db) : ILoyaltyService
@@ -1594,5 +1601,131 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
         existing.Remark = policy.Remark;
         await db.SaveChangesAsync();
         return (true, $"Đã cập nhật chính sách đối tượng tích điểm {code}.", existing.Id);
+    }
+
+    /// <summary>
+    /// Liệt kê chương trình tặng điểm voucher xe mới (Prm_VoucherNewCar), lọc theo trạng thái.
+    /// </summary>
+    public async Task<List<PrmVoucherNewCar>> PrmVoucherNewCarsAsync(PrmVoucherNewCarStatus? status = null)
+    {
+        var q = db.PrmVoucherNewCars.Include(x => x.Specs).Include(x => x.Details).AsQueryable();
+        if (status.HasValue) q = q.Where(x => x.Status == status.Value);
+        var list = await q.ToListAsync();
+        return list.OrderByDescending(x => x.CreatedAt).ToList();
+    }
+
+    public Task<PrmVoucherNewCar?> PrmVoucherNewCarAsync(int id) =>
+        db.PrmVoucherNewCars.Include(x => x.Specs).Include(x => x.Details).FirstOrDefaultAsync(x => x.Id == id);
+
+    /// <summary>
+    /// Tạo chương trình tặng điểm voucher xe mới (Prm_VoucherNewCar_SaveX, Promotion.cs): HTV cấu hình chương trình
+    /// tặng điểm voucher cho khách mua xe mới theo dòng xe. Khởi tạo ở trạng thái PENDING. Sinh mã hệ thống
+    /// PRMVC.&lt;năm&gt;.&lt;seq&gt;. Kiểm tra theo hệ nguồn: cần tên chương trình, ngày bắt đầu &lt;= ngày kết thúc,
+    /// và điểm sử dụng tối đa (PointUseLimitAllModel) &lt;= điểm voucher tặng (PointVoucherAllModel).
+    /// </summary>
+    public async Task<(bool ok, string msg, int id)> CreatePrmVoucherNewCarAsync(PrmVoucherNewCar prm)
+    {
+        if (string.IsNullOrWhiteSpace(prm.PrmVoucherName)) return (false, "Cần tên chương trình.", 0);
+        if (prm.EffDateStart == default) return (false, "Cần ngày bắt đầu hiệu lực (EffDateStart).", 0);
+        if (prm.EffDateEnd == default) return (false, "Cần ngày kết thúc hiệu lực (EffDateEnd).", 0);
+        if (prm.EffDateStart.Date > prm.EffDateEnd.Date)
+            return (false, "Ngày bắt đầu hiệu lực phải <= ngày kết thúc hiệu lực.", 0);
+        // Luật chéo (Prm_VoucherNewCar_SaveX): điểm sử dụng tối đa <= điểm voucher tặng.
+        if (prm.PointUseLimitAllModel > prm.PointVoucherAllModel)
+            return (false, "Điểm sử dụng tối đa (PointUseLimitAllModel) phải <= điểm voucher tặng (PointVoucherAllModel).", 0);
+
+        var seq = await db.PrmVoucherNewCars.CountAsync() + 1;
+        prm.PrmVoucherCode = $"PRMVC.{DateTime.Now:yyyy}.{seq:D4}";
+        prm.Status = PrmVoucherNewCarStatus.Pending;
+        prm.CreatedAt = DateTime.Now;
+        db.PrmVoucherNewCars.Add(prm);
+        await db.SaveChangesAsync();
+        return (true, $"Đã tạo chương trình {prm.PrmVoucherCode} (PENDING).", prm.Id);
+    }
+
+    /// <summary>
+    /// Duyệt chương trình (Prm_VoucherNewCar_ApprX): chỉ duyệt được chương trình đang PENDING.
+    /// Đặt Status = APPROVE, ghi ApproveAt/ApproveBy/Remark.
+    /// </summary>
+    public async Task<(bool ok, string msg)> ApprovePrmVoucherNewCarAsync(int id, string? remark, string? by = null)
+    {
+        var p = await db.PrmVoucherNewCars.FirstOrDefaultAsync(x => x.Id == id);
+        if (p == null) return (false, "Không tìm thấy chương trình.");
+        if (p.Status != PrmVoucherNewCarStatus.Pending) return (false, "Chỉ duyệt được chương trình đang PENDING.");
+
+        p.Status = PrmVoucherNewCarStatus.Approve;
+        p.ApproveAt = DateTime.Now;
+        p.ApproveBy = by;
+        p.Remark = remark;
+        await db.SaveChangesAsync();
+        return (true, $"Đã duyệt chương trình {p.PrmVoucherCode} (APPROVE).");
+    }
+
+    /// <summary>
+    /// Hoàn tất chương trình (Prm_VoucherNewCar_FinishX): chỉ hoàn tất được chương trình đang APPROVE.
+    /// Đặt Status = FINISH (chương trình có hiệu lực). Nếu đã có chương trình FINISH đang hiệu lực,
+    /// cắt hiệu lực chương trình cũ (EffDateEnd = ngày trước ngày bắt đầu chương trình mới).
+    /// </summary>
+    public async Task<(bool ok, string msg)> FinishPrmVoucherNewCarAsync(int id, string? remark, string? by = null)
+    {
+        var p = await db.PrmVoucherNewCars.FirstOrDefaultAsync(x => x.Id == id);
+        if (p == null) return (false, "Không tìm thấy chương trình.");
+        if (p.Status != PrmVoucherNewCarStatus.Approve) return (false, "Chỉ hoàn tất được chương trình đang APPROVE.");
+
+        p.Status = PrmVoucherNewCarStatus.Finish;
+        p.FinishAt = DateTime.Now;
+        p.FinishBy = by;
+        if (!string.IsNullOrWhiteSpace(remark)) p.Remark = remark;
+        await db.SaveChangesAsync();
+
+        // Cắt hiệu lực chương trình FINISH trước đó đang hiệu lực (Prm_VoucherNewCar_FinishX).
+        var today = DateTime.Today;
+        var prev = await db.PrmVoucherNewCars.FirstOrDefaultAsync(x => x.Id != p.Id
+            && x.Status == PrmVoucherNewCarStatus.Finish && x.EffDateStart <= today && x.EffDateEnd >= today);
+        if (prev != null)
+        {
+            prev.EffDateEnd = p.EffDateStart <= today ? today.AddDays(-1) : p.EffDateStart.AddDays(-1);
+            await db.SaveChangesAsync();
+        }
+
+        return (true, $"Đã hoàn tất chương trình {p.PrmVoucherCode} (FINISH) — chương trình có hiệu lực.");
+    }
+
+    /// <summary>
+    /// Huỷ chương trình (Prm_VoucherNewCar_CancelX): huỷ được chương trình đang PENDING/APPROVE.
+    /// Đặt Status = CANCEL, ghi CancelAt/CancelBy/Remark.
+    /// </summary>
+    public async Task<(bool ok, string msg)> CancelPrmVoucherNewCarAsync(int id, string? remark, string? by = null)
+    {
+        var p = await db.PrmVoucherNewCars.FirstOrDefaultAsync(x => x.Id == id);
+        if (p == null) return (false, "Không tìm thấy chương trình.");
+        if (p.Status != PrmVoucherNewCarStatus.Pending && p.Status != PrmVoucherNewCarStatus.Approve)
+            return (false, "Chỉ huỷ được chương trình đang PENDING/APPROVE.");
+
+        p.Status = PrmVoucherNewCarStatus.Cancel;
+        p.CancelAt = DateTime.Now;
+        p.CancelBy = by;
+        p.Remark = remark;
+        await db.SaveChangesAsync();
+        return (true, $"Đã huỷ chương trình {p.PrmVoucherCode} (CANCEL).");
+    }
+
+    /// <summary>
+    /// Tra chương trình tặng điểm voucher xe mới đang hiệu lực (Prm_VoucherNewCar_CalcPrmX, Promotion.Calc.cs):
+    /// tìm chương trình FINISH đang trong khoảng hiệu lực [EffDateStart, EffDateEnd] tại ngày xét. Nếu chương trình
+    /// áp dụng cho tất cả dòng xe (FlagAllModel) thì trả về luôn; ngược lại chỉ trả về khi dòng xe (ModelCode)
+    /// nằm trong danh sách Prm_VoucherNewCarSpec. Trả về null nếu không có chương trình phù hợp.
+    /// </summary>
+    public async Task<PrmVoucherNewCar?> CalcPrmVoucherNewCarAsync(string? modelCode, DateTime? today = null)
+    {
+        var d = (today ?? DateTime.Today).Date;
+        var active = await db.PrmVoucherNewCars.Include(x => x.Specs).Include(x => x.Details)
+            .Where(x => x.Status == PrmVoucherNewCarStatus.Finish && x.EffDateStart <= d && x.EffDateEnd >= d)
+            .OrderByDescending(x => x.CreatedAt)
+            .FirstOrDefaultAsync();
+        if (active == null) return null;
+        if (active.FlagAllModel) return active;
+        if (string.IsNullOrWhiteSpace(modelCode)) return null;
+        return active.Specs.Any(s => s.ModelCode == modelCode) ? active : null;
     }
 }

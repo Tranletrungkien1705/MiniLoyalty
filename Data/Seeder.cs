@@ -428,6 +428,41 @@ public static class Seeder
                 new ExpenseTypePolicy { PolicyExpenseTypeNo = "PET.ROWARRANTY", ExpenseType = "ROWARRANTY", ExpenseTypeNameActual = "Bảo hành", FlagPoint = false, FlagPointRank = false, FlagCountService = false, FlagDiscount = false, AmountRate = 0m, MaxRankReviewPoint = 0, MaxAccumulationPoint = 0, DiscountRate = 0 });
             await db.SaveChangesAsync();
         }
+        if (!await db.PrmVoucherNewCars.AnyAsync())
+        {
+            // Chương trình tặng điểm voucher xe mới mẫu (Prm_VoucherNewCar) — minh hoạ luồng duyệt PENDING → APPROVE → FINISH.
+            // 1 chương trình đang hiệu lực (FINISH, tất cả dòng xe) + 1 chương trình theo dòng xe (PENDING).
+            var active = new PrmVoucherNewCar
+            {
+                PrmVoucherCode = $"PRMVC.{DateTime.Now:yyyy}.0001",
+                PrmVoucherName = "Voucher xe mới Q3",
+                QtyDayLimitFDlvDate = 30, ValidityPeriod = 90,
+                EffDateStart = DateTime.Today.AddMonths(-1), EffDateEnd = new DateTime(9999, 12, 31),
+                FlagAllModel = true, PointVoucherAllModel = 200_000, PointUseLimitAllModel = 100_000,
+                Status = PrmVoucherNewCarStatus.Finish,
+                Remark = "Chương trình đang hiệu lực — tất cả dòng xe",
+                CreatedAt = DateTime.Now.AddMonths(-1), CreatedBy = "HTV",
+                ApproveAt = DateTime.Now.AddMonths(-1), ApproveBy = "HTV",
+                FinishAt = DateTime.Now.AddMonths(-1), FinishBy = "HTV"
+            };
+            db.PrmVoucherNewCars.Add(active);
+            var pending = new PrmVoucherNewCar
+            {
+                PrmVoucherCode = $"PRMVC.{DateTime.Now:yyyy}.0002",
+                PrmVoucherName = "Voucher xe mới theo dòng xe",
+                QtyDayLimitFDlvDate = 15, ValidityPeriod = 60,
+                EffDateStart = DateTime.Today.AddDays(7), EffDateEnd = new DateTime(9999, 12, 31),
+                FlagAllModel = false, PointVoucherAllModel = 0, PointUseLimitAllModel = 0,
+                Status = PrmVoucherNewCarStatus.Pending,
+                Remark = "Chờ duyệt — áp dụng cho một số dòng xe", CreatedAt = DateTime.Now.AddDays(-1), CreatedBy = "HTV"
+            };
+            pending.Specs.Add(new PrmVoucherNewCarSpec { Idx = 1, ModelCode = "VIOS" });
+            pending.Specs.Add(new PrmVoucherNewCarSpec { Idx = 2, ModelCode = "CRV" });
+            pending.Details.Add(new PrmVoucherNewCarDtl { Idx = 1, PointVoucher = 200_000, PointUseLimit = 100_000 });
+            pending.Details.Add(new PrmVoucherNewCarDtl { Idx = 2, PointVoucher = 300_000, PointUseLimit = 150_000 });
+            db.PrmVoucherNewCars.Add(pending);
+            await db.SaveChangesAsync();
+        }
     }
 
     /// <summary>

@@ -36,6 +36,9 @@ public class AppDbContext : DbContext
     public DbSet<PrmCarRecommendDtl> PrmCarRecommendDtls => Set<PrmCarRecommendDtl>();
     public DbSet<CretaBuyCarPolicy> CretaBuyCarPolicies => Set<CretaBuyCarPolicy>();
     public DbSet<ExpenseTypePolicy> ExpenseTypePolicies => Set<ExpenseTypePolicy>();
+    public DbSet<PrmVoucherNewCar> PrmVoucherNewCars => Set<PrmVoucherNewCar>();
+    public DbSet<PrmVoucherNewCarSpec> PrmVoucherNewCarSpecs => Set<PrmVoucherNewCarSpec>();
+    public DbSet<PrmVoucherNewCarDtl> PrmVoucherNewCarDtls => Set<PrmVoucherNewCarDtl>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -171,6 +174,21 @@ public class AppDbContext : DbContext
             e.Property(x => x.MaxRankReviewPoint).HasPrecision(18, 2);
             e.Property(x => x.MaxAccumulationPoint).HasPrecision(18, 2);
             e.Property(x => x.DiscountRate).HasPrecision(5, 2);
+            e.HasQueryFilter(x => x.OrgId == _orgId);
+        });
+        b.Entity<PrmVoucherNewCar>(e =>
+        {
+            e.HasIndex(x => x.PrmVoucherCode).IsUnique();
+            e.HasQueryFilter(x => x.OrgId == _orgId);
+        });
+        b.Entity<PrmVoucherNewCarSpec>(e =>
+        {
+            e.HasOne(x => x.PrmVoucherNewCar).WithMany(x => x.Specs).HasForeignKey(x => x.PrmVoucherNewCarId);
+            e.HasQueryFilter(x => x.OrgId == _orgId);
+        });
+        b.Entity<PrmVoucherNewCarDtl>(e =>
+        {
+            e.HasOne(x => x.PrmVoucherNewCar).WithMany(x => x.Details).HasForeignKey(x => x.PrmVoucherNewCarId);
             e.HasQueryFilter(x => x.OrgId == _orgId);
         });
     }
