@@ -252,6 +252,46 @@ public static class Seeder
             db.CardExceptions.Add(ex);
             await db.SaveChangesAsync();
         }
+        if (!await db.RankHistories.AnyAsync())
+        {
+            // Lịch sử xét hạng mẫu (Crd_CardRank, DealPointType=LOYALTY) — minh hoạ audit trail UP/KEEP/DOWN
+            // kèm ảnh chụp hạng trước/sau của hội viên.
+            var tiers = await db.RankTiers.OrderBy(t => t.SortOrder).ToListAsync();
+            var ms = await db.Members.OrderBy(x => x.Id).Take(3).ToListAsync();
+            if (ms.Count >= 3)
+            {
+                var d = DateTime.Today.AddMonths(-12);
+                db.RankHistories.AddRange(
+                    new RankHistory
+                    {
+                        CardRankNo = $"CRK.{d:yyyyMMdd}.{ms[0].Code}", MemberId = ms[0].Id, RankPolicyCode = "DEFAULT",
+                        Action = RankActionType.Up, CardSourceCode = "UP", DealPointType = "LOYALTY",
+                        FunctionName = "RunRankKeepDownJobAsync", FunctionRemark = $"Xét hạng cuối kỳ {d:dd/MM/yyyy}: {tiers[1].Name} → {tiers[2].Name}",
+                        RankTierIdBefore = tiers[1].Id, PointCardRankBefore = 1200, QtyVisitBefore = 2,
+                        RankTierIdAfter = tiers[2].Id, PointCardRankAfter = 0, QtyVisitAfter = 0,
+                        EffDateStart = d, EffDateEnd = d.AddMonths(12), CreatedAt = d, CreatedBy = "SYSTEM"
+                    },
+                    new RankHistory
+                    {
+                        CardRankNo = $"CRK.{d:yyyyMMdd}.{ms[1].Code}", MemberId = ms[1].Id, RankPolicyCode = "DEFAULT",
+                        Action = RankActionType.Keep, CardSourceCode = "KEEP", DealPointType = "LOYALTY",
+                        FunctionName = "RunRankKeepDownJobAsync", FunctionRemark = $"Xét hạng cuối kỳ {d:dd/MM/yyyy}: {tiers[2].Name} → {tiers[2].Name}",
+                        RankTierIdBefore = tiers[2].Id, PointCardRankBefore = 1500, QtyVisitBefore = 3,
+                        RankTierIdAfter = tiers[2].Id, PointCardRankAfter = 0, QtyVisitAfter = 0,
+                        EffDateStart = d, EffDateEnd = d.AddMonths(12), CreatedAt = d, CreatedBy = "SYSTEM"
+                    },
+                    new RankHistory
+                    {
+                        CardRankNo = $"CRK.{d:yyyyMMdd}.{ms[2].Code}", MemberId = ms[2].Id, RankPolicyCode = "DEFAULT",
+                        Action = RankActionType.Down, CardSourceCode = "DOWN", DealPointType = "LOYALTY",
+                        FunctionName = "RunRankKeepDownJobAsync", FunctionRemark = $"Xét hạng cuối kỳ {d:dd/MM/yyyy}: {tiers[2].Name} → {tiers[1].Name}",
+                        RankTierIdBefore = tiers[2].Id, PointCardRankBefore = 200, QtyVisitBefore = 0,
+                        RankTierIdAfter = tiers[1].Id, PointCardRankAfter = 0, QtyVisitAfter = 0,
+                        EffDateStart = d, EffDateEnd = d.AddMonths(12), CreatedAt = d, CreatedBy = "SYSTEM"
+                    });
+                await db.SaveChangesAsync();
+            }
+        }
     }
 
     /// <summary>

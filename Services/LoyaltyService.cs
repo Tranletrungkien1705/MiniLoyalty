@@ -66,6 +66,7 @@ public interface ILoyaltyService
     Task<(bool ok, string msg, int id)> RequestCardExceptionAsync(int memberId, string? dlCodeExceptionally, string? remark, List<string> dealerCodes);
     Task<(bool ok, string msg)> ApproveCardExceptionAsync(int id, string? remarkHtv, string? by = null);
     Task<(bool ok, string msg)> RejectCardExceptionAsync(int id, string? remarkHtv, string? by = null);
+    Task<List<RankHistory>> RankHistoryAsync(int? memberId = null);
 }
 
 public class LoyaltyService(AppDbContext db) : ILoyaltyService
@@ -293,12 +294,40 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
             else if (canKeep) { target = current; action = "KEEP"; kept++; }
             else { target = tiers[Math.Max(0, idx - 1)]; action = "DOWN"; down++; }
 
+            // Ảnh chụp TRƯỚC khi xét (Crd_MemberBefore/Crd_CardBefore) — lấy trước khi reset kỳ mới.
+            var pointCardRankBefore = m.PointCardRank;
+            var qtyVisitBefore = m.QtyVisitAvail;
+
             m.RankTierId = target.Id;
             m.CardSourceCode = action;
             m.EffDateStart = d;
             m.EffDateEnd = d.AddMonths(12);   // kỳ xét hạng 12 tháng
             m.PointCardRank = 0;              // reset điểm xét hạng cho kỳ mới
             m.QtyVisitAvail = 0;              // reset lượt dịch vụ cho kỳ mới
+
+            // Ghi lịch sử xét hạng (Crd_CardRank, DealPointType=LOYALTY): audit trail UP/KEEP/DOWN
+            // kèm ảnh chụp TRƯỚC/SAU của hội viên — để tra cứu vì sao lên/xuống hạng kỳ này.
+            db.RankHistories.Add(new RankHistory
+            {
+                CardRankNo = $"CRK.{d:yyyyMMdd}.{m.Code}",
+                MemberId = m.Id,
+                RankPolicyCode = "DEFAULT",
+                Action = action switch { "UP" => RankActionType.Up, "KEEP" => RankActionType.Keep, _ => RankActionType.Down },
+                CardSourceCode = action,
+                DealPointType = "LOYALTY",
+                FunctionName = "RunRankKeepDownJobAsync",
+                FunctionRemark = $"Xét hạng cuối kỳ {d:dd/MM/yyyy}: {current.Name} → {target.Name}",
+                RankTierIdBefore = current.Id,
+                PointCardRankBefore = pointCardRankBefore,
+                QtyVisitBefore = qtyVisitBefore,
+                RankTierIdAfter = target.Id,
+                PointCardRankAfter = 0,
+                QtyVisitAfter = 0,
+                EffDateStart = m.EffDateStart,
+                EffDateEnd = m.EffDateEnd,
+                CreatedAt = DateTime.Now,
+                CreatedBy = "SYSTEM"
+            });
 
             details.Add((m.Code, m.Name, current.Name, target.Name, action));
         }
@@ -947,6 +976,19 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
             .OrderBy(g => g.Key.SortOrder)
             .Select(g => (g.Key.Name, g.Key.ColorHex, g.Count())).ToList();
         return new LoyaltyDash(members.Count, members.Sum(m => m.Points), members.Sum(m => m.LifetimePoints), byRank);
+    }
+
+    /// <summary>
+    /// Lịch sử xét hạng (Crd_CardRank, DealPointType=LOYALTY): danh sách các lần job xét hạng cuối kỳ
+    /// đã xử lý hội viên (UP/KEEP/DOWN) kèm ảnh chụp hạng trước/sau. Lọc theo hội viên nếu có.
+    /// </summary>
+    public async Task<List<RankHistory>> RankHistoryAsync(int? memberId = null)
+    {
+        var q = db.RankHistories.Include(h => h.Member)
+            .Include(h => h.RankTierBefore).Include(h => h.RankTierAfter).AsQueryable();
+        if (memberId.HasValue) q = q.Where(h => h.MemberId == memberId.Value);
+        var list = await q.ToListAsync();
+        return list.OrderByDescending(h => h.CreatedAt).ToList();
     }
 
     private async Task<RankTier> LowestRankAsync() =>

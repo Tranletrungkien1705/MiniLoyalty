@@ -22,6 +22,12 @@ public enum ChangeRequestType { ChangeInfo = 0, CancelMember = 1 }   // TConst.R
 /// <summary>Trạng thái yêu cầu đặc cách thẻ (Crd_Card.CardStatus của kỳ thẻ đặc cách): PENDING → APPROVE, hoặc CANCEL khi từ chối.</summary>
 public enum CardExceptionStatus { Pending = 0, Approve = 1, Cancel = 2 }   // TConst.CardStatus.Pending/Approve/Cancel
 
+/// <summary>
+/// Hành động xét hạng (Crd_CardRank.FunctionActionType / TConst.RankActionType): ghi lại kết quả
+/// mỗi lần job xét hạng cuối kỳ xử lý 1 hội viên — UP nâng hạng, KEEP duy trì, DOWN xuống hạng.
+/// </summary>
+public enum RankActionType { Up = 0, Keep = 1, Down = 2 }   // TConst.RankActionType.Up/Keep/Down
+
 /// <summary>Hạng thẻ — xếp theo điểm tích lũy trọn đời (lifetime), kèm % chiết khấu.</summary>
 public class RankTier
 {
@@ -335,4 +341,42 @@ public class CardExceptionDealer : IOrgOwned
     public string DealerCode { get; set; } = "";            // Crd_CardDealerUseException.DealerCode — mã đại lý
     public string? Remark { get; set; }                     // Crd_CardDealerUseException.Remark
     public CardException CardException { get; set; } = null!;
+}
+
+/// <summary>
+/// Lịch sử xét hạng (Crd_CardRank, DealPointType=LOYALTY): mỗi lần job xét hạng cuối kỳ xử lý 1 hội viên,
+/// hệ thống ghi 1 bản ghi lưu lại hành động (UP/KEEP/DOWN) kèm ảnh chụp TRƯỚC/SAU của hội viên và thẻ
+/// (Crd_MemberBefore/Crd_CardBefore/Crd_MemberAfter/Crd_CardAfter). Đây là audit trail của quá trình xét hạng,
+/// KHÔNG thay đổi điểm — chỉ để tra cứu "vì sao hội viên lên/xuống hạng kỳ này".
+/// </summary>
+public class RankHistory : IOrgOwned
+{
+    public int Id { get; set; }
+    public Guid OrgId { get; set; }
+    public string CardRankNo { get; set; } = "";            // Crd_CardRank.CardRankNo — số bản ghi xét hạng
+    public int MemberId { get; set; }                       // hội viên được xét (suy từ Crd_CardBefore/After)
+    public string? RankPolicyCode { get; set; }             // Crd_CardRank.RankPolicyCode — mã chính sách xét hạng
+    public RankActionType Action { get; set; }              // Crd_CardRank.FunctionActionType — UP/KEEP/DOWN
+    public string CardSourceCode { get; set; } = "";        // Crd_CardRank.CardSourceCode — nguồn thẻ (UP/KEEP/DOWN)
+    public string DealPointType { get; set; } = "LOYALTY";  // Crd_CardRank.DealPointType — luôn LOYALTY cho xét hạng
+    public string FunctionName { get; set; } = "";          // Crd_CardRank.FunctionName — hàm xử lý (audit)
+    public string? FunctionRemark { get; set; }             // Crd_CardRank.FunctionRemark — ghi chú xử lý
+
+    // Ảnh chụp TRƯỚC khi xét (Crd_MemberBefore/Crd_CardBefore).
+    public int RankTierIdBefore { get; set; }               // hạng thẻ trước khi xét
+    public int PointCardRankBefore { get; set; }            // điểm xét hạng trong kỳ trước khi xét
+    public int QtyVisitBefore { get; set; }                 // lượt dịch vụ trong kỳ trước khi xét
+    // Ảnh chụp SAU khi xét (Crd_MemberAfter/Crd_CardAfter).
+    public int RankTierIdAfter { get; set; }                // hạng thẻ sau khi xét
+    public int PointCardRankAfter { get; set; }             // điểm xét hạng sau khi xét (đã reset)
+    public int QtyVisitAfter { get; set; }                  // lượt dịch vụ sau khi xét (đã reset)
+    public DateTime? EffDateStart { get; set; }             // Crd_Card.EffDateStart — đầu kỳ mới
+    public DateTime? EffDateEnd { get; set; }               // Crd_Card.EffDateEnd — cuối kỳ mới
+
+    public DateTime CreatedAt { get; set; } = DateTime.Now; // Crd_CardRank.CreateDTimeUTC
+    public string? CreatedBy { get; set; }                  // Crd_CardRank.CreateBy
+
+    public Member Member { get; set; } = null!;
+    public RankTier? RankTierBefore { get; set; }
+    public RankTier? RankTierAfter { get; set; }
 }

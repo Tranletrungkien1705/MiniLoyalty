@@ -1,0 +1,48 @@
+@model List<RankHistory>
+@{
+    ViewData["Title"] = "Lịch sử xét hạng";
+    var memberId = (int?)ViewBag.MemberId;
+    var members = (List<Member>)ViewBag.Members;
+    string ActName(RankActionType a) => a switch { RankActionType.Up => "Nâng hạng", RankActionType.Keep => "Duy trì", RankActionType.Down => "Xuống hạng", _ => a.ToString() };
+    string ActBadge(RankActionType a) => a switch { RankActionType.Up => "bg-success-subtle text-success", RankActionType.Keep => "bg-info-subtle text-info", RankActionType.Down => "bg-danger-subtle text-danger", _ => "bg-secondary-subtle" };
+}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div><h5 class="fw-bold mb-0"><i class="bi bi-clock-history me-2"></i>Lịch sử xét hạng</h5>
+        <small class="text-muted">Crd_CardRank (DealPointType=LOYALTY) — audit trail UP/KEEP/DOWN kèm hạng trước/sau</small></div>
+</div>
+
+<form method="get" class="row g-2 mb-3">
+    <div class="col-md-4">
+        <select name="memberId" class="form-select form-select-sm" onchange="this.form.submit()">
+            <option value="">— Tất cả hội viên —</option>
+            @foreach (var m in members)
+            {
+                <option value="@m.Id" selected="@(memberId == m.Id)">@m.Code · @m.Name</option>
+            }
+        </select>
+    </div>
+    <div class="col-md-2"><button class="btn btn-outline-primary btn-sm w-100">Lọc</button></div>
+</form>
+
+<div class="card"><div class="table-responsive"><table class="table table-hover align-middle mb-0">
+    <thead><tr><th>Mã xét hạng</th><th>Hội viên</th><th>Hành động</th><th>Hạng trước</th><th>Hạng sau</th><th class="text-end">Điểm xét hạng</th><th class="text-end">Lượt DV</th><th>Thời gian</th></tr></thead>
+    <tbody>
+        @if (Model.Count == 0)
+        {
+            <tr><td colspan="8" class="text-center text-muted small py-4">Chưa có lịch sử xét hạng. Chạy job "Xét hạng cuối kỳ" để phát sinh.</td></tr>
+        }
+        @foreach (var h in Model)
+        {
+            <tr>
+                <td class="small font-monospace">@h.CardRankNo</td>
+                <td class="small">@h.Member?.Name <span class="text-muted font-monospace">@h.Member?.Code</span></td>
+                <td><span class="badge @ActBadge(h.Action)">@ActName(h.Action)</span></td>
+                <td class="small"><span class="rank-chip" style="background:@(h.RankTierBefore?.ColorHex ?? "#94a3b8")">@(h.RankTierBefore?.Name ?? "—")</span></td>
+                <td class="small"><span class="rank-chip" style="background:@(h.RankTierAfter?.ColorHex ?? "#94a3b8")">@(h.RankTierAfter?.Name ?? "—")</span></td>
+                <td class="text-end text-muted">@h.PointCardRankBefore.ToString("N0")</td>
+                <td class="text-end text-muted">@h.QtyVisitBefore</td>
+                <td class="small text-muted">@h.CreatedAt.ToString("dd/MM/yyyy HH:mm")</td>
+            </tr>
+        }
+    </tbody>
+</table></div></div>

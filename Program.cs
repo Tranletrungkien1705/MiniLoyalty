@@ -85,6 +85,19 @@ app.MapPost("/api/rank/keepdown/run", async (ILoyaltyService svc) =>
     return Results.Ok(new { date = r.Date, up = r.Up, kept = r.Kept, down = r.Down, details = r.Details });
 });
 
+// API lịch sử xét hạng (Crd_CardRank, DealPointType=LOYALTY): audit trail UP/KEEP/DOWN kèm hạng trước/sau.
+app.MapGet("/api/rank/history", async (int? memberId, ILoyaltyService svc) =>
+{
+    var list = await svc.RankHistoryAsync(memberId);
+    return Results.Ok(list.Select(h => new
+    {
+        h.CardRankNo, memberCode = h.Member?.Code, memberName = h.Member?.Name,
+        action = h.Action.ToString(), h.CardSourceCode, h.DealPointType,
+        rankBefore = h.RankTierBefore?.Name, rankAfter = h.RankTierAfter?.Name,
+        h.PointCardRankBefore, h.QtyVisitBefore, h.FunctionRemark, h.CreatedAt
+    }));
+});
+
 // API thưởng điểm giới thiệu (DealPointType=INTRODUCTION): cộng điểm cho người giới thiệu của hội viên mới.
 app.MapPost("/api/introduction/award", async (IntroDto dto, ILoyaltyService svc) =>
 {
