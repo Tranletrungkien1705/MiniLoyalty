@@ -287,24 +287,33 @@ app.MapPost("/api/changerequest/create", async (ChangeRequestCreateDto dto, ILoy
 });
 
 // API duyệt yêu cầu thay đổi (Crd_MemberChangeInfo_ApproveX): PENDING → APPROVE.
+// Gate quyền duyệt (Crd_MemberChangeInfo_CheckApproveRight): chỉ HTV hoặc đại lý khớp Đơn vị duyệt đã khóa.
 app.MapPost("/api/changerequest/approve", async (ChangeRequestActionDto dto, ILoyaltyService svc) =>
 {
-    var (ok, msg) = await svc.ApproveChangeRequestAsync(dto.RequestId, dto.RemarkHtv, dto.By);
+    var (ok, msg) = await svc.ApproveChangeRequestAsync(dto.RequestId, dto.RemarkHtv, dto.By, dto.DlcpCode);
     return ok ? Results.Ok(new { ok, msg }) : Results.BadRequest(new { ok, error = msg });
 });
 
 // API hoàn tất yêu cầu thay đổi (Crd_MemberChangeInfo_FinishX): APPROVE → FINISH, áp thay đổi vào hội viên.
 app.MapPost("/api/changerequest/finish", async (ChangeRequestActionDto dto, ILoyaltyService svc) =>
 {
-    var (ok, msg) = await svc.FinishChangeRequestAsync(dto.RequestId, dto.RemarkHtv, dto.By);
+    var (ok, msg) = await svc.FinishChangeRequestAsync(dto.RequestId, dto.RemarkHtv, dto.By, dto.DlcpCode);
     return ok ? Results.Ok(new { ok, msg }) : Results.BadRequest(new { ok, error = msg });
 });
 
 // API từ chối yêu cầu thay đổi (Crd_MemberChangeInfo_RejectX): PENDING/APPROVE → CANCEL.
 app.MapPost("/api/changerequest/reject", async (ChangeRequestActionDto dto, ILoyaltyService svc) =>
 {
-    var (ok, msg) = await svc.RejectChangeRequestAsync(dto.RequestId, dto.RemarkHtv, dto.By);
+    var (ok, msg) = await svc.RejectChangeRequestAsync(dto.RequestId, dto.RemarkHtv, dto.By, dto.DlcpCode);
     return ok ? Results.Ok(new { ok, msg }) : Results.BadRequest(new { ok, error = msg });
+});
+
+// API đơn vị duyệt đề nghị (Crd_MemberChangeInfo.ApproveDLCode): trả Đơn vị duyệt đã khóa ("HTV,<đại lý>")
+// + cờ FlagApproveAF (user có quyền duyệt không) — dùng để bật/tắt nút Duyệt trên màn chi tiết.
+app.MapGet("/api/changerequest/approveunit", async (int requestId, string? dlcpCode, ILoyaltyService svc) =>
+{
+    var (unit, flag) = await svc.ApproveUnitAsync(requestId, dlcpCode);
+    return Results.Ok(new { approveUnit = unit, flagApproveAF = flag });
 });
 
 // API tạo yêu cầu đặc cách thẻ (Crd_Card_RequestExceptionX): sinh kỳ thẻ đặc cách PENDING + danh sách đại lý chỉ định.
@@ -604,7 +613,7 @@ record InactiveDto(string? Phone, int? MemberId, string? Remark, string? By);
 record SupportAdjustDto(string? Phone, int? MemberId, int Points, string? Reason, string? RefNo);
 record ChangeRequestDetailDto(string ColumnCode, string? ValueNew);
 record ChangeRequestCreateDto(string? Phone, int? MemberId, ChangeRequestType RequestType, string? DlCode, string? Remark, List<ChangeRequestDetailDto>? Details);
-record ChangeRequestActionDto(int RequestId, string? RemarkHtv, string? By);
+record ChangeRequestActionDto(int RequestId, string? RemarkHtv, string? By, string? DlcpCode);
 record CardExceptionRequestDto(string? Phone, int? MemberId, string? DlCodeExceptionally, string? Remark, List<string>? DealerCodes);
 record CardExceptionActionDto(int Id, string? RemarkHtv, string? By);
 record MemberRegisterCreateDto(string? DlCodeRegis, DateTime? RegisterDate, string? VIN, string? CarNo, string? TradeMarkName, string? ModelName, string? CustomerName, string? CustomerPhoneNo, DateTime? CustomerDateOfBirth, string? CustomerIDNo, string? CustomerEmail, string? CustomerAddress, string? GenderCode, string? ProvinceName, string? DistrictName, string? MemberNoIntro, string? Remark);

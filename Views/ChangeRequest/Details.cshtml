@@ -3,9 +3,13 @@
     ViewData["Title"] = $"Yêu cầu {Model.RequestNo}";
     string StName(ChangeRequestStatus s) => s switch { ChangeRequestStatus.Pending => "Chờ duyệt", ChangeRequestStatus.Approve => "Đã duyệt", ChangeRequestStatus.Finish => "Hoàn tất", ChangeRequestStatus.Cancel => "Từ chối", _ => s.ToString() };
     string StBadge(ChangeRequestStatus s) => s switch { ChangeRequestStatus.Pending => "bg-warning-subtle text-warning", ChangeRequestStatus.Approve => "bg-info-subtle text-info", ChangeRequestStatus.Finish => "bg-success-subtle text-success", ChangeRequestStatus.Cancel => "bg-danger-subtle text-danger", _ => "bg-secondary-subtle" };
-    var canApprove = Model.Status == ChangeRequestStatus.Pending;
-    var canFinish = Model.Status == ChangeRequestStatus.Approve;
-    var canReject = Model.Status == ChangeRequestStatus.Pending || Model.Status == ChangeRequestStatus.Approve;
+    // Đơn vị duyệt (ApproveDLCode) đã khóa + cờ FlagApproveAF (user có quyền duyệt không).
+    var approveUnit = ViewBag.ApproveUnit as string;
+    var flagApproveAf = ViewBag.FlagApproveAF as bool? ?? true;
+    var dlcpCode = ViewBag.DlcpCode as string;
+    var canApprove = Model.Status == ChangeRequestStatus.Pending && flagApproveAf;
+    var canFinish = Model.Status == ChangeRequestStatus.Approve && flagApproveAf;
+    var canReject = (Model.Status == ChangeRequestStatus.Pending || Model.Status == ChangeRequestStatus.Approve) && flagApproveAf;
 }
 <div class="d-flex justify-content-between align-items-center mb-3">
     <div><h5 class="fw-bold mb-0"><i class="bi bi-pencil-square me-2"></i>@Model.RequestNo
@@ -39,6 +43,8 @@
             <h6 class="fw-bold mb-2"><i class="bi bi-info-circle me-1"></i>Thông tin xử lý</h6>
             <div class="small text-muted">Hội viên: <b>@Model.Member?.Name</b> <span class="font-monospace">@Model.Member?.Code</span></div>
             <div class="small text-muted">Đại lý gửi: <b>@(Model.DLCodeRequest ?? "—")</b></div>
+            <div class="small text-muted">Đơn vị duyệt (khóa lúc tạo): <b>@(approveUnit ?? "—")</b>
+                @if (!flagApproveAf) { <span class="badge bg-danger-subtle text-danger ms-1">Không có quyền duyệt</span> }</div>
             <div class="small text-muted">Ghi chú đại lý: @(Model.Remark ?? "—")</div>
             <div class="small text-muted">Ghi chú HTV: @(Model.RemarkHTV ?? "—")</div>
             @if (Model.ApproveAt.HasValue) { <div class="small text-muted">Duyệt lúc @Model.ApproveAt.Value.ToString("dd/MM/yyyy HH:mm") bởi @Model.ApproveBy</div> }
@@ -50,16 +56,20 @@
         <div class="card mb-3"><div class="card-body">
             <h6 class="fw-bold mb-2"><i class="bi bi-check2-square me-1"></i>Duyệt / Hoàn tất</h6>
             <div class="small text-muted mb-2">Luồng: PENDING → APPROVE (duyệt) → FINISH (áp thay đổi vào hội viên). Từ chối ở bước PENDING/APPROVE → CANCEL.</div>
+            <div class="small text-muted mb-2">Đơn vị duyệt: <b>@(approveUnit ?? "—")</b> — chỉ HTV hoặc đại lý này được duyệt.</div>
             <form asp-action="Approve" asp-route-id="@Model.Id" method="post" class="row g-2 mb-2">@Html.AntiForgeryToken()
+                <input type="hidden" name="dlcpCode" value="@dlcpCode" />
                 <div class="col-12"><input name="remarkHtv" class="form-control form-control-sm" placeholder="Ghi chú HTV khi duyệt" /></div>
                 <div class="col-12"><button class="btn btn-info btn-sm w-100" @(canApprove ? "" : "disabled")><i class="bi bi-check2 me-1"></i>Duyệt (APPROVE)</button></div>
             </form>
             <form asp-action="Finish" asp-route-id="@Model.Id" method="post" class="row g-2 mb-2">@Html.AntiForgeryToken()
+                <input type="hidden" name="dlcpCode" value="@dlcpCode" />
                 <div class="col-12"><input name="remarkHtv" class="form-control form-control-sm" placeholder="Ghi chú HTV khi hoàn tất" /></div>
                 <div class="col-12"><button class="btn btn-success btn-sm w-100" @(canFinish ? "" : "disabled")><i class="bi bi-flag me-1"></i>Hoàn tất (FINISH)</button></div>
             </form>
             <hr class="my-2" />
             <form asp-action="Reject" asp-route-id="@Model.Id" method="post" class="row g-2">@Html.AntiForgeryToken()
+                <input type="hidden" name="dlcpCode" value="@dlcpCode" />
                 <div class="col-12"><input name="remarkHtv" class="form-control form-control-sm" placeholder="Lý do từ chối" /></div>
                 <div class="col-12"><button class="btn btn-outline-danger btn-sm w-100" @(canReject ? "" : "disabled")><i class="bi bi-x-circle me-1"></i>Từ chối (CANCEL)</button></div>
             </form>

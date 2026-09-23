@@ -235,7 +235,10 @@ public static class Seeder
             {
                 RequestNo = $"CRQ.{DateTime.Now:yyyy}.{m.Code}.001",
                 MemberId = m.Id, RequestType = ChangeRequestType.ChangeInfo, Status = ChangeRequestStatus.Pending,
-                DLCodeRequest = "DL-DEMO-001", Remark = "Khách đổi số điện thoại và email", CreatedAt = DateTime.Now.AddDays(-1)
+                DLCodeRequest = "DL-DEMO-001",
+                // Đơn vị duyệt (ApproveDLCode) khóa lúc tạo = đại lý phát sinh lượt xét hạng gần nhất của hội viên.
+                ApproveDLCode = "DL-DEMO-001",
+                Remark = "Khách đổi số điện thoại và email", CreatedAt = DateTime.Now.AddDays(-1)
             };
             req.Details.Add(new MemberChangeRequestDtl { ColumnCode = "PhoneNo", ColumnValueNew = "0988777666" });
             req.Details.Add(new MemberChangeRequestDtl { ColumnCode = "Email", ColumnValueNew = "an.nguyen@example.com" });

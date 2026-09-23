@@ -76,9 +76,11 @@ public interface ILoyaltyService
     Task<List<MemberChangeRequest>> ChangeRequestsAsync(ChangeRequestStatus? status = null);
     Task<MemberChangeRequest?> ChangeRequestAsync(int id);
     Task<(bool ok, string msg, int id)> CreateChangeRequestAsync(int memberId, ChangeRequestType type, string? dlCode, string? remark, List<(string ColumnCode, string? ValueNew)> details);
-    Task<(bool ok, string msg)> ApproveChangeRequestAsync(int requestId, string? remarkHtv, string? by = null);
-    Task<(bool ok, string msg)> FinishChangeRequestAsync(int requestId, string? remarkHtv, string? by = null);
-    Task<(bool ok, string msg)> RejectChangeRequestAsync(int requestId, string? remarkHtv, string? by = null);
+    Task<(bool ok, string msg)> ApproveChangeRequestAsync(int requestId, string? remarkHtv, string? by = null, string? dlcpCode = null);
+    Task<(bool ok, string msg)> FinishChangeRequestAsync(int requestId, string? remarkHtv, string? by = null, string? dlcpCode = null);
+    Task<(bool ok, string msg)> RejectChangeRequestAsync(int requestId, string? remarkHtv, string? by = null, string? dlcpCode = null);
+    /// <summary>Đơn vị duyệt (ApproveDLCode) đã khóa của đề nghị + cờ FlagApproveAF (user có quyền duyệt không).</summary>
+    Task<(string? approveUnit, bool flagApproveAf)> ApproveUnitAsync(int requestId, string? dlcpCode);
     Task<List<CardException>> CardExceptionsAsync(CardExceptionStatus? status = null);
     Task<CardException?> CardExceptionAsync(int id);
     Task<(bool ok, string msg, int id)> RequestCardExceptionAsync(int memberId, string? dlCodeExceptionally, string? remark, List<string> dealerCodes);
@@ -848,12 +850,27 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
             if (bad.ColumnCode != null) return (false, $"Cột {bad.ColumnCode} không được phép thay đổi.", 0);
         }
 
+        // Đơn vị duyệt (Crd_MemberChangeInfo.ApproveDLCode): KHÓA tại thời điểm TẠO đề nghị.
+        // Chỉ ChangeInfo mới khóa đại lý phát sinh lượt xét hạng gần nhất của hội viên
+        // (CONSUMPTION/SERVICETURN, loại HTV/SUPPORT); CancelMember để rỗng (chỉ HTV duyệt).
+        string? approveDLCode = null;
+        if (type == ChangeRequestType.ChangeInfo)
+        {
+            approveDLCode = await db.PointTransactions
+                .Where(t => t.MemberId == memberId
+                    && (t.Type == PointTxType.Consumption || t.Type == PointTxType.ServiceTurn)
+                    && t.DLCode != null && t.DLCode != "HTV" && t.DLCode != "SUPPORT")
+                .OrderByDescending(t => t.CreatedAt)
+                .Select(t => t.DLCode)
+                .FirstOrDefaultAsync();
+        }
+
         var seq = await db.MemberChangeRequests.CountAsync() + 1;
         var req = new MemberChangeRequest
         {
             RequestNo = $"CRQ.{DateTime.Now:yyyy}.{m.Code}.{seq:D3}",
             MemberId = memberId, RequestType = type, Status = ChangeRequestStatus.Pending,
-            DLCodeRequest = dlCode, Remark = remark, CreatedAt = DateTime.Now
+            DLCodeRequest = dlCode, ApproveDLCode = approveDLCode, Remark = remark, CreatedAt = DateTime.Now
         };
         foreach (var d in details)
             req.Details.Add(new MemberChangeRequestDtl { ColumnCode = d.ColumnCode, ColumnValueNew = d.ValueNew });
@@ -867,11 +884,14 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
     /// Đặt RequestStatus = APPROVE, ghi ApproveAt/ApproveBy/RemarkHTV; các dòng chi tiết chuyển APPROVE.
     /// Chưa áp thay đổi vào hội viên (đó là bước FINISH).
     /// </summary>
-    public async Task<(bool ok, string msg)> ApproveChangeRequestAsync(int requestId, string? remarkHtv, string? by = null)
+    public async Task<(bool ok, string msg)> ApproveChangeRequestAsync(int requestId, string? remarkHtv, string? by = null, string? dlcpCode = null)
     {
         var r = await db.MemberChangeRequests.Include(x => x.Details).FirstOrDefaultAsync(x => x.Id == requestId);
         if (r == null) return (false, "Không tìm thấy yêu cầu.");
         if (r.Status != ChangeRequestStatus.Pending) return (false, "Chỉ duyệt được yêu cầu đang PENDING.");
+        // Gate quyền duyệt (Crd_MemberChangeInfo_CheckApproveRight): chỉ HTV hoặc đại lý khớp Đơn vị duyệt đã khóa.
+        var (rightOk, rightMsg) = CheckApproveRight(r, dlcpCode);
+        if (!rightOk) return (false, rightMsg);
 
         r.Status = ChangeRequestStatus.Approve;
         r.ApproveAt = DateTime.Now;
@@ -888,11 +908,14 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
     /// RequestStatus = FINISH. Với CancelMember: vô hiệu hoá hội viên (MemberStatus = Cancel, huỷ thẻ,
     /// dời hạn điểm về cuối tháng) — tái dùng InactivateMemberAsync. Ghi FinishAt/FinishBy/RemarkHTV.
     /// </summary>
-    public async Task<(bool ok, string msg)> FinishChangeRequestAsync(int requestId, string? remarkHtv, string? by = null)
+    public async Task<(bool ok, string msg)> FinishChangeRequestAsync(int requestId, string? remarkHtv, string? by = null, string? dlcpCode = null)
     {
         var r = await db.MemberChangeRequests.Include(x => x.Details).FirstOrDefaultAsync(x => x.Id == requestId);
         if (r == null) return (false, "Không tìm thấy yêu cầu.");
         if (r.Status != ChangeRequestStatus.Approve) return (false, "Chỉ hoàn tất được yêu cầu đang APPROVE.");
+        // Gate quyền duyệt (Crd_MemberChangeInfo_CheckApproveRight): chỉ HTV hoặc đại lý khớp Đơn vị duyệt đã khóa.
+        var (rightOk, rightMsg) = CheckApproveRight(r, dlcpCode);
+        if (!rightOk) return (false, rightMsg);
 
         var m = await db.Members.FirstOrDefaultAsync(x => x.Id == r.MemberId);
         if (m == null) return (false, "Không tìm thấy hội viên.");
@@ -928,17 +951,49 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
     /// Từ chối yêu cầu thay đổi (Crd_MemberChangeInfo_RejectX): chỉ từ chối được yêu cầu đang PENDING/APPROVE.
     /// Đặt RequestStatus = CANCEL, ghi RemarkHTV. Không áp thay đổi vào hội viên.
     /// </summary>
-    public async Task<(bool ok, string msg)> RejectChangeRequestAsync(int requestId, string? remarkHtv, string? by = null)
+    public async Task<(bool ok, string msg)> RejectChangeRequestAsync(int requestId, string? remarkHtv, string? by = null, string? dlcpCode = null)
     {
         var r = await db.MemberChangeRequests.FirstOrDefaultAsync(x => x.Id == requestId);
         if (r == null) return (false, "Không tìm thấy yêu cầu.");
         if (r.Status != ChangeRequestStatus.Pending && r.Status != ChangeRequestStatus.Approve)
             return (false, "Chỉ từ chối được yêu cầu đang PENDING/APPROVE.");
+        // Gate quyền từ chối (Crd_MemberChangeInfo_CheckApproveRight): chỉ HTV hoặc đại lý khớp Đơn vị duyệt đã khóa.
+        var (rightOk, rightMsg) = CheckApproveRight(r, dlcpCode);
+        if (!rightOk) return (false, rightMsg);
 
         r.Status = ChangeRequestStatus.Cancel;
         r.RemarkHTV = remarkHtv;
         await db.SaveChangesAsync();
         return (true, $"Đã từ chối yêu cầu {r.RequestNo} (CANCEL).");
+    }
+
+    /// <summary>
+    /// Gate quyền duyệt (Crd_MemberChangeInfo_CheckApproveRight): chỉ HTV hoặc đại lý khớp Đơn vị duyệt
+    /// (ApproveDLCode) đã khóa lúc tạo đề nghị mới được duyệt/hoàn tất/từ chối. HTV luôn thuộc đơn vị duyệt.
+    /// Nếu dlcpCode rỗng (không xác định được đại lý của user) thì bỏ qua gate (giữ tương thích UI demo).
+    /// </summary>
+    private static (bool ok, string msg) CheckApproveRight(MemberChangeRequest r, string? dlcpCode)
+    {
+        if (string.IsNullOrWhiteSpace(dlcpCode)) return (true, "");
+        if (string.Equals(dlcpCode, "HTV", StringComparison.OrdinalIgnoreCase)) return (true, "");
+        if (string.Equals(r.ApproveDLCode, dlcpCode, StringComparison.OrdinalIgnoreCase)) return (true, "");
+        return (false, $"Không có quyền duyệt: đơn vị duyệt đã khóa là '{r.ApproveDLCode ?? "(trống)"}', "
+            + $"chỉ HTV hoặc đại lý này được duyệt.");
+    }
+
+    /// <summary>
+    /// Đơn vị duyệt (ApproveDLCode) đã khóa của đề nghị + cờ FlagApproveAF (user có quyền duyệt không).
+    /// Hiển thị đơn vị duyệt dạng "HTV,&lt;đại lý&gt;" (giống hệ nguồn); FlagApproveAF = true khi đề nghị
+    /// đang PENDING/APPROVE và user là HTV hoặc khớp đại lý đã khóa.
+    /// </summary>
+    public async Task<(string? approveUnit, bool flagApproveAf)> ApproveUnitAsync(int requestId, string? dlcpCode)
+    {
+        var r = await db.MemberChangeRequests.FirstOrDefaultAsync(x => x.Id == requestId);
+        if (r == null) return (null, false);
+        var unit = string.IsNullOrWhiteSpace(r.ApproveDLCode) ? "HTV" : $"HTV,{r.ApproveDLCode}";
+        var open = r.Status == ChangeRequestStatus.Pending || r.Status == ChangeRequestStatus.Approve;
+        var (ok, _) = CheckApproveRight(r, dlcpCode);
+        return (unit, open && ok);
     }
 
     /// <summary>Danh sách yêu cầu đặc cách thẻ (Crd_Card FlagExceptionally=1), lọc theo trạng thái nếu có.</summary>

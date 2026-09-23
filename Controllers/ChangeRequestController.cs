@@ -16,10 +16,15 @@ public class ChangeRequestController(ILoyaltyService svc) : Controller
         return View(await svc.ChangeRequestsAsync(status));
     }
 
-    public async Task<IActionResult> Details(int id)
+    public async Task<IActionResult> Details(int id, string? dlcpCode)
     {
         var r = await svc.ChangeRequestAsync(id);
         if (r == null) return NotFound();
+        // Đơn vị duyệt (ApproveDLCode) đã khóa + cờ FlagApproveAF (user có quyền duyệt không).
+        var (unit, flag) = await svc.ApproveUnitAsync(id, dlcpCode);
+        ViewBag.ApproveUnit = unit;
+        ViewBag.FlagApproveAF = flag;
+        ViewBag.DlcpCode = dlcpCode;
         return View(r);
     }
 
@@ -47,26 +52,26 @@ public class ChangeRequestController(ILoyaltyService svc) : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    public async Task<IActionResult> Approve(int id, string? remarkHtv)
+    public async Task<IActionResult> Approve(int id, string? remarkHtv, string? dlcpCode)
     {
-        var (ok, msg) = await svc.ApproveChangeRequestAsync(id, remarkHtv, User?.Identity?.Name);
+        var (ok, msg) = await svc.ApproveChangeRequestAsync(id, remarkHtv, User?.Identity?.Name, dlcpCode);
         TempData[ok ? "Success" : "Error"] = msg;
-        return RedirectToAction(nameof(Details), new { id });
+        return RedirectToAction(nameof(Details), new { id, dlcpCode });
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    public async Task<IActionResult> Finish(int id, string? remarkHtv)
+    public async Task<IActionResult> Finish(int id, string? remarkHtv, string? dlcpCode)
     {
-        var (ok, msg) = await svc.FinishChangeRequestAsync(id, remarkHtv, User?.Identity?.Name);
+        var (ok, msg) = await svc.FinishChangeRequestAsync(id, remarkHtv, User?.Identity?.Name, dlcpCode);
         TempData[ok ? "Success" : "Error"] = msg;
-        return RedirectToAction(nameof(Details), new { id });
+        return RedirectToAction(nameof(Details), new { id, dlcpCode });
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    public async Task<IActionResult> Reject(int id, string? remarkHtv)
+    public async Task<IActionResult> Reject(int id, string? remarkHtv, string? dlcpCode)
     {
-        var (ok, msg) = await svc.RejectChangeRequestAsync(id, remarkHtv, User?.Identity?.Name);
+        var (ok, msg) = await svc.RejectChangeRequestAsync(id, remarkHtv, User?.Identity?.Name, dlcpCode);
         TempData[ok ? "Success" : "Error"] = msg;
-        return RedirectToAction(nameof(Details), new { id });
+        return RedirectToAction(nameof(Details), new { id, dlcpCode });
     }
 }

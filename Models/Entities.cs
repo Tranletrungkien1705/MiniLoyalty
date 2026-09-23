@@ -304,6 +304,11 @@ public class MemberChangeRequest : IOrgOwned
     public ChangeRequestType RequestType { get; set; } = ChangeRequestType.ChangeInfo;   // Crd_MemberChangeInfo.RequestType
     public ChangeRequestStatus Status { get; set; } = ChangeRequestStatus.Pending;       // Crd_MemberChangeInfo.RequestStatus
     public string? DLCodeRequest { get; set; }              // Crd_MemberChangeInfo.DLCodeRequest — đại lý gửi yêu cầu
+    // Đơn vị duyệt (Crd_MemberChangeInfo.ApproveDLCode): KHÓA tại thời điểm TẠO đề nghị = đại lý phát sinh
+    // lượt xét hạng gần nhất của hội viên (CONSUMPTION/SERVICETURN, loại HTV/SUPPORT). Chỉ ChangeInfo mới khóa
+    // đại lý; CancelMember để rỗng (chỉ HTV duyệt). Khi hiển thị prefix "HTV," (vd "HTV,VN040").
+    // Gate quyền duyệt A/F/Reject: chỉ HTV hoặc đại lý khớp ApproveDLCode mới được duyệt.
+    public string? ApproveDLCode { get; set; }              // Crd_MemberChangeInfo.ApproveDLCode — đơn vị duyệt (khóa lúc tạo)
     public DateTime CreatedAt { get; set; } = DateTime.Now; // Crd_MemberChangeInfo.CreateDTimeUTC
     public string? CreatedBy { get; set; }                  // Crd_MemberChangeInfo.CreateBy
     public DateTime? ApproveAt { get; set; }                // Crd_MemberChangeInfo.ApproveDTimeUTC
