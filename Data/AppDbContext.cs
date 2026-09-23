@@ -21,6 +21,9 @@ public class AppDbContext : DbContext
     public DbSet<ServicePolicy> ServicePolicies => Set<ServicePolicy>();
     public DbSet<Promotion> Promotions => Set<Promotion>();
     public DbSet<MemberPromotionUse> MemberPromotionUses => Set<MemberPromotionUse>();
+    public DbSet<MemberColumnChange> MemberColumnChanges => Set<MemberColumnChange>();
+    public DbSet<MemberChangeRequest> MemberChangeRequests => Set<MemberChangeRequest>();
+    public DbSet<MemberChangeRequestDtl> MemberChangeRequestDtls => Set<MemberChangeRequestDtl>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -69,6 +72,22 @@ public class AppDbContext : DbContext
         {
             e.HasOne(x => x.Member).WithMany(x => x.PromotionUses).HasForeignKey(x => x.MemberId);
             e.HasOne(x => x.PromotionNav).WithMany().HasForeignKey(x => x.PromotionId);
+            e.HasQueryFilter(x => x.OrgId == _orgId);
+        });
+        b.Entity<MemberColumnChange>(e =>
+        {
+            e.HasIndex(x => x.ColumnCode).IsUnique();
+            e.HasQueryFilter(x => x.OrgId == _orgId);
+        });
+        b.Entity<MemberChangeRequest>(e =>
+        {
+            e.HasIndex(x => x.RequestNo).IsUnique();
+            e.HasOne(x => x.Member).WithMany().HasForeignKey(x => x.MemberId);
+            e.HasQueryFilter(x => x.OrgId == _orgId);
+        });
+        b.Entity<MemberChangeRequestDtl>(e =>
+        {
+            e.HasOne(x => x.Request).WithMany(x => x.Details).HasForeignKey(x => x.RequestId);
             e.HasQueryFilter(x => x.OrgId == _orgId);
         });
     }

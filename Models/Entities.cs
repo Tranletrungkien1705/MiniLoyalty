@@ -14,6 +14,12 @@ public enum MemberStatus { Pending = 0, Approve = 1, Cancel = 2 }   // TConst.Me
 /// <summary>Trạng thái thẻ (Crd_Card.CardStatus): PENDING → APPROVE → CANCEL.</summary>
 public enum CardStatus { Pending = 0, Approve = 1, Cancel = 2 }   // TConst.CardStatus.Pending/Approve/Cancel
 
+/// <summary>Trạng thái yêu cầu thay đổi thông tin (Crd_MemberChangeInfo.RequestStatus): PENDING → APPROVE → FINISH, hoặc CANCEL khi từ chối.</summary>
+public enum ChangeRequestStatus { Pending = 0, Approve = 1, Finish = 2, Cancel = 3 }   // TConst.RequestStatus.Pending/Approve/Finish/Cancel
+
+/// <summary>Loại yêu cầu thay đổi (Crd_MemberChangeInfo.RequestType): ChangeInfo = đổi thông tin, CancelMember = huỷ hội viên.</summary>
+public enum ChangeRequestType { ChangeInfo = 0, CancelMember = 1 }   // TConst.RequestType.ChangeInfo/CancelMember
+
 /// <summary>Hạng thẻ — xếp theo điểm tích lũy trọn đời (lifetime), kèm % chiết khấu.</summary>
 public class RankTier
 {
@@ -229,4 +235,62 @@ public class MemberPromotionUse : IOrgOwned
     public DateTime CreatedAt { get; set; } = DateTime.Now;   // Crd_DealUsePromotion.UsePrmDTime
     public Member Member { get; set; } = null!;
     public Promotion? PromotionNav { get; set; }
+}
+
+/// <summary>
+/// Danh mục cột được phép thay đổi (Crd_MemberColumnChange): whitelist các cột của Crd_Member
+/// mà hội viên/đại lý được phép đề nghị thay đổi qua yêu cầu Crd_MemberChangeInfo.
+/// </summary>
+public class MemberColumnChange : IOrgOwned
+{
+    public int Id { get; set; }
+    public Guid OrgId { get; set; }
+    public string ColumnCode { get; set; } = "";   // Crd_MemberColumnChange.ColumnCode — mã cột (MemberName/PhoneNo/...)
+    public string ColumnName { get; set; } = "";   // Crd_MemberColumnChange.ColumnName — tên hiển thị
+    public bool IsActive { get; set; } = true;      // Crd_MemberColumnChange.FlagActive
+}
+
+/// <summary>
+/// Yêu cầu thay đổi thông tin hội viên (Crd_MemberChangeInfo): hội viên/đại lý đề nghị đổi thông tin
+/// cá nhân (tên, giới tính, CMND, SĐT, ngày sinh, địa chỉ, tỉnh/huyện, dòng xe, biển số, VIN...).
+/// Đi qua luồng duyệt: PENDING (tạo) → APPROVE (duyệt) → FINISH (hoàn tất, áp thay đổi vào hội viên),
+/// hoặc CANCEL khi bị từ chối. Mỗi yêu cầu gồm nhiều dòng chi tiết (MemberChangeRequestDtl).
+/// </summary>
+public class MemberChangeRequest : IOrgOwned
+{
+    public int Id { get; set; }
+    public Guid OrgId { get; set; }
+    public string RequestNo { get; set; } = "";            // Crd_MemberChangeInfo.RequestNo — số yêu cầu
+    public int MemberId { get; set; }                       // Crd_MemberChangeInfo.MemberNo — hội viên đề nghị
+    public ChangeRequestType RequestType { get; set; } = ChangeRequestType.ChangeInfo;   // Crd_MemberChangeInfo.RequestType
+    public ChangeRequestStatus Status { get; set; } = ChangeRequestStatus.Pending;       // Crd_MemberChangeInfo.RequestStatus
+    public string? DLCodeRequest { get; set; }              // Crd_MemberChangeInfo.DLCodeRequest — đại lý gửi yêu cầu
+    public DateTime CreatedAt { get; set; } = DateTime.Now; // Crd_MemberChangeInfo.CreateDTimeUTC
+    public string? CreatedBy { get; set; }                  // Crd_MemberChangeInfo.CreateBy
+    public DateTime? ApproveAt { get; set; }                // Crd_MemberChangeInfo.ApproveDTimeUTC
+    public string? ApproveBy { get; set; }                  // Crd_MemberChangeInfo.ApproveBy
+    public DateTime? FinishAt { get; set; }                 // Crd_MemberChangeInfo.FinishDTimeUTC
+    public string? FinishBy { get; set; }                   // Crd_MemberChangeInfo.FinishBy
+    public string? Remark { get; set; }                     // Crd_MemberChangeInfo.Remark — ghi chú đại lý
+    public string? RemarkHTV { get; set; }                  // Crd_MemberChangeInfo.RemarkHTV — ghi chú HTV khi duyệt/từ chối
+
+    public Member Member { get; set; } = null!;
+    public List<MemberChangeRequestDtl> Details { get; set; } = [];
+}
+
+/// <summary>
+/// Chi tiết yêu cầu thay đổi thông tin (Crd_MemberChangeInfoDtl): mỗi dòng là 1 cột đề nghị đổi
+/// (ColumnCode) kèm giá trị mới (ColumnValueNew). Khi FINISH, chỉ các dòng đã APPROVE mới được áp vào hội viên.
+/// </summary>
+public class MemberChangeRequestDtl : IOrgOwned
+{
+    public int Id { get; set; }
+    public Guid OrgId { get; set; }
+    public int RequestId { get; set; }                      // Crd_MemberChangeInfoDtl.RequestNo
+    public string ColumnCode { get; set; } = "";            // Crd_MemberChangeInfoDtl.ColumnCode — cột đề nghị đổi
+    public string? ColumnValueNew { get; set; }             // Crd_MemberChangeInfoDtl.ColumnValueNew — giá trị mới
+    public ChangeRequestStatus DtlStatus { get; set; } = ChangeRequestStatus.Pending;   // Crd_MemberChangeInfoDtl.RequestDtlStatus
+    public string? Remark { get; set; }                     // Crd_MemberChangeInfoDtl.Remark
+
+    public MemberChangeRequest Request { get; set; } = null!;
 }
