@@ -67,6 +67,13 @@ public interface ILoyaltyService
     Task<(bool ok, string msg)> ApproveCardExceptionAsync(int id, string? remarkHtv, string? by = null);
     Task<(bool ok, string msg)> RejectCardExceptionAsync(int id, string? remarkHtv, string? by = null);
     Task<List<RankHistory>> RankHistoryAsync(int? memberId = null);
+    Task<List<MemberRegister>> MemberRegistersAsync(MemberRegisterStatus? status = null);
+    Task<MemberRegister?> MemberRegisterAsync(int id);
+    Task<(bool ok, string msg, int id)> CreateMemberRegisterAsync(MemberRegister req);
+    Task<(bool ok, string msg)> ApproveMemberRegisterAsync(int id, string? remark, string? by = null);
+    Task<(bool ok, string msg)> FinishMemberRegisterAsync(int id, string? by = null);
+    Task<(bool ok, string msg)> CancelMemberRegisterAsync(int id, string? remark, string? by = null);
+    Task<(bool ok, string msg)> RejectMemberRegisterAsync(int id, string? remark, string? by = null);
 }
 
 public class LoyaltyService(AppDbContext db) : ILoyaltyService
@@ -993,8 +1000,6 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
 
     private async Task<RankTier> LowestRankAsync() =>
         (await db.RankTiers.OrderBy(t => t.SortOrder).FirstAsync());
-
-    private async Task RecomputeRankAsync(Member m)
     {
         var tiers = await db.RankTiers.OrderBy(t => t.SortOrder).ToListAsync();
         var newTier = tiers.Last(t => m.LifetimePoints >= t.MinLifetimePoints);

@@ -23,6 +23,12 @@ public enum ChangeRequestType { ChangeInfo = 0, CancelMember = 1 }   // TConst.R
 public enum CardExceptionStatus { Pending = 0, Approve = 1, Cancel = 2 }   // TConst.CardStatus.Pending/Approve/Cancel
 
 /// <summary>
+/// Trạng thái yêu cầu đăng ký hội viên (Req_MemberRegister.ReqMemberRegisterStatus / TConst.ReqMemberRegisterStatus):
+/// PENDING (đại lý gửi) → APPROVE (HTV duyệt) → FINISH (hoàn tất đăng ký), hoặc CANCEL/REJECT khi huỷ/từ chối.
+/// </summary>
+public enum MemberRegisterStatus { Pending = 0, Approve = 1, Finish = 2, Cancel = 3, Reject = 4 }   // TConst.ReqMemberRegisterStatus
+
+/// <summary>
 /// Hành động xét hạng (Crd_CardRank.FunctionActionType / TConst.RankActionType): ghi lại kết quả
 /// mỗi lần job xét hạng cuối kỳ xử lý 1 hội viên — UP nâng hạng, KEEP duy trì, DOWN xuống hạng.
 /// </summary>
@@ -341,6 +347,49 @@ public class CardExceptionDealer : IOrgOwned
     public string DealerCode { get; set; } = "";            // Crd_CardDealerUseException.DealerCode — mã đại lý
     public string? Remark { get; set; }                     // Crd_CardDealerUseException.Remark
     public CardException CardException { get; set; } = null!;
+}
+
+/// <summary>
+/// Yêu cầu đăng ký hội viên (Req_MemberRegister): đại lý gửi thông tin khách hàng + xe để đề nghị cấp thẻ
+/// hội viên mới. Đi qua luồng duyệt: PENDING (đại lý gửi) → APPROVE (HTV duyệt) → FINISH (hoàn tất đăng ký),
+/// hoặc CANCEL (đại lý huỷ) / REJECT (HTV từ chối) khi không hợp lệ. Khi duyệt, hệ thống chặn nếu đã có hội viên
+/// APPROVE trùng CarNo/VIN (tránh cấp trùng thẻ cho cùng một xe).
+/// </summary>
+public class MemberRegister : IOrgOwned
+{
+    public int Id { get; set; }
+    public Guid OrgId { get; set; }
+    public string ReqMemberRegisterCode { get; set; } = "";   // Req_MemberRegister.ReqMemberRegisterCode — mã lượt đăng ký
+    public string? DLCodeRegis { get; set; }                   // Req_MemberRegister.DLCodeRegis — đại lý đăng ký
+    public DateTime RegisterDate { get; set; } = DateTime.Now; // Req_MemberRegister.RegisterDate — ngày HV đăng ký
+    public string? VIN { get; set; }                           // Req_MemberRegister.VIN — số khung
+    public string? CarNo { get; set; }                         // Req_MemberRegister.CarNo — biển số
+    public string? TradeMarkName { get; set; }                 // Req_MemberRegister.TradeMarkName — hiệu xe
+    public string? ModelName { get; set; }                     // Req_MemberRegister.ModelName — dòng xe
+    public string CustomerName { get; set; } = "";            // Req_MemberRegister.CustomerName — tên khách hàng
+    public string? CustomerPhoneNo { get; set; }               // Req_MemberRegister.CustomerPhoneNo — SĐT
+    public DateTime? CustomerDateOfBirth { get; set; }         // Req_MemberRegister.CustomerDateOfBirth — ngày sinh
+    public string? CustomerIDNo { get; set; }                  // Req_MemberRegister.CustomerIDNo — MST/CCCD
+    public string? CustomerEmail { get; set; }                 // Req_MemberRegister.CustomerEmail — email
+    public string? CustomerAddress { get; set; }               // Req_MemberRegister.CustomerAddress — địa chỉ
+    public string? GenderCode { get; set; }                    // Req_MemberRegister.GenderCode — mã giới tính
+    public string? ProvinceName { get; set; }                  // Req_MemberRegister.ProvinceName — tỉnh/TP
+    public string? DistrictName { get; set; }                  // Req_MemberRegister.DistrictName — quận/huyện
+    public string? MemberNoIntro { get; set; }                 // Req_MemberRegister.MemberNoIntro — mã hội viên người giới thiệu
+    public MemberRegisterStatus Status { get; set; } = MemberRegisterStatus.Pending;   // Req_MemberRegister.ReqMemberRegisterStatus
+    public string? Remark { get; set; }                        // Req_MemberRegister.Remark — ghi chú
+    public DateTime CreatedAt { get; set; } = DateTime.Now;    // Req_MemberRegister.CreateDTimeUTC
+    public string? CreatedBy { get; set; }                     // Req_MemberRegister.CreateBy
+    public DateTime? ApproveAt { get; set; }                   // Req_MemberRegister.ApproveDTimeUTC
+    public string? ApproveBy { get; set; }                     // Req_MemberRegister.ApproveBy
+    public DateTime? CancelAt { get; set; }                    // Req_MemberRegister.CancelDTimeUTC
+    public string? CancelBy { get; set; }                      // Req_MemberRegister.CancelBy
+    public DateTime? RejectAt { get; set; }                    // Req_MemberRegister.RejectDTimeUTC
+    public string? RejectBy { get; set; }                      // Req_MemberRegister.RejectBy
+    public DateTime? FinishAt { get; set; }                    // Req_MemberRegister.cm_RegisFinishDTimeUTC — thời gian hoàn tất đăng ký
+    public int? MemberId { get; set; }                         // hội viên được tạo khi hoàn tất (FINISH)
+
+    public Member? Member { get; set; }
 }
 
 /// <summary>
