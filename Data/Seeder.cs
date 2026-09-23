@@ -116,6 +116,9 @@ public static class Seeder
             // Hội viên mua xe Creta (DealNo) — minh hoạ tính điểm khuyến mại bán hàng Creta (WA_Crd_MemberRegis_CalcPointBuyCreta).
             var creta = M("Võ Minh Creta", "0910888888", 0, 0);
             creta.DealNo = "DEAL-CRETA-2025-001";
+            // Biển số + số khung (Crd_Member.CarNo/VIN) — minh hoạ tra cứu DMS theo biển số/VIN (GetDetailForDMS).
+            creta.CarNo = "51G-678.90";
+            creta.VIN = "RL4DEMO0000000002";
             db.Members.Add(creta);
             // Hội viên mới có điểm tặng mở thẻ (Crd_Member.PointOpenCard) — minh hoạ nghiệp vụ tặng điểm mở thẻ (DealPointType=OPENCARD).
             var openCard = M("Nguyễn Thị Bích", "0910666666", 0, 0);
@@ -335,6 +338,10 @@ public static class Seeder
                     new DealerMemberLink { DLCPCode = "DL-DEMO-001", MemberId = ms[0].Id, NetworkID = 1, QueryDate = DateTime.Now.AddDays(-10), Remark = "Đăng ký hội viên", FlagActive = true, CreatedBy = "HTV" },
                     new DealerMemberLink { DLCPCode = "DL-DEMO-001", MemberId = ms[1].Id, NetworkID = 1, QueryDate = DateTime.Now.AddDays(-6), Remark = "Tra cứu điểm", FlagActive = true, CreatedBy = "HTV" },
                     new DealerMemberLink { DLCPCode = "DL-DEMO-002", MemberId = ms[2].Id, NetworkID = 2, QueryDate = DateTime.Now.AddDays(-3), Remark = "Đăng ký hội viên", FlagActive = true, CreatedBy = "HTV" });
+                // Liên kết cho hội viên có biển số/VIN (Võ Minh Creta) — minh hoạ FlagIsDLQuery=1 khi DMS tra cứu theo biển số/VIN.
+                var cretaM = await db.Members.FirstOrDefaultAsync(x => x.CarNo == "51G-678.90");
+                if (cretaM != null)
+                    db.DealerMemberLinks.Add(new DealerMemberLink { DLCPCode = "DL-DEMO-002", MemberId = cretaM.Id, NetworkID = 2, QueryDate = DateTime.Now.AddDays(-2), Remark = "Tra cứu theo biển số (DMS)", FlagActive = true, CreatedBy = "HTV" });
                 await db.SaveChangesAsync();
             }
         }

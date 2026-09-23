@@ -492,6 +492,22 @@ app.MapPost("/api/creta/calc", async (CretaCalcDto dto, ILoyaltyService svc) =>
     return Results.Ok(new { eligible = r.Eligible, pointBuyCreta = r.PointBuyCreta, reason = r.Reason });
 });
 
+// API tra cứu hội viên cho DMS (Crd_MemberController.GetDetailForDMS): tìm hội viên theo biển số (CarNo)
+// hoặc số khung (VIN), kèm FlagIsDLQuery (đại lý đã đăng ký/tra cứu hội viên này chưa).
+app.MapGet("/api/member/dms-lookup", async (string? carNo, string? vin, string? dlcpCode, ILoyaltyService svc) =>
+{
+    var r = await svc.GetDetailForDmsAsync(carNo, vin, dlcpCode);
+    if (r.Member == null) return Results.NotFound(new { error = "Không tìm thấy hội viên theo biển số/VIN." });
+    var m = r.Member;
+    return Results.Ok(new
+    {
+        memberCode = m.Code, memberName = m.Name, m.Phone, m.CarNo, m.VIN,
+        rank = m.RankTier?.Name, points = m.Points, lifetime = m.LifetimePoints,
+        qtyVisitAvail = m.QtyVisitAvail, status = m.Status.ToString(),
+        flagIsDLQuery = r.FlagIsDLQuery
+    });
+});
+
 app.MapControllerRoute(name: "default", pattern: "{controller=Home}/{action=Index}/{id?}");
 app.Run();
 

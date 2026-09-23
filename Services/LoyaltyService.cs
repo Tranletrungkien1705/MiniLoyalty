@@ -23,6 +23,13 @@ public record RankKeepDownRunResult(DateTime Date, int Up, int Kept, int Down, L
 public record CretaBuyCarResult(bool Eligible, int PointBuyCreta, string Reason);
 
 /// <summary>
+/// Kết quả tra cứu hội viên cho DMS (Crd_MemberController.GetDetailForDMS): tìm hội viên theo biển số (CarNo)
+/// hoặc số khung (VIN), kèm cờ FlagIsDLQuery cho biết đại lý (DLCPCode) đã từng đăng ký/tra cứu hội viên này chưa
+/// (dựa trên Map_QueryDealer_Member). Member = null nếu không tìm thấy.
+/// </summary>
+public record DmsMemberLookup(Member? Member, int FlagIsDLQuery);
+
+/// <summary>
 /// Kết quả tính điểm khuyến mại bán hàng Creta (WA_Crd_MemberRegis_CalcPointBuyCreta):
 /// Eligible = hội viên đủ điều kiện nhận điểm; Points = số điểm HTV tặng (0 nếu không đủ điều kiện);
 /// Reason = lý do (đủ điều kiện hoặc lý do không đủ).
@@ -34,6 +41,7 @@ public interface ILoyaltyService
     Task<List<Member>> MembersAsync(string? q, int? rankId);
     Task<Member?> GetAsync(int id);
     Task<Member?> GetByPhoneAsync(string phone);
+    Task<DmsMemberLookup> GetDetailForDmsAsync(string? carNo, string? vin, string? dlcpCode);
     Task<int> CreateAsync(Member m);
     Task<PointTransaction> EarnAsync(int memberId, int points, PointTxType type, string? note, string? refNo);
     Task<PointTransaction> EarnFromPurchaseAsync(int memberId, decimal amount, string? refNo);
@@ -122,6 +130,29 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
 
     public Task<Member?> GetByPhoneAsync(string phone) =>
         db.Members.Include(m => m.RankTier).FirstOrDefaultAsync(m => m.Phone == phone);
+
+    /// <summary>
+    /// Tra cứu hội viên cho DMS (Crd_MemberController.GetDetailForDMS): tìm hội viên theo biển số (CarNo)
+    /// HOẶC số khung (VIN) — khớp chính xác. Kèm FlagIsDLQuery = 1 nếu đại lý (DLCPCode) đã có liên kết
+    /// Map_QueryDealer_Member với hội viên này (đã đăng ký/tra cứu), ngược lại = 0. Trả Member = null nếu không thấy.
+    /// </summary>
+    public async Task<DmsMemberLookup> GetDetailForDmsAsync(string? carNo, string? vin, string? dlcpCode)
+    {
+        carNo = carNo?.Trim(); vin = vin?.Trim();
+        if (string.IsNullOrEmpty(carNo) && string.IsNullOrEmpty(vin))
+            return new DmsMemberLookup(null, 0);
+
+        var m = await db.Members.Include(x => x.RankTier).FirstOrDefaultAsync(x =>
+            (!string.IsNullOrEmpty(carNo) && x.CarNo == carNo) ||
+            (!string.IsNullOrEmpty(vin) && x.VIN == vin));
+        if (m == null) return new DmsMemberLookup(null, 0);
+
+        // FlagIsDLQuery: đại lý đã từng đăng ký/tra cứu hội viên này chưa (Map_QueryDealer_Member).
+        var flag = 0;
+        if (!string.IsNullOrWhiteSpace(dlcpCode))
+            flag = await db.DealerMemberLinks.AnyAsync(l => l.DLCPCode == dlcpCode && l.MemberId == m.Id) ? 1 : 0;
+        return new DmsMemberLookup(m, flag);
+    }
 
     public async Task<int> CreateAsync(Member m)
     {

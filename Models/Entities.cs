@@ -82,6 +82,10 @@ public class Member : IOrgOwned
     public string? Phone { get; set; }
     public string? Email { get; set; }
     public DateTime? Dob { get; set; }
+    // Xe của hội viên (Crd_Member.CarNo/VIN): dùng cho tra cứu DMS theo biển số/số khung
+    // (Crd_MemberController.GetDetailForDMS) — DMS gọi loyalty để tìm hội viên trước khi vào xưởng dịch vụ.
+    public string? CarNo { get; set; }         // Crd_Member.CarNo — biển số xe
+    public string? VIN { get; set; }           // Crd_Member.VIN — số khung
     public int Points { get; set; }            // điểm khả dụng (đổi được)
     public int LifetimePoints { get; set; }    // điểm tích lũy trọn đời (xếp hạng)
     public int PointVoucher { get; set; }      // Crd_Member.PointVoucher — tổng điểm voucher còn lại (không dùng xét hạng)
