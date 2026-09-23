@@ -1,0 +1,44 @@
+@model List<PrmCarRecommend>
+@{
+    ViewData["Title"] = "Chương trình tặng điểm giới thiệu mua xe";
+    var status = (PrmCarRecommendStatus?)ViewBag.Status;
+    var dlcpCode = (string?)ViewBag.DlcpCode;
+    string StName(PrmCarRecommendStatus s) => s switch { PrmCarRecommendStatus.Pending => "Chờ duyệt", PrmCarRecommendStatus.Approve => "Đã duyệt", PrmCarRecommendStatus.Finish => "Hoàn tất", PrmCarRecommendStatus.Cancel => "Đã huỷ", _ => s.ToString() };
+    string StBadge(PrmCarRecommendStatus s) => s switch { PrmCarRecommendStatus.Pending => "bg-warning-subtle text-warning", PrmCarRecommendStatus.Approve => "bg-info-subtle text-info", PrmCarRecommendStatus.Finish => "bg-success-subtle text-success", PrmCarRecommendStatus.Cancel => "bg-secondary-subtle text-secondary", _ => "bg-secondary-subtle" };
+}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div><h5 class="fw-bold mb-0"><i class="bi bi-people-fill me-2"></i>Chương trình tặng điểm giới thiệu mua xe</h5>
+        <small class="text-muted">Prm_CarRecommend — luồng duyệt PENDING → APPROVE → FINISH</small></div>
+    <a asp-action="Create" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i>Tạo chương trình</a>
+</div>
+
+<div class="mb-3">
+    <a asp-action="Index" class="btn btn-sm @(status==null?"btn-primary":"btn-outline-secondary")">Tất cả</a>
+    <a asp-action="Index" asp-route-status="@PrmCarRecommendStatus.Pending" class="btn btn-sm @(status==PrmCarRecommendStatus.Pending?"btn-primary":"btn-outline-secondary")">Chờ duyệt</a>
+    <a asp-action="Index" asp-route-status="@PrmCarRecommendStatus.Approve" class="btn btn-sm @(status==PrmCarRecommendStatus.Approve?"btn-primary":"btn-outline-secondary")">Đã duyệt</a>
+    <a asp-action="Index" asp-route-status="@PrmCarRecommendStatus.Finish" class="btn btn-sm @(status==PrmCarRecommendStatus.Finish?"btn-primary":"btn-outline-secondary")">Hoàn tất</a>
+    <a asp-action="Index" asp-route-status="@PrmCarRecommendStatus.Cancel" class="btn btn-sm @(status==PrmCarRecommendStatus.Cancel?"btn-primary":"btn-outline-secondary")">Đã huỷ</a>
+</div>
+
+<div class="card"><div class="table-responsive"><table class="table table-hover align-middle mb-0">
+    <thead><tr><th>Mã chương trình</th><th>Tên</th><th>Đại lý</th><th>Dòng xe</th><th>Điểm</th><th>Hiệu lực</th><th>Trạng thái</th><th></th></tr></thead>
+    <tbody>
+        @if (Model.Count == 0)
+        {
+            <tr><td colspan="8" class="text-center text-muted small py-4">Chưa có chương trình nào.</td></tr>
+        }
+        @foreach (var p in Model)
+        {
+            <tr>
+                <td class="small font-monospace">@p.PRMCRCodeSys</td>
+                <td class="small">@p.PRMCRName</td>
+                <td class="small text-muted">@p.DLCPCode</td>
+                <td class="small">@(p.FlagAllModel ? "Tất cả" : $"{p.Specs.Count} dòng")</td>
+                <td class="small">@(p.FlagAllModel ? p.PointValAllModel.ToString("N0") : "—")</td>
+                <td class="small text-muted">@p.EffDateStart.ToString("dd/MM/yyyy") → @p.EffDateEnd.ToString("dd/MM/yyyy")</td>
+                <td><span class="badge @StBadge(p.Status)">@StName(p.Status)</span></td>
+                <td class="text-end"><a asp-action="Details" asp-route-id="@p.Id" class="btn btn-outline-primary btn-sm">Xem</a></td>
+            </tr>
+        }
+    </tbody>
+</table></div></div>

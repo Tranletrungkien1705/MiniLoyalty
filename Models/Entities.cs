@@ -40,6 +40,12 @@ public enum RankActionType { Up = 0, Keep = 1, Down = 2 }   // TConst.RankAction
 /// </summary>
 public enum PrmCarNewStatus { Pending = 0, Approve = 1, Finish = 2, Cancel = 3 }   // TConst.PRMCNStatus
 
+/// <summary>
+/// Trạng thái chương trình tặng điểm giới thiệu mua xe (Prm_CarRecommend.PRMCRStatus / TConst.PRMCRStatus):
+/// PENDING (đại lý tạo) → APPROVE (HTV duyệt) → FINISH (hoàn tất, chương trình có hiệu lực), hoặc CANCEL khi huỷ.
+/// </summary>
+public enum PrmCarRecommendStatus { Pending = 0, Approve = 1, Finish = 2, Cancel = 3 }   // TConst.PRMCRStatus
+
 /// <summary>Hạng thẻ — xếp theo điểm tích lũy trọn đời (lifetime), kèm % chiết khấu.</summary>
 public class RankTier
 {
@@ -528,4 +534,66 @@ public class CretaBuyCarPolicy : IOrgOwned
     public DateTime EffDateStart { get; set; }             // ngày giao xe sớm nhất được áp dụng
     public DateTime EffDateEnd { get; set; }               // ngày giao xe muộn nhất được áp dụng
     public bool IsActive { get; set; } = true;             // FlagActive
+}
+
+/// <summary>
+/// Chương trình tặng điểm giới thiệu mua xe (Prm_CarRecommend): HTV/đại lý cấu hình chương trình tặng điểm
+/// cho hội viên giới thiệu khách mua xe mới theo từng đại lý (DLCPCode) và dòng xe (ModelCode). Đi qua luồng
+/// duyệt PENDING (tạo) → APPROVE (duyệt) → FINISH (hoàn tất, chương trình có hiệu lực), hoặc CANCEL khi huỷ.
+/// Khi hoàn tất, chương trình áp dụng cho khoảng thời gian [EffDateStart, EffDateEnd]; nếu có chương trình
+/// trước đó đang hiệu lực cùng đại lý thì bị cắt hiệu lực (EffDateEnd = ngày trước ngày bắt đầu chương trình mới).
+/// </summary>
+public class PrmCarRecommend : IOrgOwned
+{
+    public int Id { get; set; }
+    public Guid OrgId { get; set; }
+    public string PRMCRCodeSys { get; set; } = "";        // Prm_CarRecommend.PRMCRCodeSys — mã hệ thống chương trình
+    public string PRMCRCode { get; set; } = "";           // Prm_CarRecommend.PRMCRCode — mã chương trình
+    public string PRMCRName { get; set; } = "";           // Prm_CarRecommend.PRMCRName — tên chương trình
+    public string DLCPCode { get; set; } = "";            // Prm_CarRecommend.DLCPCode — đại lý áp dụng
+    public DateTime EffDateStart { get; set; }             // Prm_CarRecommend.EffDateStart — ngày bắt đầu hiệu lực
+    public DateTime EffDateEnd { get; set; }               // Prm_CarRecommend.EffDateEnd — ngày kết thúc hiệu lực
+    public bool FlagAllModel { get; set; } = true;         // Prm_CarRecommend.FlagAllModel — áp dụng cho tất cả dòng xe
+    public int PointValAllModel { get; set; }              // Prm_CarRecommend.PointValAllModel — điểm tặng khi áp dụng tất cả dòng xe
+    public PrmCarRecommendStatus Status { get; set; } = PrmCarRecommendStatus.Pending;   // Prm_CarRecommend.PRMCRStatus
+    public string? Remark { get; set; }                    // Prm_CarRecommend.Remark — ghi chú
+    public DateTime CreatedAt { get; set; } = DateTime.Now;   // Prm_CarRecommend.CreateDTimeUTC
+    public string? CreatedBy { get; set; }                 // Prm_CarRecommend.CreateBy
+    public DateTime? ApproveAt { get; set; }               // Prm_CarRecommend.ApprDTimeUTC
+    public string? ApproveBy { get; set; }                 // Prm_CarRecommend.ApprBy
+    public DateTime? FinishAt { get; set; }                // Prm_CarRecommend.FinishDTimeUTC
+    public string? FinishBy { get; set; }                  // Prm_CarRecommend.FinishBy
+    public DateTime? CancelAt { get; set; }                // Prm_CarRecommend.CancelDTimeUTC
+    public string? CancelBy { get; set; }                  // Prm_CarRecommend.CancelBy
+    public List<PrmCarRecommendSpec> Specs { get; set; } = [];   // Prm_CarRecommendSpec — danh sách dòng xe (khi FlagAllModel = false)
+    public List<PrmCarRecommendDtl> Details { get; set; } = [];  // Prm_CarRecommendDtl — điểm tặng theo từng dòng (Idx)
+}
+
+/// <summary>
+/// Dòng xe áp dụng chương trình tặng điểm giới thiệu mua xe (Prm_CarRecommendSpec): khi chương trình KHÔNG
+/// áp dụng cho tất cả dòng xe (FlagAllModel = false), mỗi dòng là 1 dòng xe (ModelCode) theo thứ tự (Idx).
+/// </summary>
+public class PrmCarRecommendSpec : IOrgOwned
+{
+    public int Id { get; set; }
+    public Guid OrgId { get; set; }
+    public int PrmCarRecommendId { get; set; }             // Prm_CarRecommendSpec.PRMCRCodeSys (FK tới chương trình)
+    public int Idx { get; set; }                           // Prm_CarRecommendSpec.Idx — thứ tự dòng
+    public string ModelCode { get; set; } = "";            // Prm_CarRecommendSpec.ModelCode — mã dòng xe
+    public PrmCarRecommend PrmCarRecommend { get; set; } = null!;
+}
+
+/// <summary>
+/// Chi tiết điểm tặng theo dòng của chương trình giới thiệu mua xe (Prm_CarRecommendDtl): mỗi dòng (Idx)
+/// kèm số điểm tặng (PointVal) cho dòng xe tương ứng trong Prm_CarRecommendSpec.
+/// </summary>
+public class PrmCarRecommendDtl : IOrgOwned
+{
+    public int Id { get; set; }
+    public Guid OrgId { get; set; }
+    public int PrmCarRecommendId { get; set; }             // Prm_CarRecommendDtl.PRMCRCodeSys (FK tới chương trình)
+    public int Idx { get; set; }                           // Prm_CarRecommendDtl.Idx — thứ tự dòng
+    public int PointVal { get; set; }                      // Prm_CarRecommendDtl.PointVal — điểm tặng cho dòng xe này
+    public string? Remark { get; set; }                    // Prm_CarRecommendDtl.Remark
+    public PrmCarRecommend PrmCarRecommend { get; set; } = null!;
 }

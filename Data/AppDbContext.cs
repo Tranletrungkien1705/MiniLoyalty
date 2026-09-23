@@ -31,6 +31,9 @@ public class AppDbContext : DbContext
     public DbSet<DealerMemberLink> DealerMemberLinks => Set<DealerMemberLink>();
     public DbSet<PrmCarNew> PrmCarNews => Set<PrmCarNew>();
     public DbSet<PrmCarNewSpec> PrmCarNewSpecs => Set<PrmCarNewSpec>();
+    public DbSet<PrmCarRecommend> PrmCarRecommends => Set<PrmCarRecommend>();
+    public DbSet<PrmCarRecommendSpec> PrmCarRecommendSpecs => Set<PrmCarRecommendSpec>();
+    public DbSet<PrmCarRecommendDtl> PrmCarRecommendDtls => Set<PrmCarRecommendDtl>();
     public DbSet<CretaBuyCarPolicy> CretaBuyCarPolicies => Set<CretaBuyCarPolicy>();
 
     protected override void OnModelCreating(ModelBuilder b)
@@ -138,6 +141,21 @@ public class AppDbContext : DbContext
         b.Entity<PrmCarNewSpec>(e =>
         {
             e.HasOne(x => x.PrmCarNew).WithMany(x => x.Specs).HasForeignKey(x => x.PrmCarNewId);
+            e.HasQueryFilter(x => x.OrgId == _orgId);
+        });
+        b.Entity<PrmCarRecommend>(e =>
+        {
+            e.HasIndex(x => x.PRMCRCodeSys).IsUnique();
+            e.HasQueryFilter(x => x.OrgId == _orgId);
+        });
+        b.Entity<PrmCarRecommendSpec>(e =>
+        {
+            e.HasOne(x => x.PrmCarRecommend).WithMany(x => x.Specs).HasForeignKey(x => x.PrmCarRecommendId);
+            e.HasQueryFilter(x => x.OrgId == _orgId);
+        });
+        b.Entity<PrmCarRecommendDtl>(e =>
+        {
+            e.HasOne(x => x.PrmCarRecommend).WithMany(x => x.Details).HasForeignKey(x => x.PrmCarRecommendId);
             e.HasQueryFilter(x => x.OrgId == _orgId);
         });
         b.Entity<CretaBuyCarPolicy>(e =>

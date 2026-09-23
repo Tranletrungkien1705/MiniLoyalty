@@ -440,6 +440,50 @@ app.MapGet("/api/prmcarnew/calc", async (string dlcpCode, string? modelCode, ILo
     return Results.Ok(new { p.PRMCNCodeSys, p.PRMCNName, p.DLCPCode, p.FlagAllModel, p.PointValAllModel, p.EffDateStart, p.EffDateEnd });
 });
 
+// API tạo chương trình tặng điểm giới thiệu mua xe (Prm_CarRecommend_SaveX): đại lý/HTV cấu hình chương trình, PENDING.
+app.MapPost("/api/prmcarrecommend/create", async (PrmCarRecommendCreateDto dto, ILoyaltyService svc) =>
+{
+    var prm = new PrmCarRecommend
+    {
+        PRMCRName = dto.Name ?? "", DLCPCode = dto.DlcpCode ?? "",
+        EffDateStart = dto.EffDateStart ?? DateTime.Today, EffDateEnd = dto.EffDateEnd ?? new DateTime(9999, 12, 31),
+        FlagAllModel = dto.FlagAllModel, PointValAllModel = dto.PointValAllModel, Remark = dto.Remark,
+        Specs = (dto.Specs ?? []).Select((s, i) => new PrmCarRecommendSpec { Idx = i + 1, ModelCode = s.ModelCode }).ToList(),
+        Details = (dto.Specs ?? []).Select((s, i) => new PrmCarRecommendDtl { Idx = i + 1, PointVal = s.PointVal }).ToList()
+    };
+    var (ok, msg, id) = await svc.CreatePrmCarRecommendAsync(prm);
+    return ok ? Results.Ok(new { ok, msg, id }) : Results.BadRequest(new { ok, error = msg });
+});
+
+// API duyệt chương trình tặng điểm giới thiệu mua xe (Prm_CarRecommend_ApprX): PENDING → APPROVE.
+app.MapPost("/api/prmcarrecommend/approve", async (PrmCarRecommendActionDto dto, ILoyaltyService svc) =>
+{
+    var (ok, msg) = await svc.ApprovePrmCarRecommendAsync(dto.Id, dto.Remark, dto.By);
+    return ok ? Results.Ok(new { ok, msg }) : Results.BadRequest(new { ok, error = msg });
+});
+
+// API hoàn tất chương trình tặng điểm giới thiệu mua xe (Prm_CarRecommend_FinishX): APPROVE → FINISH, chương trình có hiệu lực.
+app.MapPost("/api/prmcarrecommend/finish", async (PrmCarRecommendActionDto dto, ILoyaltyService svc) =>
+{
+    var (ok, msg) = await svc.FinishPrmCarRecommendAsync(dto.Id, dto.Remark, dto.By);
+    return ok ? Results.Ok(new { ok, msg }) : Results.BadRequest(new { ok, error = msg });
+});
+
+// API huỷ chương trình tặng điểm giới thiệu mua xe (Prm_CarRecommend_CancelX): PENDING/APPROVE → CANCEL.
+app.MapPost("/api/prmcarrecommend/cancel", async (PrmCarRecommendActionDto dto, ILoyaltyService svc) =>
+{
+    var (ok, msg) = await svc.CancelPrmCarRecommendAsync(dto.Id, dto.Remark, dto.By);
+    return ok ? Results.Ok(new { ok, msg }) : Results.BadRequest(new { ok, error = msg });
+});
+
+// API tra chương trình tặng điểm giới thiệu mua xe đang hiệu lực (Prm_CarRecommend_CalcPrmX) theo đại lý + dòng xe.
+app.MapGet("/api/prmcarrecommend/calc", async (string dlcpCode, string? modelCode, ILoyaltyService svc) =>
+{
+    var p = await svc.CalcPrmCarRecommendAsync(dlcpCode, modelCode);
+    if (p == null) return Results.NotFound(new { error = "Không có chương trình tặng điểm giới thiệu mua xe đang hiệu lực." });
+    return Results.Ok(new { p.PRMCRCodeSys, p.PRMCRName, p.DLCPCode, p.FlagAllModel, p.PointValAllModel, p.EffDateStart, p.EffDateEnd });
+});
+
 // API tính điểm khuyến mại bán hàng Creta (WA_Crd_MemberRegis_CalcPointBuyCreta): kiểm tra điều kiện
 // (dòng xe + hạng thẻ + ngày giao xe + CCCD + chưa áp dụng) và trả về số điểm HTV tặng (0 nếu không đủ).
 app.MapPost("/api/creta/calc", async (CretaCalcDto dto, ILoyaltyService svc) =>
@@ -478,4 +522,7 @@ record DealerLinkDto(string? DlcpCode, string? Phone, int? MemberId, int Network
 record PrmCarNewSpecDto(string ModelCode, int PointVal);
 record PrmCarNewCreateDto(string? Name, string? DlcpCode, DateTime? EffDateStart, DateTime? EffDateEnd, bool FlagAllModel, int PointValAllModel, string? Remark, List<PrmCarNewSpecDto>? Specs);
 record PrmCarNewActionDto(int Id, string? Remark, string? By);
+record PrmCarRecommendSpecDto(string ModelCode, int PointVal);
+record PrmCarRecommendCreateDto(string? Name, string? DlcpCode, DateTime? EffDateStart, DateTime? EffDateEnd, bool FlagAllModel, int PointValAllModel, string? Remark, List<PrmCarRecommendSpecDto>? Specs);
+record PrmCarRecommendActionDto(int Id, string? Remark, string? By);
 record CretaCalcDto(string? ModelCode, string? CardTypeUse, DateTime? DeliveryDate, string? IdCardNo, string? DealNo, int? MemberId);

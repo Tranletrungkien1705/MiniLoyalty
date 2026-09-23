@@ -367,6 +367,37 @@ public static class Seeder
             db.PrmCarNews.Add(pending);
             await db.SaveChangesAsync();
         }
+        if (!await db.PrmCarRecommends.AnyAsync())
+        {
+            // Chương trình tặng điểm giới thiệu mua xe mẫu (Prm_CarRecommend) — minh hoạ luồng duyệt PENDING → APPROVE → FINISH.
+            // 1 chương trình đang hiệu lực (FINISH, tất cả dòng xe) + 1 chương trình theo dòng xe (PENDING).
+            var active = new PrmCarRecommend
+            {
+                PRMCRCodeSys = $"PRMCR.{DateTime.Now:yyyy}.0001", PRMCRCode = $"PRMCR.{DateTime.Now:yyyy}.0001",
+                PRMCRName = "Giới thiệu mua xe Q3", DLCPCode = "DL-DEMO-001",
+                EffDateStart = DateTime.Today.AddMonths(-1), EffDateEnd = new DateTime(9999, 12, 31),
+                FlagAllModel = true, PointValAllModel = 1000, Status = PrmCarRecommendStatus.Finish,
+                Remark = "Chương trình đang hiệu lực — tất cả dòng xe",
+                CreatedAt = DateTime.Now.AddMonths(-1), CreatedBy = "HTV",
+                ApproveAt = DateTime.Now.AddMonths(-1), ApproveBy = "HTV",
+                FinishAt = DateTime.Now.AddMonths(-1), FinishBy = "HTV"
+            };
+            db.PrmCarRecommends.Add(active);
+            var pending = new PrmCarRecommend
+            {
+                PRMCRCodeSys = $"PRMCR.{DateTime.Now:yyyy}.0002", PRMCRCode = $"PRMCR.{DateTime.Now:yyyy}.0002",
+                PRMCRName = "Giới thiệu mua xe theo dòng xe", DLCPCode = "DL-DEMO-002",
+                EffDateStart = DateTime.Today.AddDays(7), EffDateEnd = new DateTime(9999, 12, 31),
+                FlagAllModel = false, PointValAllModel = 0, Status = PrmCarRecommendStatus.Pending,
+                Remark = "Chờ duyệt — áp dụng cho một số dòng xe", CreatedAt = DateTime.Now.AddDays(-1), CreatedBy = "DL-DEMO-002"
+            };
+            pending.Specs.Add(new PrmCarRecommendSpec { Idx = 1, ModelCode = "VIOS" });
+            pending.Specs.Add(new PrmCarRecommendSpec { Idx = 2, ModelCode = "CRV" });
+            pending.Details.Add(new PrmCarRecommendDtl { Idx = 1, PointVal = 1000 });
+            pending.Details.Add(new PrmCarRecommendDtl { Idx = 2, PointVal = 1500 });
+            db.PrmCarRecommends.Add(pending);
+            await db.SaveChangesAsync();
+        }
         if (!await db.CretaBuyCarPolicies.AnyAsync())
         {
             // Chính sách tặng điểm khuyến mại bán hàng Creta (WA_Crd_MemberRegis_CalcPointBuyCreta):

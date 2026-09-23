@@ -1,0 +1,85 @@
+@model PrmCarRecommend
+@{
+    ViewData["Title"] = $"Chương trình {Model.PRMCRCodeSys}";
+    string StName(PrmCarRecommendStatus s) => s switch { PrmCarRecommendStatus.Pending => "Chờ duyệt", PrmCarRecommendStatus.Approve => "Đã duyệt", PrmCarRecommendStatus.Finish => "Hoàn tất", PrmCarRecommendStatus.Cancel => "Đã huỷ", _ => s.ToString() };
+    string StBadge(PrmCarRecommendStatus s) => s switch { PrmCarRecommendStatus.Pending => "bg-warning-subtle text-warning", PrmCarRecommendStatus.Approve => "bg-info-subtle text-info", PrmCarRecommendStatus.Finish => "bg-success-subtle text-success", PrmCarRecommendStatus.Cancel => "bg-secondary-subtle text-secondary", _ => "bg-secondary-subtle" };
+    var canApprove = Model.Status == PrmCarRecommendStatus.Pending;
+    var canFinish = Model.Status == PrmCarRecommendStatus.Approve;
+    var canCancel = Model.Status == PrmCarRecommendStatus.Pending || Model.Status == PrmCarRecommendStatus.Approve;
+    // Ghép dòng xe (Prm_CarRecommendSpec) với điểm tặng (Prm_CarRecommendDtl) theo Idx.
+    var rows = Model.Specs.OrderBy(x => x.Idx)
+        .Select(s => (s.Idx, s.ModelCode, PointVal: Model.Details.FirstOrDefault(d => d.Idx == s.Idx)?.PointVal ?? 0))
+        .ToList();
+}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div><h5 class="fw-bold mb-0"><i class="bi bi-people-fill me-2"></i>@Model.PRMCRCodeSys
+            <span class="badge @StBadge(Model.Status) ms-1">@StName(Model.Status)</span></h5>
+        <small class="text-muted">@Model.PRMCRName · tạo @Model.CreatedAt.ToString("dd/MM/yyyy HH:mm")</small></div>
+    <a asp-action="Index" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left me-1"></i>Danh sách</a>
+</div>
+
+<div class="row g-3">
+    <div class="col-lg-7">
+        <div class="card mb-3"><div class="card-header bg-white fw-semibold"><i class="bi bi-info-circle me-1"></i>Thông tin chương trình</div>
+        <div class="card-body">
+            <div class="row g-2 small">
+                <div class="col-md-6 text-muted">Đại lý: <b class="text-dark">@Model.DLCPCode</b></div>
+                <div class="col-md-6 text-muted">Phạm vi dòng xe: <b class="text-dark">@(Model.FlagAllModel ? "Tất cả dòng xe" : "Theo danh sách")</b></div>
+                <div class="col-md-6 text-muted">Điểm tặng (tất cả dòng): <b class="text-dark">@Model.PointValAllModel.ToString("N0")</b></div>
+                <div class="col-md-6 text-muted">Hiệu lực: <b class="text-dark">@Model.EffDateStart.ToString("dd/MM/yyyy") → @Model.EffDateEnd.ToString("dd/MM/yyyy")</b></div>
+                <div class="col-12 text-muted">Ghi chú: <b class="text-dark">@(Model.Remark ?? "—")</b></div>
+            </div>
+        </div></div>
+
+        <div class="card mb-3"><div class="card-header bg-white fw-semibold"><i class="bi bi-list-ul me-1"></i>Dòng xe áp dụng (Prm_CarRecommendSpec / Prm_CarRecommendDtl)</div>
+        <div class="card-body p-0">
+            @if (Model.FlagAllModel)
+            {
+                <div class="p-3 small text-muted">Chương trình áp dụng cho <b>tất cả dòng xe</b> — điểm tặng @Model.PointValAllModel.ToString("N0") điểm.</div>
+            }
+            else if (rows.Count == 0)
+            {
+                <div class="p-3 small text-muted">Chưa cấu hình dòng xe nào.</div>
+            }
+            else
+            {
+                <table class="table table-sm mb-0">
+                    <thead><tr><th>#</th><th>Dòng xe (ModelCode)</th><th class="text-end">Điểm tặng</th></tr></thead>
+                    <tbody>
+                        @foreach (var r in rows)
+                        {
+                            <tr><td class="small text-muted">@r.Idx</td><td class="small font-monospace">@r.ModelCode</td><td class="small text-end">@r.PointVal.ToString("N0")</td></tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div></div>
+
+        <div class="card"><div class="card-body">
+            <h6 class="fw-bold mb-2"><i class="bi bi-clock-history me-1"></i>Thông tin xử lý</h6>
+            @if (Model.ApproveAt.HasValue) { <div class="small text-muted">Duyệt lúc @Model.ApproveAt.Value.ToString("dd/MM/yyyy HH:mm") bởi @Model.ApproveBy</div> }
+            @if (Model.FinishAt.HasValue) { <div class="small text-muted">Hoàn tất lúc @Model.FinishAt.Value.ToString("dd/MM/yyyy HH:mm") bởi @Model.FinishBy</div> }
+            @if (Model.CancelAt.HasValue) { <div class="small text-muted">Huỷ lúc @Model.CancelAt.Value.ToString("dd/MM/yyyy HH:mm") bởi @Model.CancelBy</div> }
+        </div></div>
+    </div>
+
+    <div class="col-lg-5">
+        <div class="card mb-3"><div class="card-body">
+            <h6 class="fw-bold mb-2"><i class="bi bi-check2-square me-1"></i>Duyệt / Hoàn tất</h6>
+            <div class="small text-muted mb-2">Luồng: PENDING → APPROVE (duyệt) → FINISH (chương trình có hiệu lực). Huỷ ở PENDING/APPROVE → CANCEL.</div>
+            <form asp-action="Approve" asp-route-id="@Model.Id" method="post" class="row g-2 mb-2">@Html.AntiForgeryToken()
+                <div class="col-12"><input name="remark" class="form-control form-control-sm" placeholder="Ghi chú khi duyệt" /></div>
+                <div class="col-12"><button class="btn btn-info btn-sm w-100" @(canApprove ? "" : "disabled")><i class="bi bi-check2 me-1"></i>Duyệt (APPROVE)</button></div>
+            </form>
+            <form asp-action="Finish" asp-route-id="@Model.Id" method="post" class="row g-2 mb-2">@Html.AntiForgeryToken()
+                <div class="col-12"><input name="remark" class="form-control form-control-sm" placeholder="Ghi chú khi hoàn tất" /></div>
+                <div class="col-12"><button class="btn btn-success btn-sm w-100" @(canFinish ? "" : "disabled")><i class="bi bi-flag me-1"></i>Hoàn tất (FINISH) — có hiệu lực</button></div>
+            </form>
+            <hr class="my-2" />
+            <form asp-action="Cancel" asp-route-id="@Model.Id" method="post" class="row g-2">@Html.AntiForgeryToken()
+                <div class="col-12"><input name="remark" class="form-control form-control-sm" placeholder="Lý do huỷ" /></div>
+                <div class="col-12"><button class="btn btn-outline-secondary btn-sm w-100" @(canCancel ? "" : "disabled")><i class="bi bi-slash-circle me-1"></i>Huỷ (CANCEL)</button></div>
+            </form>
+        </div></div>
+    </div>
+</div>

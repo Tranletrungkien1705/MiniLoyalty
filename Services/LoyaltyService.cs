@@ -93,6 +93,13 @@ public interface ILoyaltyService
     Task<(bool ok, string msg)> FinishPrmCarNewAsync(int id, string? remark, string? by = null);
     Task<(bool ok, string msg)> CancelPrmCarNewAsync(int id, string? remark, string? by = null);
     Task<PrmCarNew?> CalcPrmCarNewAsync(string dlcpCode, string? modelCode, DateTime? today = null);
+    Task<List<PrmCarRecommend>> PrmCarRecommendsAsync(PrmCarRecommendStatus? status = null, string? dlcpCode = null);
+    Task<PrmCarRecommend?> PrmCarRecommendAsync(int id);
+    Task<(bool ok, string msg, int id)> CreatePrmCarRecommendAsync(PrmCarRecommend prm);
+    Task<(bool ok, string msg)> ApprovePrmCarRecommendAsync(int id, string? remark, string? by = null);
+    Task<(bool ok, string msg)> FinishPrmCarRecommendAsync(int id, string? remark, string? by = null);
+    Task<(bool ok, string msg)> CancelPrmCarRecommendAsync(int id, string? remark, string? by = null);
+    Task<PrmCarRecommend?> CalcPrmCarRecommendAsync(string dlcpCode, string? modelCode, DateTime? today = null);
     Task<CretaBuyCarResult> CalcPointBuyCretaAsync(string? modelCode, string? cardTypeUse, DateTime? deliveryDate, string? idCardNo, string? dealNo, int? memberId = null);
 }
 
@@ -1316,6 +1323,131 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
         var d = (today ?? DateTime.Today).Date;
         var active = await db.PrmCarNews.Include(x => x.Specs)
             .Where(x => x.DLCPCode == dlcpCode && x.Status == PrmCarNewStatus.Finish
+                && x.EffDateStart <= d && x.EffDateEnd >= d)
+            .OrderBy(x => x.EffDateStart)
+            .FirstOrDefaultAsync();
+        if (active == null) return null;
+        if (active.FlagAllModel) return active;
+        if (string.IsNullOrWhiteSpace(modelCode)) return null;
+        return active.Specs.Any(s => s.ModelCode == modelCode) ? active : null;
+    }
+
+    /// <summary>
+    /// Liệt kê chương trình tặng điểm giới thiệu mua xe (Prm_CarRecommend), lọc theo trạng thái và/hoặc đại lý.
+    /// </summary>
+    public async Task<List<PrmCarRecommend>> PrmCarRecommendsAsync(PrmCarRecommendStatus? status = null, string? dlcpCode = null)
+    {
+        var q = db.PrmCarRecommends.Include(x => x.Specs).Include(x => x.Details).AsQueryable();
+        if (status.HasValue) q = q.Where(x => x.Status == status.Value);
+        if (!string.IsNullOrWhiteSpace(dlcpCode)) q = q.Where(x => x.DLCPCode == dlcpCode);
+        var list = await q.ToListAsync();
+        return list.OrderByDescending(x => x.CreatedAt).ToList();
+    }
+
+    public Task<PrmCarRecommend?> PrmCarRecommendAsync(int id) =>
+        db.PrmCarRecommends.Include(x => x.Specs).Include(x => x.Details).FirstOrDefaultAsync(x => x.Id == id);
+
+    /// <summary>
+    /// Tạo chương trình tặng điểm giới thiệu mua xe (Prm_CarRecommend_SaveX): đại lý/HTV cấu hình chương trình
+    /// tặng điểm cho hội viên giới thiệu khách mua xe mới theo đại lý (DLCPCode) và dòng xe. Khởi tạo ở trạng thái
+    /// PENDING. Sinh mã hệ thống PRMCR.&lt;năm&gt;.&lt;seq&gt;. Chặn khi thiếu tên chương trình hoặc đại lý.
+    /// </summary>
+    public async Task<(bool ok, string msg, int id)> CreatePrmCarRecommendAsync(PrmCarRecommend prm)
+    {
+        if (string.IsNullOrWhiteSpace(prm.PRMCRName)) return (false, "Cần tên chương trình.", 0);
+        if (string.IsNullOrWhiteSpace(prm.DLCPCode)) return (false, "Cần mã đại lý (DLCPCode).", 0);
+
+        var seq = await db.PrmCarRecommends.CountAsync() + 1;
+        prm.PRMCRCodeSys = $"PRMCR.{DateTime.Now:yyyy}.{seq:D4}";
+        prm.PRMCRCode = prm.PRMCRCodeSys;
+        prm.Status = PrmCarRecommendStatus.Pending;
+        prm.EffDateStart = prm.EffDateStart == default ? DateTime.Today : prm.EffDateStart;
+        prm.EffDateEnd = prm.EffDateEnd == default ? new DateTime(9999, 12, 31) : prm.EffDateEnd;
+        prm.CreatedAt = DateTime.Now;
+        db.PrmCarRecommends.Add(prm);
+        await db.SaveChangesAsync();
+        return (true, $"Đã tạo chương trình {prm.PRMCRCodeSys} (PENDING).", prm.Id);
+    }
+
+    /// <summary>
+    /// Duyệt chương trình (Prm_CarRecommend_ApprX): chỉ duyệt được chương trình đang PENDING.
+    /// Đặt Status = APPROVE, ghi ApproveAt/ApproveBy/Remark.
+    /// </summary>
+    public async Task<(bool ok, string msg)> ApprovePrmCarRecommendAsync(int id, string? remark, string? by = null)
+    {
+        var p = await db.PrmCarRecommends.FirstOrDefaultAsync(x => x.Id == id);
+        if (p == null) return (false, "Không tìm thấy chương trình.");
+        if (p.Status != PrmCarRecommendStatus.Pending) return (false, "Chỉ duyệt được chương trình đang PENDING.");
+
+        p.Status = PrmCarRecommendStatus.Approve;
+        p.ApproveAt = DateTime.Now;
+        p.ApproveBy = by;
+        p.Remark = remark;
+        await db.SaveChangesAsync();
+        return (true, $"Đã duyệt chương trình {p.PRMCRCodeSys} (APPROVE).");
+    }
+
+    /// <summary>
+    /// Hoàn tất chương trình (Prm_CarRecommend_FinishX): chỉ hoàn tất được chương trình đang APPROVE.
+    /// Đặt Status = FINISH (chương trình có hiệu lực). Nếu đã có chương trình FINISH đang hiệu lực cùng đại lý,
+    /// cắt hiệu lực chương trình cũ (EffDateEnd = ngày trước ngày bắt đầu chương trình mới).
+    /// </summary>
+    public async Task<(bool ok, string msg)> FinishPrmCarRecommendAsync(int id, string? remark, string? by = null)
+    {
+        var p = await db.PrmCarRecommends.FirstOrDefaultAsync(x => x.Id == id);
+        if (p == null) return (false, "Không tìm thấy chương trình.");
+        if (p.Status != PrmCarRecommendStatus.Approve) return (false, "Chỉ hoàn tất được chương trình đang APPROVE.");
+
+        p.Status = PrmCarRecommendStatus.Finish;
+        p.FinishAt = DateTime.Now;
+        p.FinishBy = by;
+        if (!string.IsNullOrWhiteSpace(remark)) p.Remark = remark;
+        await db.SaveChangesAsync();
+
+        // Cắt hiệu lực chương trình FINISH trước đó đang hiệu lực cùng đại lý (Prm_CarRecommend_FinishX).
+        var today = DateTime.Today;
+        var prev = await db.PrmCarRecommends.FirstOrDefaultAsync(x => x.Id != p.Id && x.DLCPCode == p.DLCPCode
+            && x.Status == PrmCarRecommendStatus.Finish && x.EffDateStart <= today && x.EffDateEnd >= today);
+        if (prev != null)
+        {
+            prev.EffDateEnd = p.EffDateStart <= today ? today.AddDays(-1) : p.EffDateStart.AddDays(-1);
+            await db.SaveChangesAsync();
+        }
+
+        return (true, $"Đã hoàn tất chương trình {p.PRMCRCodeSys} (FINISH) — chương trình có hiệu lực.");
+    }
+
+    /// <summary>
+    /// Huỷ chương trình (Prm_CarRecommend_CancelX): huỷ được chương trình đang PENDING/APPROVE.
+    /// Đặt Status = CANCEL, ghi CancelAt/CancelBy/Remark.
+    /// </summary>
+    public async Task<(bool ok, string msg)> CancelPrmCarRecommendAsync(int id, string? remark, string? by = null)
+    {
+        var p = await db.PrmCarRecommends.FirstOrDefaultAsync(x => x.Id == id);
+        if (p == null) return (false, "Không tìm thấy chương trình.");
+        if (p.Status != PrmCarRecommendStatus.Pending && p.Status != PrmCarRecommendStatus.Approve)
+            return (false, "Chỉ huỷ được chương trình đang PENDING/APPROVE.");
+
+        p.Status = PrmCarRecommendStatus.Cancel;
+        p.CancelAt = DateTime.Now;
+        p.CancelBy = by;
+        p.Remark = remark;
+        await db.SaveChangesAsync();
+        return (true, $"Đã huỷ chương trình {p.PRMCRCodeSys} (CANCEL).");
+    }
+
+    /// <summary>
+    /// Tra chương trình tặng điểm giới thiệu mua xe đang hiệu lực (Prm_CarRecommend_CalcPrmX): tìm chương trình
+    /// FINISH của đại lý (DLCPCode) đang trong khoảng hiệu lực [EffDateStart, EffDateEnd] tại ngày xét.
+    /// Nếu chương trình áp dụng cho tất cả dòng xe (FlagAllModel) thì trả về luôn; ngược lại chỉ trả về
+    /// khi dòng xe (ModelCode) nằm trong danh sách Prm_CarRecommendSpec. Trả về null nếu không có chương trình phù hợp.
+    /// </summary>
+    public async Task<PrmCarRecommend?> CalcPrmCarRecommendAsync(string dlcpCode, string? modelCode, DateTime? today = null)
+    {
+        if (string.IsNullOrWhiteSpace(dlcpCode)) return null;
+        var d = (today ?? DateTime.Today).Date;
+        var active = await db.PrmCarRecommends.Include(x => x.Specs).Include(x => x.Details)
+            .Where(x => x.DLCPCode == dlcpCode && x.Status == PrmCarRecommendStatus.Finish
                 && x.EffDateStart <= d && x.EffDateEnd >= d)
             .OrderBy(x => x.EffDateStart)
             .FirstOrDefaultAsync();
