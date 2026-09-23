@@ -33,6 +33,8 @@ public interface ILoyaltyService
     Task<RankKeepDownRunResult> RunRankKeepDownJobAsync(DateTime? today = null);
     Task<(bool ok, string msg)> AwardIntroductionAsync(int newMemberId);
     Task<PointTransaction> RecordServiceTurnAsync(int memberId, int qty, string? refNo);
+    Task<MemberDiscountTransaction> ApplyServiceDiscountAsync(int memberId, decimal amount, string? refNo);
+    Task<List<MemberDiscountTransaction>> DiscountsAsync(int memberId);
 }
 
 public class LoyaltyService(AppDbContext db) : ILoyaltyService
@@ -279,6 +281,33 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
         await db.SaveChangesAsync();
         return tx;
     }
+
+    /// <summary>
+    /// Chiết khấu dịch vụ (DealPointType = DISCOUNTRO, Crd_MemberDiscountTransaction): khi hội viên
+    /// dùng dịch vụ, áp % chiết khấu theo hạng thẻ hiện tại (RankTier.DiscountPercent) lên doanh thu
+    /// dịch vụ. Ghi 1 giao dịch chiết khấu (không đổi điểm). Tiền chiết khấu = doanh thu × %/100.
+    /// </summary>
+    public async Task<MemberDiscountTransaction> ApplyServiceDiscountAsync(int memberId, decimal amount, string? refNo)
+    {
+        if (amount <= 0) throw new ArgumentException("Doanh thu dịch vụ phải > 0.", nameof(amount));
+        var m = await db.Members.Include(x => x.RankTier).FirstOrDefaultAsync(x => x.Id == memberId)
+            ?? throw new KeyNotFoundException();
+        var rate = m.RankTier?.DiscountPercent ?? 0;
+        var discount = Math.Round(amount * rate / 100m, 0, MidpointRounding.AwayFromZero);
+        var tx = new MemberDiscountTransaction
+        {
+            MemberId = memberId, RefNo = refNo, CardTypeApplyId = m.RankTierId,
+            PolicyDiscountRate = rate, AmountForDC = amount, DiscountAmount = discount
+        };
+        db.MemberDiscountTransactions.Add(tx);
+        await db.SaveChangesAsync();
+        return tx;
+    }
+
+    public Task<List<MemberDiscountTransaction>> DiscountsAsync(int memberId) =>
+        db.MemberDiscountTransactions.Include(d => d.CardTypeApply)
+            .Where(d => d.MemberId == memberId)
+            .OrderByDescending(d => d.CreatedAt).ToListAsync();
 
     public async Task<LoyaltyDash> DashboardAsync()
     {

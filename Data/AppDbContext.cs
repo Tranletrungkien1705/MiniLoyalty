@@ -15,6 +15,7 @@ public class AppDbContext : DbContext
     public DbSet<RankTier> RankTiers => Set<RankTier>();
     public DbSet<Member> Members => Set<Member>();
     public DbSet<PointTransaction> PointTransactions => Set<PointTransaction>();
+    public DbSet<MemberDiscountTransaction> MemberDiscountTransactions => Set<MemberDiscountTransaction>();
     public DbSet<Reward> Rewards => Set<Reward>();
 
     protected override void OnModelCreating(ModelBuilder b)
@@ -34,6 +35,15 @@ public class AppDbContext : DbContext
             e.HasQueryFilter(x => x.OrgId == _orgId);
         });
         b.Entity<Reward>().HasQueryFilter(x => x.OrgId == _orgId);
+        b.Entity<MemberDiscountTransaction>(e =>
+        {
+            e.Property(x => x.PolicyDiscountRate).HasPrecision(5, 2);
+            e.Property(x => x.AmountForDC).HasPrecision(18, 2);
+            e.Property(x => x.DiscountAmount).HasPrecision(18, 2);
+            e.HasOne(x => x.Member).WithMany(x => x.Discounts).HasForeignKey(x => x.MemberId);
+            e.HasOne(x => x.CardTypeApply).WithMany().HasForeignKey(x => x.CardTypeApplyId);
+            e.HasQueryFilter(x => x.OrgId == _orgId);
+        });
     }
 
     // Tự đóng dấu OrgId cho mọi bản ghi mới thuộc tenant hiện tại (khỏi sửa từng service).

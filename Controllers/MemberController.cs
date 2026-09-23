@@ -18,6 +18,7 @@ public class MemberController(ILoyaltyService svc) : Controller
         var m = await svc.GetAsync(id);
         if (m == null) return NotFound();
         ViewBag.Rewards = await svc.RewardsAsync();
+        ViewBag.Discounts = await svc.DiscountsAsync(id);
         return View(m);
     }
 
@@ -48,6 +49,15 @@ public class MemberController(ILoyaltyService svc) : Controller
         if (qty <= 0) { TempData["Error"] = "Số lượt phải > 0."; return RedirectToAction(nameof(Details), new { id }); }
         var tx = await svc.RecordServiceTurnAsync(id, qty, note);
         TempData["Success"] = $"Đã ghi nhận {tx.QtyVisit} lượt dịch vụ.";
+        return RedirectToAction(nameof(Details), new { id });
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> Discount(int id, decimal amount, string? note)
+    {
+        if (amount <= 0) { TempData["Error"] = "Doanh thu dịch vụ phải > 0."; return RedirectToAction(nameof(Details), new { id }); }
+        var tx = await svc.ApplyServiceDiscountAsync(id, amount, note);
+        TempData["Success"] = $"Đã áp chiết khấu {tx.PolicyDiscountRate:0.##}% — giảm {tx.DiscountAmount:N0}đ.";
         return RedirectToAction(nameof(Details), new { id });
     }
 

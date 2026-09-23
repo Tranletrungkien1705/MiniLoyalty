@@ -1,6 +1,6 @@
 namespace MiniLoyalty.Models;
 
-public enum PointTxType { Earn = 0, Redeem = 1, Birthday = 2, Adjust = 3, Expiry = 4, Introduction = 5, ServiceTurn = 6 }
+public enum PointTxType { Earn = 0, Redeem = 1, Birthday = 2, Adjust = 3, Expiry = 4, Introduction = 5, ServiceTurn = 6, Discount = 7 }
 
 /// <summary>Hạng thẻ — xếp theo điểm tích lũy trọn đời (lifetime), kèm % chiết khấu.</summary>
 public class RankTier
@@ -53,6 +53,7 @@ public class Member : IOrgOwned
 
     public RankTier? RankTier { get; set; }
     public List<PointTransaction> Transactions { get; set; } = [];
+    public List<MemberDiscountTransaction> Discounts { get; set; } = [];
 }
 
 /// <summary>Giao dịch điểm (tích/đổi/sinh nhật/điều chỉnh/hết hạn).</summary>
@@ -71,6 +72,26 @@ public class PointTransaction : IOrgOwned
     public DateTime CreatedAt { get; set; } = DateTime.Now;
 
     public Member Member { get; set; } = null!;
+}
+
+/// <summary>
+/// Giao dịch chiết khấu dịch vụ (Crd_MemberDiscountTransaction, DealPointType = DISCOUNTRO):
+/// khi hội viên dùng dịch vụ, hệ thống áp % chiết khấu theo hạng thẻ hiện tại lên doanh thu dịch vụ.
+/// </summary>
+public class MemberDiscountTransaction : IOrgOwned
+{
+    public int Id { get; set; }
+    public Guid OrgId { get; set; }
+    public int MemberId { get; set; }
+    public string? RefNo { get; set; }              // Crd_MemberDiscountTransaction.RefNo — số tham chiếu (số RO/HĐ)
+    public int CardTypeApplyId { get; set; }        // Crd_MemberDiscountTransaction.CardTypeApply — hạng áp dụng chiết khấu
+    public decimal PolicyDiscountRate { get; set; } // Crd_MemberDiscountTransaction.PolicyDiscountRate — % chiết khấu theo hạng
+    public decimal AmountForDC { get; set; }        // Crd_MemberDiscountTransaction.AmountForDC — doanh thu dịch vụ tính chiết khấu
+    public decimal DiscountAmount { get; set; }     // Crd_MemberDiscountTransaction.PointChTotal — tiền chiết khấu
+    public DateTime CreatedAt { get; set; } = DateTime.Now;
+
+    public Member Member { get; set; } = null!;
+    public RankTier? CardTypeApply { get; set; }
 }
 
 /// <summary>Quà/voucher đổi bằng điểm.</summary>

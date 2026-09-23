@@ -84,6 +84,16 @@ public static class Seeder
             svcTurn.QtyVisitAvail = 2;
             svcTurn.Transactions.Add(new PointTransaction { Type = PointTxType.ServiceTurn, Points = 0, QtyVisit = 2, BalanceAfter = 300, Note = "Ghi nhận 2 lượt dịch vụ", RefNo = "RO-DEMO-001" });
             db.Members.Add(svcTurn);
+            // Giao dịch chiết khấu dịch vụ (DealPointType=DISCOUNTRO) — minh hoạ áp % chiết khấu theo hạng.
+            var disc = M("Ngô Thị Lan", "0909999999", 2600, 1200);
+            disc.Discounts.Add(new MemberDiscountTransaction
+            {
+                RefNo = "RO-DEMO-002", CardTypeApplyId = disc.RankTierId,
+                PolicyDiscountRate = Rank(2600).DiscountPercent, AmountForDC = 2_000_000,
+                DiscountAmount = Math.Round(2_000_000 * Rank(2600).DiscountPercent / 100m, 0, MidpointRounding.AwayFromZero),
+                CreatedAt = DateTime.Now.AddDays(-3)
+            });
+            db.Members.Add(disc);
             await db.SaveChangesAsync();
         }
     }

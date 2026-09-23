@@ -99,6 +99,17 @@ app.MapPost("/api/serviceturn", async (ServiceTurnDto dto, ILoyaltyService svc) 
     return Results.Ok(new { memberCode = member!.Code, qtyVisit = tx.QtyVisit, qtyVisitAvail = member.QtyVisitAvail, points = member.Points });
 });
 
+// API chiết khấu dịch vụ (DealPointType=DISCOUNTRO): áp % chiết khấu theo hạng lên doanh thu dịch vụ.
+app.MapPost("/api/discount", async (DiscountDto dto, ILoyaltyService svc) =>
+{
+    var m = dto.Phone is { Length: > 0 } p ? await svc.GetByPhoneAsync(p) : null;
+    if (m == null && dto.MemberId is { } mid) m = await svc.GetAsync(mid);
+    if (m == null) return Results.NotFound(new { error = "Không tìm thấy hội viên" });
+    if (dto.Amount <= 0) return Results.BadRequest(new { error = "Doanh thu dịch vụ phải > 0." });
+    var tx = await svc.ApplyServiceDiscountAsync(m.Id, dto.Amount, dto.RefNo);
+    return Results.Ok(new { memberCode = m.Code, rank = tx.CardTypeApply?.Name, rate = tx.PolicyDiscountRate, amount = tx.AmountForDC, discount = tx.DiscountAmount });
+});
+
 app.MapControllerRoute(name: "default", pattern: "{controller=Home}/{action=Index}/{id?}");
 app.Run();
 
@@ -106,3 +117,4 @@ record EarnDto(string? Phone, int? MemberId, decimal Amount, string? RefNo);
 record RegisterOrgDto(string Name);
 record IntroDto(string? Phone, int? MemberId);
 record ServiceTurnDto(string? Phone, int? MemberId, int Qty, string? RefNo);
+record DiscountDto(string? Phone, int? MemberId, decimal Amount, string? RefNo);
