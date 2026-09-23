@@ -6,7 +6,7 @@
     var vouchers = (List<MemberVoucherTransaction>)ViewBag.Vouchers;
     var promotions = (List<Promotion>)ViewBag.Promotions;
     var promotionUses = (List<MemberPromotionUse>)ViewBag.PromotionUses;
-    string TxName(PointTxType t) => t switch { PointTxType.Earn=>"Tích điểm", PointTxType.Redeem=>"Đổi quà", PointTxType.Birthday=>"Sinh nhật", PointTxType.Adjust=>"Điều chỉnh", PointTxType.Expiry=>"Hết hạn", PointTxType.Introduction=>"Giới thiệu", PointTxType.ServiceTurn=>"Lượt dịch vụ", PointTxType.PointUse=>"Dùng ưu đãi", PointTxType.Sale=>"Mua xe mới", _=>t.ToString() };
+    string TxName(PointTxType t) => t switch { PointTxType.Earn=>"Tích điểm", PointTxType.Redeem=>"Đổi quà", PointTxType.Birthday=>"Sinh nhật", PointTxType.Adjust=>"Điều chỉnh", PointTxType.Expiry=>"Hết hạn", PointTxType.Introduction=>"Giới thiệu", PointTxType.ServiceTurn=>"Lượt dịch vụ", PointTxType.PointUse=>"Dùng ưu đãi", PointTxType.Sale=>"Mua xe mới", PointTxType.Consumption=>"Tiêu dùng dịch vụ", _=>t.ToString() };
 }
 <div class="d-flex justify-content-between align-items-center mb-3">
     <div><h5 class="fw-bold mb-0"><i class="bi bi-person-badge me-2"></i>@Model.Name</h5>
@@ -44,6 +44,12 @@
             <form asp-action="ServiceTurn" asp-route-id="@Model.Id" method="post" class="row g-2">@Html.AntiForgeryToken()
                 <div class="col-7"><input name="qty" type="number" value="1" min="1" class="form-control form-control-sm" placeholder="Số lượt dịch vụ" required /></div>
                 <div class="col-5"><button class="btn btn-outline-primary btn-sm w-100"><i class="bi bi-tools me-1"></i>Ghi lượt DV</button></div>
+                <div class="col-12"><input name="note" class="form-control form-control-sm" placeholder="Ghi chú / số RO" /></div>
+            </form>
+            <hr class="my-2" />
+            <form asp-action="Consumption" asp-route-id="@Model.Id" method="post" class="row g-2">@Html.AntiForgeryToken()
+                <div class="col-7"><input name="amount" type="number" step="1000" min="0" class="form-control form-control-sm" placeholder="Doanh thu RO dịch vụ (đ)" required /></div>
+                <div class="col-5"><button class="btn btn-outline-primary btn-sm w-100"><i class="bi bi-receipt me-1"></i>Tích điểm DV</button></div>
                 <div class="col-12"><input name="note" class="form-control form-control-sm" placeholder="Ghi chú / số RO" /></div>
             </form>
             <hr class="my-2" />
@@ -145,6 +151,29 @@
                         <td class="text-end fw-semibold text-danger">@u.Points.ToString("N0")</td>
                         <td class="text-end text-muted">@u.BalanceAfter.ToString("N0")</td>
                         <td class="small text-muted">@u.RefNo</td>
+                    </tr>
+                }
+            </tbody>
+        </table></div></div>
+
+        <div class="card mb-3"><div class="card-header bg-white fw-semibold"><i class="bi bi-receipt me-1"></i>Lịch sử tích điểm tiêu dùng dịch vụ</div>
+        <div class="table-responsive"><table class="table table-hover align-middle mb-0">
+            <thead><tr><th>Thời gian</th><th class="text-end">Doanh thu</th><th class="text-end">Điểm</th><th class="text-end">Điểm xét hạng</th><th class="text-end">Số dư</th><th>Tham chiếu</th></tr></thead>
+            <tbody>
+                @{ var consumptions = Model.Transactions.Where(t => t.Type == PointTxType.Consumption).OrderByDescending(t => t.CreatedAt).ToList(); }
+                @if (consumptions.Count == 0)
+                {
+                    <tr><td colspan="6" class="text-center text-muted small py-3">Chưa có giao dịch tích điểm tiêu dùng.</td></tr>
+                }
+                @foreach (var c in consumptions)
+                {
+                    <tr>
+                        <td class="small text-muted">@c.CreatedAt.ToString("dd/MM/yyyy HH:mm")</td>
+                        <td class="text-end">@c.AmountChTotal.ToString("N0")</td>
+                        <td class="text-end fw-semibold text-success">+@c.Points.ToString("N0")</td>
+                        <td class="text-end text-muted">@c.PointChRankTotal.ToString("N0")</td>
+                        <td class="text-end text-muted">@c.BalanceAfter.ToString("N0")</td>
+                        <td class="small text-muted">@c.RefNo</td>
                     </tr>
                 }
             </tbody>

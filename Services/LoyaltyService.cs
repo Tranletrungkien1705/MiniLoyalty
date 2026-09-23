@@ -34,6 +34,8 @@ public interface ILoyaltyService
     Task<(bool ok, string msg)> AwardIntroductionAsync(int newMemberId);
     Task<PointTransaction> AwardBuyNewCarAsync(int memberId, int? points = null, string? refNo = null);
     Task<PointTransaction> RecordServiceTurnAsync(int memberId, int qty, string? refNo);
+    Task<PointTransaction> RecordConsumptionAsync(int memberId, decimal amount, string? refNo);
+    Task<List<ServicePolicy>> ServicePoliciesAsync();
     Task<MemberDiscountTransaction> ApplyServiceDiscountAsync(int memberId, decimal amount, string? refNo);
     Task<List<MemberDiscountTransaction>> DiscountsAsync(int memberId);
     Task<MemberVoucherTransaction> AwardVoucherAsync(int memberId, int points, string? voucherCode, string? refNo, DateTime? expiry = null);
@@ -311,7 +313,47 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
     }
 
     /// <summary>
-    /// Chiết khấu dịch vụ (DealPointType = DISCOUNTRO, Crd_MemberDiscountTransaction): khi hội viên
+    /// Tích điểm tiêu dùng (DealPointType = CONSUMPTION, Crd_DealSerRO_Add / Crd_CardTransaction_InCrease_Save):
+    /// hội viên đưa xe vào đại lý làm dịch vụ (RO) → quy đổi doanh thu dịch vụ thành điểm theo chính sách
+    /// của hạng thẻ hiện tại (Mst_PolicyMoneyToPointServiceDtl: cứ ConvertValue đồng = ConvertPoint điểm).
+    /// Cộng điểm khả dụng + điểm tích lũy trọn đời (điểm dương nên ảnh hưởng xét hạng), cộng 1 lượt dịch vụ
+    /// (QtyVisitAvail), ghi 1 giao dịch CONSUMPTION kèm doanh thu (AmountChTotal) + điểm xét hạng (PointChRankTotal).
+    /// Điểm cộng có hạn dùng 12 tháng (PointExpiryDTime).
+    /// </summary>
+    public async Task<PointTransaction> RecordConsumptionAsync(int memberId, decimal amount, string? refNo)
+    {
+        if (amount <= 0) throw new ArgumentException("Doanh thu dịch vụ phải > 0.", nameof(amount));
+        var m = await db.Members.Include(x => x.RankTier).FirstOrDefaultAsync(x => x.Id == memberId)
+            ?? throw new KeyNotFoundException();
+
+        // Chính sách quy đổi của hạng hiện tại (mặc định 1.000đ = 1 điểm nếu chưa cấu hình).
+        var policy = await db.ServicePolicies.FirstOrDefaultAsync(p => p.RankTierId == m.RankTierId && p.IsActive);
+        var convertValue = policy?.ConvertValue > 0 ? policy.ConvertValue : VndPerPoint;
+        var convertPoint = policy?.ConvertPoint > 0 ? policy.ConvertPoint : 1;
+        var pts = (int)Math.Floor(amount / convertValue * convertPoint);
+
+        m.Points += pts;
+        m.LifetimePoints += pts;      // điểm dương → tính xếp hạng
+        m.PointCardRank += pts;       // điểm xét hạng tích trong kỳ
+        m.QtyVisitAvail += 1;         // mỗi lần vào xưởng = 1 lượt dịch vụ
+        await RecomputeRankAsync(m);
+
+        var tx = new PointTransaction
+        {
+            MemberId = memberId, Type = PointTxType.Consumption, Points = pts, BalanceAfter = m.Points,
+            AmountChTotal = amount, PointChRankTotal = pts, QtyVisit = 1,
+            Note = $"Tích điểm tiêu dùng dịch vụ {amount:N0}đ ({convertValue:N0}đ = {convertPoint} điểm)",
+            RefNo = refNo, ExpiresAt = DateTime.Now.AddMonths(PointValidityMonths)
+        };
+        db.PointTransactions.Add(tx);
+        await db.SaveChangesAsync();
+        return tx;
+    }
+
+    public Task<List<ServicePolicy>> ServicePoliciesAsync() =>
+        db.ServicePolicies.Include(p => p.RankTier).OrderBy(p => p.RankTierId).ToListAsync();
+
+    /// <summary>
     /// dùng dịch vụ, áp % chiết khấu theo hạng thẻ hiện tại (RankTier.DiscountPercent) lên doanh thu
     /// dịch vụ. Ghi 1 giao dịch chiết khấu (không đổi điểm). Tiền chiết khấu = doanh thu × %/100.
     /// </summary>

@@ -18,6 +18,7 @@ public class AppDbContext : DbContext
     public DbSet<MemberDiscountTransaction> MemberDiscountTransactions => Set<MemberDiscountTransaction>();
     public DbSet<MemberVoucherTransaction> MemberVoucherTransactions => Set<MemberVoucherTransaction>();
     public DbSet<Reward> Rewards => Set<Reward>();
+    public DbSet<ServicePolicy> ServicePolicies => Set<ServicePolicy>();
     public DbSet<Promotion> Promotions => Set<Promotion>();
     public DbSet<MemberPromotionUse> MemberPromotionUses => Set<MemberPromotionUse>();
 
@@ -34,7 +35,14 @@ public class AppDbContext : DbContext
         });
         b.Entity<PointTransaction>(e =>
         {
+            e.Property(x => x.AmountChTotal).HasPrecision(18, 2);
             e.HasOne(x => x.Member).WithMany(x => x.Transactions).HasForeignKey(x => x.MemberId);
+            e.HasQueryFilter(x => x.OrgId == _orgId);
+        });
+        b.Entity<ServicePolicy>(e =>
+        {
+            e.Property(x => x.ConvertValue).HasPrecision(18, 2);
+            e.HasOne(x => x.RankTier).WithMany().HasForeignKey(x => x.RankTierId);
             e.HasQueryFilter(x => x.OrgId == _orgId);
         });
         b.Entity<Reward>().HasQueryFilter(x => x.OrgId == _orgId);

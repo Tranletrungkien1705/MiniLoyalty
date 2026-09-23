@@ -29,6 +29,20 @@ public static class Seeder
                 new RankTier { Name = "Kim cương", MinLifetimePoints = 10000, DiscountPercent = 10, BirthdayPoints = 500, ColorHex = "#06b6d4", SortOrder = 4, PointKeepBegin = 5000, QtyVisitKeepBegin = 4, PointUpBegin = 0, QtyVisitUpBegin = 0 });
             await db.SaveChangesAsync();
         }
+        if (!await db.ServicePolicies.AnyAsync())
+        {
+            // Chính sách quy đổi tiền dịch vụ → điểm theo hạng (Mst_PolicyMoneyToPointServiceDtl):
+            // hạng càng cao, cứ mỗi ConvertValue đồng doanh thu RO được càng nhiều điểm (ConvertPoint).
+            var tiers = await db.RankTiers.OrderBy(t => t.SortOrder).ToListAsync();
+            var rates = new (decimal Value, int Point)[] { (1000, 1), (1000, 1), (1000, 2), (1000, 3), (1000, 4) };
+            for (var i = 0; i < tiers.Count; i++)
+                db.ServicePolicies.Add(new ServicePolicy
+                {
+                    PolicyCode = "DEFAULT", RankTierId = tiers[i].Id,
+                    ConvertValue = rates[i].Value, ConvertPoint = rates[i].Point
+                });
+            await db.SaveChangesAsync();
+        }
         if (!await db.Rewards.AnyAsync())
         {
             db.Rewards.AddRange(
@@ -130,7 +144,17 @@ public static class Seeder
                 RefNo = "DUP-DEMO-001", Note = $"Sử dụng ưu đãi {pr.Code} ({pr.Name})", CreatedAt = DateTime.Now.AddDays(-2)
             });
             prm.Transactions.Add(new PointTransaction { Type = PointTxType.PointUse, Points = -pr.PointCost, BalanceAfter = 2500 - pr.PointCost, Note = $"Sử dụng ưu đãi: {pr.Name}", RefNo = "DUP-DEMO-001", CreatedAt = DateTime.Now.AddDays(-2) });
-            db.Members.Add(prm);
+            // Tích điểm tiêu dùng dịch vụ (DealPointType=CONSUMPTION) — minh hoạ quy đổi doanh thu RO thành điểm theo hạng.
+            var cons = M("Hồ Nhật Nam", "0911333333", 1500, 800);
+            cons.PointCardRank = 1500;
+            cons.QtyVisitAvail = 1;
+            cons.Transactions.Add(new PointTransaction
+            {
+                Type = PointTxType.Consumption, Points = 1500, BalanceAfter = 800, AmountChTotal = 1_500_000,
+                PointChRankTotal = 1500, QtyVisit = 1, RefNo = "RO-DEMO-003",
+                Note = "Tích điểm tiêu dùng dịch vụ 1.500.000đ (1.000đ = 1 điểm)", CreatedAt = DateTime.Now.AddDays(-5)
+            });
+            db.Members.Add(cons);
             await db.SaveChangesAsync();
         }
     }

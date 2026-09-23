@@ -99,6 +99,18 @@ app.MapPost("/api/serviceturn", async (ServiceTurnDto dto, ILoyaltyService svc) 
     return Results.Ok(new { memberCode = member!.Code, qtyVisit = tx.QtyVisit, qtyVisitAvail = member.QtyVisitAvail, points = member.Points });
 });
 
+// API tích điểm tiêu dùng dịch vụ (DealPointType=CONSUMPTION): quy đổi doanh thu RO thành điểm theo chính sách hạng.
+app.MapPost("/api/consumption", async (ConsumptionDto dto, ILoyaltyService svc) =>
+{
+    var m = dto.Phone is { Length: > 0 } p ? await svc.GetByPhoneAsync(p) : null;
+    if (m == null && dto.MemberId is { } mid) m = await svc.GetAsync(mid);
+    if (m == null) return Results.NotFound(new { error = "Không tìm thấy hội viên" });
+    if (dto.Amount <= 0) return Results.BadRequest(new { error = "Doanh thu dịch vụ phải > 0." });
+    var tx = await svc.RecordConsumptionAsync(m.Id, dto.Amount, dto.RefNo);
+    var member = await svc.GetAsync(m.Id);
+    return Results.Ok(new { memberCode = member!.Code, earned = tx.Points, amount = tx.AmountChTotal, balance = member.Points, lifetime = member.LifetimePoints, qtyVisit = member.QtyVisitAvail, rank = member.RankTier?.Name });
+});
+
 // API chiết khấu dịch vụ (DealPointType=DISCOUNTRO): áp % chiết khấu theo hạng lên doanh thu dịch vụ.
 app.MapPost("/api/discount", async (DiscountDto dto, ILoyaltyService svc) =>
 {
@@ -169,6 +181,7 @@ record RegisterOrgDto(string Name);
 record IntroDto(string? Phone, int? MemberId);
 record BuyNewCarDto(string? Phone, int? MemberId, int? Points, string? RefNo);
 record ServiceTurnDto(string? Phone, int? MemberId, int Qty, string? RefNo);
+record ConsumptionDto(string? Phone, int? MemberId, decimal Amount, string? RefNo);
 record DiscountDto(string? Phone, int? MemberId, decimal Amount, string? RefNo);
 record VoucherAwardDto(string? Phone, int? MemberId, int Points, string? VoucherCode, string? RefNo, DateTime? Expiry);
 record VoucherUseDto(string? Phone, int? MemberId, int Points, string? VoucherCode, string? RefNo);

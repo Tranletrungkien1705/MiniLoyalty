@@ -68,6 +68,15 @@ public class MemberController(ILoyaltyService svc) : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> Consumption(int id, decimal amount, string? note)
+    {
+        if (amount <= 0) { TempData["Error"] = "Doanh thu dịch vụ phải > 0."; return RedirectToAction(nameof(Details), new { id }); }
+        var tx = await svc.RecordConsumptionAsync(id, amount, note);
+        TempData["Success"] = $"Đã tích {tx.Points:N0} điểm tiêu dùng dịch vụ ({tx.AmountChTotal:N0}đ).";
+        return RedirectToAction(nameof(Details), new { id });
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
     public async Task<IActionResult> Discount(int id, decimal amount, string? note)
     {
         if (amount <= 0) { TempData["Error"] = "Doanh thu dịch vụ phải > 0."; return RedirectToAction(nameof(Details), new { id }); }

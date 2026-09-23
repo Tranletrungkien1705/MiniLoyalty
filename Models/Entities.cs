@@ -1,6 +1,6 @@
 namespace MiniLoyalty.Models;
 
-public enum PointTxType { Earn = 0, Redeem = 1, Birthday = 2, Adjust = 3, Expiry = 4, Introduction = 5, ServiceTurn = 6, Discount = 7, PointUse = 8, Sale = 9 }
+public enum PointTxType { Earn = 0, Redeem = 1, Birthday = 2, Adjust = 3, Expiry = 4, Introduction = 5, ServiceTurn = 6, Discount = 7, PointUse = 8, Sale = 9, Consumption = 10 }
 
 /// <summary>Loại giao dịch điểm voucher (Crd_MemberVoucherTransaction.DealPointType).</summary>
 public enum VoucherTxType { Award = 0, Use = 1 }   // VOUCHERXM = tặng, VOUCHERSD = sử dụng
@@ -77,6 +77,8 @@ public class PointTransaction : IOrgOwned
     public string? Note { get; set; }
     public string? RefNo { get; set; }
     public int QtyVisit { get; set; }          // Crd_CardTransaction.QtyVisitChTotal — số lượt dịch vụ ghi nhận (SERVICETURN)
+    public decimal AmountChTotal { get; set; } // Crd_CardTransaction.AmountChTotal — doanh thu dịch vụ (CONSUMPTION)
+    public int PointChRankTotal { get; set; }  // Crd_CardTransaction.PointChRankTotal — điểm xét hạng cộng thêm (CONSUMPTION)
     public DateTime? ExpiresAt { get; set; }   // điểm dương hết hạn vào thời điểm này (PointExpiryDTime)
     public DateTime CreatedAt { get; set; } = DateTime.Now;
 
@@ -123,6 +125,22 @@ public class MemberVoucherTransaction : IOrgOwned
     public DateTime CreatedAt { get; set; } = DateTime.Now;
 
     public Member Member { get; set; } = null!;
+}
+
+/// <summary>
+/// Chính sách quy đổi tiền dịch vụ → điểm (Mst_PolicyMoneyToPointServiceDtl): theo hạng thẻ,
+/// cứ ConvertValue đồng doanh thu dịch vụ thì được ConvertPoint điểm. Dùng cho giao dịch CONSUMPTION.
+/// </summary>
+public class ServicePolicy : IOrgOwned
+{
+    public int Id { get; set; }
+    public Guid OrgId { get; set; }
+    public string PolicyCode { get; set; } = "DEFAULT";   // Mst_PolicyMoneyToPointService.PolicyCode
+    public int RankTierId { get; set; }                   // Mst_PolicyMoneyToPointServiceDtl.CardType — hạng áp dụng
+    public decimal ConvertValue { get; set; }             // Mst_PolicyMoneyToPointServiceDtl.ConvertValue — số tiền (đ)
+    public int ConvertPoint { get; set; }                 // Mst_PolicyMoneyToPointServiceDtl.ConvertPoint — số điểm tương ứng
+    public bool IsActive { get; set; } = true;            // Mst_PolicyMoneyToPointServiceDtl.FlagActive
+    public RankTier? RankTier { get; set; }
 }
 
 /// <summary>Quà/voucher đổi bằng điểm.</summary>
