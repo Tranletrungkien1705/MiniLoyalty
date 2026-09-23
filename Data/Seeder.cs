@@ -20,12 +20,13 @@ public static class Seeder
         if (!await db.RankTiers.AnyAsync())
         {
             // PointKeepBegin/QtyVisitKeepBegin = ngưỡng DUY TRÌ hạng trong kỳ (Mst_RankPolicy) — dùng cho job xét hạng cuối kỳ.
+            // PointUpBegin/QtyVisitUpBegin = ngưỡng NÂNG hạng trong kỳ — đạt cả hai thì lên hạng kế tiếp (UP).
             db.RankTiers.AddRange(
-                new RankTier { Name = "Thành viên", MinLifetimePoints = 0, DiscountPercent = 0, BirthdayPoints = 50, ColorHex = "#94a3b8", SortOrder = 0, PointKeepBegin = 0, QtyVisitKeepBegin = 0 },
-                new RankTier { Name = "Bạc", MinLifetimePoints = 500, DiscountPercent = 3, BirthdayPoints = 100, ColorHex = "#9ca3af", SortOrder = 1, PointKeepBegin = 300, QtyVisitKeepBegin = 1 },
-                new RankTier { Name = "Vàng", MinLifetimePoints = 2000, DiscountPercent = 5, BirthdayPoints = 200, ColorHex = "#f59e0b", SortOrder = 2, PointKeepBegin = 1000, QtyVisitKeepBegin = 2 },
-                new RankTier { Name = "Bạch kim", MinLifetimePoints = 5000, DiscountPercent = 8, BirthdayPoints = 300, ColorHex = "#6366f1", SortOrder = 3, PointKeepBegin = 2500, QtyVisitKeepBegin = 3 },
-                new RankTier { Name = "Kim cương", MinLifetimePoints = 10000, DiscountPercent = 10, BirthdayPoints = 500, ColorHex = "#06b6d4", SortOrder = 4, PointKeepBegin = 5000, QtyVisitKeepBegin = 4 });
+                new RankTier { Name = "Thành viên", MinLifetimePoints = 0, DiscountPercent = 0, BirthdayPoints = 50, ColorHex = "#94a3b8", SortOrder = 0, PointKeepBegin = 0, QtyVisitKeepBegin = 0, PointUpBegin = 300, QtyVisitUpBegin = 1 },
+                new RankTier { Name = "Bạc", MinLifetimePoints = 500, DiscountPercent = 3, BirthdayPoints = 100, ColorHex = "#9ca3af", SortOrder = 1, PointKeepBegin = 300, QtyVisitKeepBegin = 1, PointUpBegin = 1000, QtyVisitUpBegin = 2 },
+                new RankTier { Name = "Vàng", MinLifetimePoints = 2000, DiscountPercent = 5, BirthdayPoints = 200, ColorHex = "#f59e0b", SortOrder = 2, PointKeepBegin = 1000, QtyVisitKeepBegin = 2, PointUpBegin = 2500, QtyVisitUpBegin = 3 },
+                new RankTier { Name = "Bạch kim", MinLifetimePoints = 5000, DiscountPercent = 8, BirthdayPoints = 300, ColorHex = "#6366f1", SortOrder = 3, PointKeepBegin = 2500, QtyVisitKeepBegin = 3, PointUpBegin = 5000, QtyVisitUpBegin = 4 },
+                new RankTier { Name = "Kim cương", MinLifetimePoints = 10000, DiscountPercent = 10, BirthdayPoints = 500, ColorHex = "#06b6d4", SortOrder = 4, PointKeepBegin = 5000, QtyVisitKeepBegin = 4, PointUpBegin = 0, QtyVisitUpBegin = 0 });
             await db.SaveChangesAsync();
         }
         if (!await db.Rewards.AnyAsync())
@@ -65,6 +66,10 @@ public static class Seeder
                 M("Phạm Thu Dung", "0904444444", 700, 350),
                 M("Vũ Minh Đức", "0905555555", 120, 120)
             );
+            // Hội viên đạt ngưỡng NÂNG hạng trong kỳ (Bạc: PointUpBegin=1000, QtyVisitUpBegin=2) → minh hoạ UP.
+            var up = M("Đỗ Thị Hoa", "0906666666", 800, 400);
+            up.PointCardRank = 1200; up.QtyVisitAvail = 2;
+            db.Members.Add(up);
             // Hội viên có sinh nhật đúng hôm nay — để minh hoạ job tặng điểm sinh nhật.
             var bd = db.Members.Local.First();
             bd.Dob = new DateTime(1992, DateTime.Today.Month, DateTime.Today.Day);

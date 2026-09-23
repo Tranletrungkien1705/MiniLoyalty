@@ -43,12 +43,13 @@
         <div class="card h-100"><div class="card-body">
             <div class="d-flex align-items-center mb-2">
                 <i class="bi bi-arrow-down-up fs-4 me-2" style="color:var(--accent)"></i>
-                <h6 class="fw-bold mb-0">Xét hạng cuối kỳ (duy trì / xuống hạng)</h6>
+                <h6 class="fw-bold mb-0">Xét hạng cuối kỳ (nâng / duy trì / xuống hạng)</h6>
             </div>
             <p class="text-muted small mb-2">
-                So điểm xét hạng trong kỳ và số lượt dịch vụ với ngưỡng <b>duy trì</b> của hạng hiện tại.
-                Đạt ngưỡng → <b>giữ hạng</b>; không đạt → <b>xuống 1 hạng</b>. Sang kỳ mới, điểm xét hạng và
-                lượt dịch vụ được reset về 0. Hội viên đã xét trong kỳ sẽ bị bỏ qua (không xét trùng).
+                So điểm xét hạng trong kỳ và số lượt dịch vụ với ngưỡng của hạng hiện tại.
+                Đạt ngưỡng <b>nâng</b> → <b>lên 1 hạng</b>; không nâng nhưng đạt ngưỡng <b>duy trì</b> → <b>giữ hạng</b>;
+                không đạt → <b>xuống 1 hạng</b>. Sang kỳ mới, điểm xét hạng và lượt dịch vụ được reset về 0.
+                Hội viên đã xét trong kỳ sẽ bị bỏ qua (không xét trùng).
             </p>
             <form asp-action="RunRankKeepDown" method="post">@Html.AntiForgeryToken()
                 <button class="btn btn-primary btn-sm"><i class="bi bi-play-fill me-1"></i>Chạy job hôm nay</button>
