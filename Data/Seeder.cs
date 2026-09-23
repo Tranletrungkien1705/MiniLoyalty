@@ -177,6 +177,14 @@ public static class Seeder
             });
             inc.PointCardRank += 600;
             db.Members.Add(inc);
+            // Hội viên đã bị vô hiệu hoá (Crd_Member_InActiveX) — minh hoạ trạng thái Cancel + thẻ huỷ.
+            var inact = M("Trương Văn Lộc", "0911555555", 800, 0);
+            inact.Status = MemberStatus.Cancel;
+            inact.CardStatus = CardStatus.Cancel;
+            inact.InactiveAt = DateTime.Now.AddDays(-7);
+            inact.InactiveBy = "HTV";
+            inact.Remark = "Khách bán xe cũ cho người khác";
+            db.Members.Add(inact);
             await db.SaveChangesAsync();
         }
     }

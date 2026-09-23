@@ -222,6 +222,18 @@ app.MapPost("/api/opencard/award", async (OpenCardDto dto, ILoyaltyService svc) 
     catch (Exception ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
+// API vô hiệu hoá hội viên (Crd_Member_InActiveX): đặt MemberStatus=Cancel, huỷ thẻ, đặt điểm còn lại hết hạn cuối tháng.
+app.MapPost("/api/member/inactive", async (InactiveDto dto, ILoyaltyService svc) =>
+{
+    var m = dto.Phone is { Length: > 0 } p ? await svc.GetByPhoneAsync(p) : null;
+    if (m == null && dto.MemberId is { } mid) m = await svc.GetAsync(mid);
+    if (m == null) return Results.NotFound(new { error = "Không tìm thấy hội viên" });
+    var (ok, msg) = await svc.InactivateMemberAsync(m.Id, dto.Remark, dto.By);
+    if (!ok) return Results.BadRequest(new { ok, error = msg });
+    var member = await svc.GetAsync(m.Id);
+    return Results.Ok(new { ok, msg, memberCode = member!.Code, status = member.Status.ToString(), cardStatus = member.CardStatus.ToString() });
+});
+
 app.MapControllerRoute(name: "default", pattern: "{controller=Home}/{action=Index}/{id?}");
 app.Run();
 
@@ -238,3 +250,4 @@ record VoucherAwardDto(string? Phone, int? MemberId, int Points, string? Voucher
 record VoucherUseDto(string? Phone, int? MemberId, int Points, string? VoucherCode, string? RefNo);
 record PromotionUseDto(string? Phone, int? MemberId, int PromotionId, string? RefNo);
 record PointIncreaseDto(string? Phone, int? MemberId, int RankPoints, string? RefNo);
+record InactiveDto(string? Phone, int? MemberId, string? Remark, string? By);

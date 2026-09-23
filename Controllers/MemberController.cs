@@ -167,4 +167,12 @@ public class MemberController(ILoyaltyService svc) : Controller
         TempData[ok ? "Success" : "Error"] = msg;
         return RedirectToAction(nameof(Details), new { id });
     }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> Inactivate(int id, string? remark)
+    {
+        var (ok, msg) = await svc.InactivateMemberAsync(id, remark, User?.Identity?.Name);
+        TempData[ok ? "Success" : "Error"] = msg;
+        return RedirectToAction(nameof(Details), new { id });
+    }
 }

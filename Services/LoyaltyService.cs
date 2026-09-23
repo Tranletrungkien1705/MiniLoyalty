@@ -52,6 +52,7 @@ public interface ILoyaltyService
     Task<(bool ok, string msg)> UsePromotionAsync(int memberId, int promotionId, string? refNo);
     Task<(bool ok, string msg)> RecordPromotionUseAsync(int memberId, int promotionId, int qty, string? refNo);
     Task<List<MemberPromotionUse>> PromotionUsesAsync(int memberId);
+    Task<(bool ok, string msg)> InactivateMemberAsync(int memberId, string? remark, string? by = null);
 }
 
 public class LoyaltyService(AppDbContext db) : ILoyaltyService
@@ -614,6 +615,41 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
         db.MemberPromotionUses.Include(u => u.PromotionNav)
             .Where(u => u.MemberId == memberId)
             .OrderByDescending(u => u.CreatedAt).ToListAsync();
+
+    /// <summary>
+    /// Vô hiệu hoá hội viên (Crd_Member_InActiveX, Card.cs): khi hội viên ngừng tham gia (ví dụ bán xe cũ
+    /// cho khách khác), hệ thống:
+    ///   1. Đặt MemberStatus = Cancel, ghi InactiveAt/InactiveBy/Remark (audit).
+    ///   2. Huỷ thẻ đang hiệu lực (CardStatus = Cancel).
+    ///   3. Đặt toàn bộ điểm còn lại hết hạn ngay: các giao dịch cộng điểm chưa xử lý (ExpiresAt &gt; cuối tháng)
+    ///      được dời hạn về cuối tháng hiện tại (PointExpiryDTime = StdDateEndOfMonth), để job hết hạn điểm
+    ///      thu hồi phần điểm còn lại. KHÔNG trừ điểm trực tiếp ở đây (giữ đúng luồng hệ nguồn).
+    /// Idempotent: hội viên đã ở trạng thái Cancel thì bỏ qua.
+    /// </summary>
+    public async Task<(bool ok, string msg)> InactivateMemberAsync(int memberId, string? remark, string? by = null)
+    {
+        var m = await db.Members.FirstOrDefaultAsync(x => x.Id == memberId);
+        if (m == null) return (false, "Không tìm thấy hội viên.");
+        if (m.Status == MemberStatus.Cancel) return (false, "Hội viên đã ở trạng thái vô hiệu hoá.");
+
+        var now = DateTime.Now;
+        var endOfMonth = new DateTime(now.Year, now.Month, DateTime.DaysInMonth(now.Year, now.Month));
+
+        m.Status = MemberStatus.Cancel;      // Crd_Member.MemberStatus = CANCEL
+        m.CardStatus = CardStatus.Cancel;    // Crd_Card.CardStatus = CANCEL (huỷ thẻ đang hiệu lực)
+        m.InactiveAt = now;                  // Crd_Member.InactiveDTimeUTC
+        m.InactiveBy = by;                   // Crd_Member.InactiveBy
+        m.Remark = remark;                   // Crd_Member.Remark
+
+        // Dời hạn các giao dịch cộng điểm chưa xử lý về cuối tháng → job hết hạn sẽ thu hồi điểm còn lại.
+        var pending = await db.PointTransactions
+            .Where(t => t.MemberId == m.Id && t.Points > 0 && t.ExpiresAt != null && t.ExpiresAt > endOfMonth)
+            .ToListAsync();
+        foreach (var t in pending) t.ExpiresAt = endOfMonth;
+
+        await db.SaveChangesAsync();
+        return (true, $"Đã vô hiệu hoá hội viên {m.Code} ({m.Name}); huỷ thẻ và đặt {pending.Count} giao dịch điểm hết hạn cuối tháng.");
+    }
 
     public async Task<LoyaltyDash> DashboardAsync()
     {

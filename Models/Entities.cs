@@ -8,6 +8,12 @@ public enum PromotionUseKind { PointUse = 0, PrProgram = 1 }
 /// <summary>Loại giao dịch điểm voucher (Crd_MemberVoucherTransaction.DealPointType).</summary>
 public enum VoucherTxType { Award = 0, Use = 1, BirthdayVoucher = 2 }   // VOUCHERXM = tặng, VOUCHERSD = sử dụng, VOUCHERTSN = voucher sinh nhật
 
+/// <summary>Trạng thái hội viên (Crd_Member.MemberStatus): PENDING → APPROVE → CANCEL.</summary>
+public enum MemberStatus { Pending = 0, Approve = 1, Cancel = 2 }   // TConst.MemberStatus.Pending/Approve/Cancel
+
+/// <summary>Trạng thái thẻ (Crd_Card.CardStatus): PENDING → APPROVE → CANCEL.</summary>
+public enum CardStatus { Pending = 0, Approve = 1, Cancel = 2 }   // TConst.CardStatus.Pending/Approve/Cancel
+
 /// <summary>Hạng thẻ — xếp theo điểm tích lũy trọn đời (lifetime), kèm % chiết khấu.</summary>
 public class RankTier
 {
@@ -71,6 +77,15 @@ public class Member : IOrgOwned
     public DateTime? EffDateStart { get; set; }   // Crd_Card.EffDateStart — đầu kỳ xét hạng
     public DateTime? EffDateEnd { get; set; }     // Crd_Card.EffDateEnd — cuối kỳ xét hạng
     public string CardSourceCode { get; set; } = "NEW";   // Crd_Card.CardSourceCode: NEW/UP/DOWN/KEEP/RENEW
+
+    // Trạng thái hội viên/thẻ (Crd_Member.MemberStatus, Crd_Card.CardStatus).
+    // Khi hội viên bị vô hiệu hoá (Crd_Member_InActiveX): MemberStatus = Cancel, thẻ bị huỷ (CardStatus = Cancel),
+    // và toàn bộ điểm còn lại bị đặt hết hạn ngay (PointExpiryDTime = cuối tháng).
+    public MemberStatus Status { get; set; } = MemberStatus.Approve;   // Crd_Member.MemberStatus
+    public CardStatus CardStatus { get; set; } = CardStatus.Approve;   // Crd_Card.CardStatus
+    public DateTime? InactiveAt { get; set; }      // Crd_Member.InactiveDTimeUTC — thời điểm vô hiệu hoá
+    public string? InactiveBy { get; set; }        // Crd_Member.InactiveBy — người vô hiệu hoá
+    public string? Remark { get; set; }            // Crd_Member.Remark — lý do vô hiệu hoá (audit)
 
     public RankTier? RankTier { get; set; }
     public List<PointTransaction> Transactions { get; set; } = [];
