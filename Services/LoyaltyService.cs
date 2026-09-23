@@ -32,6 +32,7 @@ public interface ILoyaltyService
     Task<ExpiryRunResult> RunExpiryJobAsync(DateTime? today = null);
     Task<RankKeepDownRunResult> RunRankKeepDownJobAsync(DateTime? today = null);
     Task<(bool ok, string msg)> AwardIntroductionAsync(int newMemberId);
+    Task<PointTransaction> AwardBuyNewCarAsync(int memberId, int? points = null, string? refNo = null);
     Task<PointTransaction> RecordServiceTurnAsync(int memberId, int qty, string? refNo);
     Task<MemberDiscountTransaction> ApplyServiceDiscountAsync(int memberId, decimal amount, string? refNo);
     Task<List<MemberDiscountTransaction>> DiscountsAsync(int memberId);
@@ -266,6 +267,27 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
         await EarnAsync(referrer.Id, m.PointIntro, PointTxType.Introduction,
             $"Thưởng điểm giới thiệu hội viên {m.Code} ({m.Name})", refNo);
         return (true, $"Đã thưởng {m.PointIntro:N0} điểm cho người giới thiệu {referrer.Code} ({referrer.Name}).");
+    }
+
+    /// <summary>
+    /// Tặng điểm mua xe mới (DealPointType = SALES, Crd_Member_PerformBuyNewCarX): khi hội viên mua xe mới,
+    /// hệ thống cộng số điểm thưởng mua xe (Crd_Member.PointBuyCar) vào điểm khả dụng + điểm tích lũy trọn đời
+    /// (điểm dương nên có ảnh hưởng xét hạng), ghi 1 giao dịch SALES. Điểm có hạn dùng cuối năm kế tiếp.
+    /// Idempotent: mỗi hội viên chỉ thưởng 1 lần (chặn bằng giao dịch SALES đã có theo RefNo).
+    /// </summary>
+    public async Task<PointTransaction> AwardBuyNewCarAsync(int memberId, int? points = null, string? refNo = null)
+    {
+        var m = await db.Members.FirstOrDefaultAsync(x => x.Id == memberId) ?? throw new KeyNotFoundException();
+        var pts = points ?? m.PointBuyCar;
+        if (pts <= 0) throw new ArgumentException("Điểm thưởng mua xe phải > 0.", nameof(points));
+
+        var rn = string.IsNullOrWhiteSpace(refNo) ? $"NEW.{m.Code}" : refNo;
+        // Đã thưởng điểm mua xe cho hội viên này chưa? (chặn thưởng trùng)
+        var already = await db.PointTransactions.AnyAsync(t =>
+            t.MemberId == m.Id && t.Type == PointTxType.Sale && t.RefNo == rn);
+        if (already) throw new InvalidOperationException("Đã thưởng điểm mua xe cho hội viên này rồi.");
+
+        return await EarnAsync(m.Id, pts, PointTxType.Sale, $"Tặng điểm mua xe mới ({pts:N0} điểm)", rn);
     }
 
     /// <summary>

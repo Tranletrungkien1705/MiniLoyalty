@@ -87,6 +87,10 @@ public static class Seeder
             intro.MemberNoIntro = db.Members.Local.First().Code;   // người giới thiệu = hội viên đầu tiên
             intro.PointIntro = 200;
             db.Members.Add(intro);
+            // Hội viên mua xe mới có điểm thưởng (Crd_Member.PointBuyCar) — minh hoạ nghiệp vụ tặng điểm mua xe (DealPointType=SALES).
+            var buyCar = M("Trịnh Văn Sơn", "0909990000", 0, 0);
+            buyCar.PointBuyCar = 5000;
+            db.Members.Add(buyCar);
             // Ghi nhận lượt dịch vụ (DealPointType=SERVICETURN) — minh hoạ nghiệp vụ cộng lượt vào QtyVisitAvail.
             var svcTurn = M("Bùi Thanh Tùng", "0908888888", 300, 300);
             svcTurn.QtyVisitAvail = 2;
