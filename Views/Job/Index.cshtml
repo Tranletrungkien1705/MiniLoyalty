@@ -42,6 +42,23 @@
     <div class="col-lg-6">
         <div class="card h-100"><div class="card-body">
             <div class="d-flex align-items-center mb-2">
+                <i class="bi bi-ticket-perforated-fill fs-4 me-2" style="color:var(--accent)"></i>
+                <h6 class="fw-bold mb-0">Phát voucher sinh nhật</h6>
+            </div>
+            <p class="text-muted small mb-2">
+                Phát <b>1 voucher/năm</b> cho hội viên có sinh nhật trùng ngày chạy, theo giá trị voucher
+                của hạng hiện tại (đại lý <b>SUPPORT</b> phát hành). Voucher cộng vào điểm voucher (không dùng xét hạng),
+                hạn dùng theo cấu hình hạng. Chạy lại không phát trùng.
+            </p>
+            <form asp-action="RunBirthdayVoucher" method="post">@Html.AntiForgeryToken()
+                <button class="btn btn-primary btn-sm"><i class="bi bi-play-fill me-1"></i>Chạy job hôm nay</button>
+            </form>
+        </div></div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card h-100"><div class="card-body">
+            <div class="d-flex align-items-center mb-2">
                 <i class="bi bi-arrow-down-up fs-4 me-2" style="color:var(--accent)"></i>
                 <h6 class="fw-bold mb-0">Xét hạng cuối kỳ (nâng / duy trì / xuống hạng)</h6>
             </div>

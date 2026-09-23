@@ -71,6 +71,13 @@ app.MapPost("/api/expiry/run", async (ILoyaltyService svc) =>
     return Results.Ok(new { date = r.Date, members = r.Members, expiredPoints = r.Points, details = r.Details });
 });
 
+// API chạy job phát voucher sinh nhật (DealPointType=VOUCHERTSN): 1 voucher/năm cho hội viên sinh nhật hôm nay. Idempotent.
+app.MapPost("/api/birthdayvoucher/run", async (ILoyaltyService svc) =>
+{
+    var r = await svc.RunBirthdayVoucherJobAsync();
+    return Results.Ok(new { date = r.Date, issued = r.Issued, points = r.Points, details = r.Details });
+});
+
 // API chạy job xét hạng cuối kỳ (nâng/duy trì/xuống hạng theo ngưỡng Mst_RankPolicy). Idempotent theo kỳ.
 app.MapPost("/api/rank/keepdown/run", async (ILoyaltyService svc) =>
 {

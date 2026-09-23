@@ -32,6 +32,16 @@ public class JobController(ILoyaltyService svc) : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> RunBirthdayVoucher()
+    {
+        var r = await svc.RunBirthdayVoucherJobAsync();
+        TempData["Success"] = r.Issued == 0
+            ? "Không có hội viên nào đủ điều kiện nhận voucher sinh nhật hôm nay (hoặc đã nhận trong năm)."
+            : $"Đã phát voucher sinh nhật cho {r.Issued} hội viên, tổng {r.Points:N0} điểm voucher.";
+        return RedirectToAction(nameof(Index));
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
     public async Task<IActionResult> RunRankKeepDown()
     {
         var r = await svc.RunRankKeepDownJobAsync();

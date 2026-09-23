@@ -3,7 +3,7 @@ namespace MiniLoyalty.Models;
 public enum PointTxType { Earn = 0, Redeem = 1, Birthday = 2, Adjust = 3, Expiry = 4, Introduction = 5, ServiceTurn = 6, Discount = 7, PointUse = 8, Sale = 9, Consumption = 10 }
 
 /// <summary>Loại giao dịch điểm voucher (Crd_MemberVoucherTransaction.DealPointType).</summary>
-public enum VoucherTxType { Award = 0, Use = 1 }   // VOUCHERXM = tặng, VOUCHERSD = sử dụng
+public enum VoucherTxType { Award = 0, Use = 1, BirthdayVoucher = 2 }   // VOUCHERXM = tặng, VOUCHERSD = sử dụng, VOUCHERTSN = voucher sinh nhật
 
 /// <summary>Hạng thẻ — xếp theo điểm tích lũy trọn đời (lifetime), kèm % chiết khấu.</summary>
 public class RankTier
@@ -13,6 +13,10 @@ public class RankTier
     public int MinLifetimePoints { get; set; }
     public decimal DiscountPercent { get; set; }
     public int BirthdayPoints { get; set; }   // điểm tặng sinh nhật theo hạng (Mst_BirthPolicyDtl.Point)
+    // Voucher sinh nhật theo hạng (Mst_BirthPolicyDtl.VoucherValue/VoucherExpireDays):
+    // VoucherValue > 0 → phát 1 voucher/năm cho hội viên hạng này vào ngày sinh nhật.
+    public int BirthdayVoucherPoints { get; set; }      // Mst_BirthPolicyDtl.VoucherValue — điểm voucher tặng sinh nhật
+    public int BirthdayVoucherExpireDays { get; set; }  // Mst_BirthPolicyDtl.VoucherExpireDays — số ngày voucher hiệu lực
     public string ColorHex { get; set; } = "#94a3b8";
     public int SortOrder { get; set; }
 

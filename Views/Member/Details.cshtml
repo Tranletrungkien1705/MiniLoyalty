@@ -213,7 +213,7 @@
                 {
                     <tr>
                         <td class="small text-muted">@v.CreatedAt.ToString("dd/MM/yyyy HH:mm")</td>
-                        <td class="small">@(v.Type == VoucherTxType.Award ? "Tặng (VOUCHERXM)" : "Sử dụng (VOUCHERSD)")</td>
+                        <td class="small">@(v.Type == VoucherTxType.Award ? "Tặng (VOUCHERXM)" : v.Type == VoucherTxType.BirthdayVoucher ? "Voucher sinh nhật (VOUCHERTSN)" : "Sử dụng (VOUCHERSD)")</td>
                         <td class="small font-monospace">@v.VoucherCode</td>
                         <td class="text-end fw-semibold @(v.Points>=0?"text-success":"text-danger")">@(v.Points>=0?"+":"")@v.Points.ToString("N0")</td>
                         <td class="text-end text-muted">@v.BalanceAfter.ToString("N0")</td>

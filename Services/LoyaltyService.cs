@@ -10,6 +10,9 @@ public record LoyaltyDash(int Members, int ActivePoints, int LifetimeIssued,
 /// <summary>Kết quả 1 lần chạy job tặng điểm sinh nhật.</summary>
 public record BirthdayRunResult(int Awarded, int Points, List<(string Code, string Name, int Points)> Details);
 
+/// <summary>Kết quả 1 lần chạy job phát voucher sinh nhật (DealPointType=VOUCHERTSN).</summary>
+public record BirthdayVoucherRunResult(DateTime Date, int Issued, int Points, List<(string Code, string Name, int Points, DateTime Expiry)> Details);
+
 /// <summary>Kết quả 1 lần chạy job hết hạn điểm.</summary>
 public record ExpiryRunResult(DateTime Date, int Members, int Points, List<(string Code, string Name, int Points)> Details);
 
@@ -29,6 +32,7 @@ public interface ILoyaltyService
     Task<List<Reward>> RewardsAsync(bool activeOnly = true);
     Task<LoyaltyDash> DashboardAsync();
     Task<BirthdayRunResult> RunBirthdayJobAsync(DateTime? today = null);
+    Task<BirthdayVoucherRunResult> RunBirthdayVoucherJobAsync(DateTime? today = null);
     Task<ExpiryRunResult> RunExpiryJobAsync(DateTime? today = null);
     Task<RankKeepDownRunResult> RunRankKeepDownJobAsync(DateTime? today = null);
     Task<(bool ok, string msg)> AwardIntroductionAsync(int newMemberId);
@@ -144,6 +148,48 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
             total += pts;
         }
         return new BirthdayRunResult(details.Count, total, details);
+    }
+
+    /// <summary>
+    /// Job phát voucher sinh nhật (DealPointType = VOUCHERTSN, Crd_MemberVoucherTransaction):
+    /// với hội viên có ngày sinh trùng ngày chạy (so khớp MM-dd) và hạng hiện tại có cấu hình voucher
+    /// (Mst_BirthPolicyDtl.VoucherValue &gt; 0), phát 1 voucher/năm do đại lý SUPPORT phát hành:
+    /// cộng VoucherValue điểm vào Member.PointVoucher (không dùng xét hạng), hạn dùng = ngày chạy + VoucherExpireDays.
+    /// Idempotent: mỗi hội viên chỉ nhận 1 voucher/năm (chặn bằng giao dịch VOUCHERTSN đã có theo RefNo "BVS.&lt;năm&gt;.&lt;mã&gt;").
+    /// </summary>
+    public async Task<BirthdayVoucherRunResult> RunBirthdayVoucherJobAsync(DateTime? today = null)
+    {
+        var d = (today ?? DateTime.Today).Date;
+        var year = d.Year;
+        var members = await db.Members.Include(m => m.RankTier).ToListAsync();
+        var details = new List<(string, string, int, DateTime)>();
+        var total = 0;
+
+        foreach (var m in members)
+        {
+            if (m.Dob is not { } dob || dob.Month != d.Month || dob.Day != d.Day) continue;
+            var pts = m.RankTier?.BirthdayVoucherPoints ?? 0;
+            if (pts <= 0) continue;   // hạng không cấu hình voucher → không phát
+            // Đã nhận voucher sinh nhật trong năm nay chưa? (chặn phát trùng)
+            var refNo = $"BVS.{year}.{m.Code}";
+            var already = await db.MemberVoucherTransactions.AnyAsync(t =>
+                t.MemberId == m.Id && t.Type == VoucherTxType.BirthdayVoucher && t.RefNo == refNo);
+            if (already) continue;
+
+            var days = m.RankTier?.BirthdayVoucherExpireDays ?? 0;
+            var expiry = d.AddDays(days);
+            m.PointVoucher += pts;
+            db.MemberVoucherTransactions.Add(new MemberVoucherTransaction
+            {
+                MemberId = m.Id, Type = VoucherTxType.BirthdayVoucher, Points = pts, BalanceAfter = m.PointVoucher,
+                VoucherCode = $"BV.{year}.{m.Code}", RefNo = refNo, ExpiryDate = expiry,
+                Note = $"Voucher sinh nhật {d:dd/MM} (hạng {m.RankTier?.Name}, đại lý SUPPORT)"
+            });
+            details.Add((m.Code, m.Name, pts, expiry));
+            total += pts;
+        }
+        if (details.Count > 0) await db.SaveChangesAsync();
+        return new BirthdayVoucherRunResult(d, details.Count, total, details);
     }
 
     /// <summary>
