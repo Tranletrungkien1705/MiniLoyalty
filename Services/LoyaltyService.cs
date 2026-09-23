@@ -61,6 +61,11 @@ public interface ILoyaltyService
     Task<(bool ok, string msg)> ApproveChangeRequestAsync(int requestId, string? remarkHtv, string? by = null);
     Task<(bool ok, string msg)> FinishChangeRequestAsync(int requestId, string? remarkHtv, string? by = null);
     Task<(bool ok, string msg)> RejectChangeRequestAsync(int requestId, string? remarkHtv, string? by = null);
+    Task<List<CardException>> CardExceptionsAsync(CardExceptionStatus? status = null);
+    Task<CardException?> CardExceptionAsync(int id);
+    Task<(bool ok, string msg, int id)> RequestCardExceptionAsync(int memberId, string? dlCodeExceptionally, string? remark, List<string> dealerCodes);
+    Task<(bool ok, string msg)> ApproveCardExceptionAsync(int id, string? remarkHtv, string? by = null);
+    Task<(bool ok, string msg)> RejectCardExceptionAsync(int id, string? remarkHtv, string? by = null);
 }
 
 public class LoyaltyService(AppDbContext db) : ILoyaltyService
@@ -831,6 +836,94 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
         r.RemarkHTV = remarkHtv;
         await db.SaveChangesAsync();
         return (true, $"Đã từ chối yêu cầu {r.RequestNo} (CANCEL).");
+    }
+
+    /// <summary>Danh sách yêu cầu đặc cách thẻ (Crd_Card FlagExceptionally=1), lọc theo trạng thái nếu có.</summary>
+    public async Task<List<CardException>> CardExceptionsAsync(CardExceptionStatus? status = null)
+    {
+        var q = db.CardExceptions.Include(x => x.Member).Include(x => x.CardTypeUse).Include(x => x.Dealers).AsQueryable();
+        if (status.HasValue) q = q.Where(x => x.Status == status.Value);
+        var list = await q.ToListAsync();
+        return list.OrderByDescending(x => x.CreatedAt).ToList();
+    }
+
+    public Task<CardException?> CardExceptionAsync(int id) =>
+        db.CardExceptions.Include(x => x.Member).Include(x => x.CardTypeUse).Include(x => x.Dealers)
+            .FirstOrDefaultAsync(x => x.Id == id);
+
+    /// <summary>
+    /// Tạo yêu cầu đặc cách thẻ (Crd_Card_RequestExceptionX): hội viên/đại lý đề nghị cấp một KỲ THẺ ĐẶC CÁCH
+    /// (FlagExceptionally=1) kế thừa hạng thẻ hiện tại, kèm danh sách đại lý chỉ định được dùng thẻ
+    /// (Crd_CardDealerUseException). Kỳ thẻ mới sinh ở trạng thái PENDING (CardNoPrev = kỳ thẻ đang hiệu lực).
+    /// Chặn khi hội viên đã có yêu cầu đặc cách đang PENDING (giống hệ nguồn), hoặc hội viên đã vô hiệu hoá.
+    /// </summary>
+    public async Task<(bool ok, string msg, int id)> RequestCardExceptionAsync(
+        int memberId, string? dlCodeExceptionally, string? remark, List<string> dealerCodes)
+    {
+        var m = await db.Members.FirstOrDefaultAsync(x => x.Id == memberId);
+        if (m == null) return (false, "Không tìm thấy hội viên.", 0);
+        if (m.Status == MemberStatus.Cancel) return (false, "Hội viên đã bị vô hiệu hoá.", 0);
+
+        dealerCodes = (dealerCodes ?? []).Where(c => !string.IsNullOrWhiteSpace(c)).Select(c => c.Trim()).Distinct().ToList();
+        if (dealerCodes.Count == 0) return (false, "Cần ít nhất 1 đại lý được dùng thẻ đặc cách.", 0);
+
+        // Chỉ 1 yêu cầu đặc cách đang mở (PENDING) cho mỗi hội viên.
+        var open = await db.CardExceptions.AnyAsync(x => x.MemberId == memberId && x.Status == CardExceptionStatus.Pending);
+        if (open) return (false, "Đã có yêu cầu đặc cách đang chờ duyệt (PENDING) cho hội viên này.", 0);
+
+        var seq = await db.CardExceptions.CountAsync() + 1;
+        var ex = new CardException
+        {
+            MemberId = memberId,
+            CardNo = $"CEX.{DateTime.Now:yyyy}.{m.Code}.{seq:D3}",   // Crd_Card.CardNo — kỳ thẻ đặc cách mới
+            CardNoPrev = m.Code,                                     // Crd_Card.CardNoPrev — kỳ thẻ cũ (đang hiệu lực)
+            CardTypeUseId = m.RankTierId,                            // kế thừa hạng thẻ hiện tại
+            DLCodeExceptionally = dlCodeExceptionally,
+            Status = CardExceptionStatus.Pending,
+            Remark = remark,
+            CreatedAt = DateTime.Now
+        };
+        foreach (var code in dealerCodes)
+            ex.Dealers.Add(new CardExceptionDealer { DealerCode = code });
+        db.CardExceptions.Add(ex);
+        await db.SaveChangesAsync();
+        return (true, $"Đã tạo yêu cầu đặc cách thẻ {ex.CardNo} cho {m.Code} ({dealerCodes.Count} đại lý).", ex.Id);
+    }
+
+    /// <summary>
+    /// Duyệt yêu cầu đặc cách thẻ (Crd_Card_ApprExceptionX): kỳ thẻ đang hiệu lực bị huỷ (CardStatus=Cancel)
+    /// và kỳ thẻ đặc cách được kích hoạt (CardStatus=Approve). Ghi ApproveAt/ApproveBy/RemarkHTV.
+    /// Idempotent: chỉ duyệt được yêu cầu đang PENDING.
+    /// </summary>
+    public async Task<(bool ok, string msg)> ApproveCardExceptionAsync(int id, string? remarkHtv, string? by = null)
+    {
+        var ex = await db.CardExceptions.Include(x => x.Member).FirstOrDefaultAsync(x => x.Id == id);
+        if (ex == null) return (false, "Không tìm thấy yêu cầu đặc cách.");
+        if (ex.Status != CardExceptionStatus.Pending) return (false, "Chỉ duyệt được yêu cầu đang PENDING.");
+
+        // Huỷ kỳ thẻ đang hiệu lực của hội viên (Crd_Card_CancelX) rồi kích hoạt kỳ thẻ đặc cách.
+        if (ex.Member != null) ex.Member.CardStatus = CardStatus.Cancel;
+        ex.Status = CardExceptionStatus.Approve;
+        ex.ApproveAt = DateTime.Now;
+        ex.ApproveBy = by;
+        ex.RemarkHTV = remarkHtv;
+        await db.SaveChangesAsync();
+        return (true, $"Đã duyệt đặc cách thẻ {ex.CardNo}; huỷ kỳ thẻ cũ và kích hoạt kỳ thẻ đặc cách.");
+    }
+
+    /// <summary>
+    /// Từ chối yêu cầu đặc cách thẻ: chỉ từ chối được yêu cầu đang PENDING. Đặt Status = CANCEL, ghi RemarkHTV.
+    /// </summary>
+    public async Task<(bool ok, string msg)> RejectCardExceptionAsync(int id, string? remarkHtv, string? by = null)
+    {
+        var ex = await db.CardExceptions.FirstOrDefaultAsync(x => x.Id == id);
+        if (ex == null) return (false, "Không tìm thấy yêu cầu đặc cách.");
+        if (ex.Status != CardExceptionStatus.Pending) return (false, "Chỉ từ chối được yêu cầu đang PENDING.");
+
+        ex.Status = CardExceptionStatus.Cancel;
+        ex.RemarkHTV = remarkHtv;
+        await db.SaveChangesAsync();
+        return (true, $"Đã từ chối yêu cầu đặc cách thẻ {ex.CardNo} (CANCEL).");
     }
 
     /// <summary>Áp 1 cột thay đổi vào hội viên theo ColumnCode (whitelist Crd_MemberColumnChange).</summary>

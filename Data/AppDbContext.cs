@@ -24,6 +24,8 @@ public class AppDbContext : DbContext
     public DbSet<MemberColumnChange> MemberColumnChanges => Set<MemberColumnChange>();
     public DbSet<MemberChangeRequest> MemberChangeRequests => Set<MemberChangeRequest>();
     public DbSet<MemberChangeRequestDtl> MemberChangeRequestDtls => Set<MemberChangeRequestDtl>();
+    public DbSet<CardException> CardExceptions => Set<CardException>();
+    public DbSet<CardExceptionDealer> CardExceptionDealers => Set<CardExceptionDealer>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -88,6 +90,18 @@ public class AppDbContext : DbContext
         b.Entity<MemberChangeRequestDtl>(e =>
         {
             e.HasOne(x => x.Request).WithMany(x => x.Details).HasForeignKey(x => x.RequestId);
+            e.HasQueryFilter(x => x.OrgId == _orgId);
+        });
+        b.Entity<CardException>(e =>
+        {
+            e.HasIndex(x => x.CardNo).IsUnique();
+            e.HasOne(x => x.Member).WithMany().HasForeignKey(x => x.MemberId);
+            e.HasOne(x => x.CardTypeUse).WithMany().HasForeignKey(x => x.CardTypeUseId);
+            e.HasQueryFilter(x => x.OrgId == _orgId);
+        });
+        b.Entity<CardExceptionDealer>(e =>
+        {
+            e.HasOne(x => x.CardException).WithMany(x => x.Dealers).HasForeignKey(x => x.CardExceptionId);
             e.HasQueryFilter(x => x.OrgId == _orgId);
         });
     }

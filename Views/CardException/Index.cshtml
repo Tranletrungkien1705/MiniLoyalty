@@ -1,0 +1,42 @@
+@model List<CardException>
+@{
+    ViewData["Title"] = "Yêu cầu đặc cách thẻ";
+    var status = (CardExceptionStatus?)ViewBag.Status;
+    string StName(CardExceptionStatus s) => s switch { CardExceptionStatus.Pending => "Chờ duyệt", CardExceptionStatus.Approve => "Đã duyệt", CardExceptionStatus.Cancel => "Từ chối", _ => s.ToString() };
+    string StBadge(CardExceptionStatus s) => s switch { CardExceptionStatus.Pending => "bg-warning-subtle text-warning", CardExceptionStatus.Approve => "bg-success-subtle text-success", CardExceptionStatus.Cancel => "bg-danger-subtle text-danger", _ => "bg-secondary-subtle" };
+}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div><h5 class="fw-bold mb-0"><i class="bi bi-credit-card-2-front me-2"></i>Yêu cầu đặc cách thẻ</h5>
+        <small class="text-muted">Crd_Card_RequestExceptionX — kỳ thẻ đặc cách (FlagExceptionally) + đại lý chỉ định</small></div>
+    <a asp-action="Create" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i>Tạo yêu cầu</a>
+</div>
+
+<div class="mb-3">
+    <a asp-action="Index" class="btn btn-sm @(status==null?"btn-primary":"btn-outline-secondary")">Tất cả</a>
+    <a asp-action="Index" asp-route-status="@CardExceptionStatus.Pending" class="btn btn-sm @(status==CardExceptionStatus.Pending?"btn-primary":"btn-outline-secondary")">Chờ duyệt</a>
+    <a asp-action="Index" asp-route-status="@CardExceptionStatus.Approve" class="btn btn-sm @(status==CardExceptionStatus.Approve?"btn-primary":"btn-outline-secondary")">Đã duyệt</a>
+    <a asp-action="Index" asp-route-status="@CardExceptionStatus.Cancel" class="btn btn-sm @(status==CardExceptionStatus.Cancel?"btn-primary":"btn-outline-secondary")">Từ chối</a>
+</div>
+
+<div class="card"><div class="table-responsive"><table class="table table-hover align-middle mb-0">
+    <thead><tr><th>Mã kỳ thẻ</th><th>Hội viên</th><th>Hạng thẻ</th><th>Đại lý đặc cách</th><th>Trạng thái</th><th class="text-end">Số ĐL</th><th>Ngày tạo</th><th></th></tr></thead>
+    <tbody>
+        @if (Model.Count == 0)
+        {
+            <tr><td colspan="8" class="text-center text-muted small py-4">Chưa có yêu cầu đặc cách thẻ nào.</td></tr>
+        }
+        @foreach (var x in Model)
+        {
+            <tr>
+                <td class="small font-monospace">@x.CardNo</td>
+                <td class="small">@x.Member?.Name <span class="text-muted font-monospace">@x.Member?.Code</span></td>
+                <td class="small"><span class="rank-chip" style="background:@(x.CardTypeUse?.ColorHex ?? "#94a3b8")">@(x.CardTypeUse?.Name ?? "—")</span></td>
+                <td class="small text-muted">@(x.DLCodeExceptionally ?? "—")</td>
+                <td><span class="badge @StBadge(x.Status)">@StName(x.Status)</span></td>
+                <td class="text-end text-muted">@x.Dealers.Count</td>
+                <td class="small text-muted">@x.CreatedAt.ToString("dd/MM/yyyy HH:mm")</td>
+                <td class="text-end"><a asp-action="Details" asp-route-id="@x.Id" class="btn btn-outline-primary btn-sm">Xem</a></td>
+            </tr>
+        }
+    </tbody>
+</table></div></div>

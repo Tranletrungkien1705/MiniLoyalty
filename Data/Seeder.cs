@@ -235,6 +235,23 @@ public static class Seeder
             db.MemberChangeRequests.Add(req);
             await db.SaveChangesAsync();
         }
+        if (!await db.CardExceptions.AnyAsync())
+        {
+            // Yêu cầu đặc cách thẻ mẫu (Crd_Card_RequestExceptionX) — minh hoạ luồng duyệt PENDING → APPROVE.
+            // Kỳ thẻ đặc cách kế thừa hạng thẻ hiện tại, kèm danh sách đại lý chỉ định (Crd_CardDealerUseException).
+            var m = await db.Members.OrderBy(x => x.Id).Skip(1).FirstAsync();
+            var ex = new CardException
+            {
+                MemberId = m.Id, CardNo = $"CEX.{DateTime.Now:yyyy}.{m.Code}.001", CardNoPrev = m.Code,
+                CardTypeUseId = m.RankTierId, DLCodeExceptionally = "DL-DEMO-001",
+                Status = CardExceptionStatus.Pending, Remark = "Khách yêu cầu dùng thẻ tại đại lý khác tỉnh",
+                CreatedAt = DateTime.Now.AddHours(-6)
+            };
+            ex.Dealers.Add(new CardExceptionDealer { DealerCode = "DL-HN-001" });
+            ex.Dealers.Add(new CardExceptionDealer { DealerCode = "DL-HCM-002" });
+            db.CardExceptions.Add(ex);
+            await db.SaveChangesAsync();
+        }
     }
 
     /// <summary>

@@ -294,6 +294,30 @@ app.MapPost("/api/changerequest/reject", async (ChangeRequestActionDto dto, ILoy
     return ok ? Results.Ok(new { ok, msg }) : Results.BadRequest(new { ok, error = msg });
 });
 
+// API tạo yêu cầu đặc cách thẻ (Crd_Card_RequestExceptionX): sinh kỳ thẻ đặc cách PENDING + danh sách đại lý chỉ định.
+app.MapPost("/api/cardexception/request", async (CardExceptionRequestDto dto, ILoyaltyService svc) =>
+{
+    var m = dto.Phone is { Length: > 0 } p ? await svc.GetByPhoneAsync(p) : null;
+    if (m == null && dto.MemberId is { } mid) m = await svc.GetAsync(mid);
+    if (m == null) return Results.NotFound(new { error = "Không tìm thấy hội viên" });
+    var (ok, msg, id) = await svc.RequestCardExceptionAsync(m.Id, dto.DlCodeExceptionally, dto.Remark, dto.DealerCodes ?? []);
+    return ok ? Results.Ok(new { ok, msg, cardExceptionId = id }) : Results.BadRequest(new { ok, error = msg });
+});
+
+// API duyệt yêu cầu đặc cách thẻ (Crd_Card_ApprExceptionX): huỷ kỳ thẻ cũ, kích hoạt kỳ thẻ đặc cách.
+app.MapPost("/api/cardexception/approve", async (CardExceptionActionDto dto, ILoyaltyService svc) =>
+{
+    var (ok, msg) = await svc.ApproveCardExceptionAsync(dto.Id, dto.RemarkHtv, dto.By);
+    return ok ? Results.Ok(new { ok, msg }) : Results.BadRequest(new { ok, error = msg });
+});
+
+// API từ chối yêu cầu đặc cách thẻ: PENDING → CANCEL.
+app.MapPost("/api/cardexception/reject", async (CardExceptionActionDto dto, ILoyaltyService svc) =>
+{
+    var (ok, msg) = await svc.RejectCardExceptionAsync(dto.Id, dto.RemarkHtv, dto.By);
+    return ok ? Results.Ok(new { ok, msg }) : Results.BadRequest(new { ok, error = msg });
+});
+
 app.MapControllerRoute(name: "default", pattern: "{controller=Home}/{action=Index}/{id?}");
 app.Run();
 
@@ -316,3 +340,5 @@ record SupportAdjustDto(string? Phone, int? MemberId, int Points, string? Reason
 record ChangeRequestDetailDto(string ColumnCode, string? ValueNew);
 record ChangeRequestCreateDto(string? Phone, int? MemberId, ChangeRequestType RequestType, string? DlCode, string? Remark, List<ChangeRequestDetailDto>? Details);
 record ChangeRequestActionDto(int RequestId, string? RemarkHtv, string? By);
+record CardExceptionRequestDto(string? Phone, int? MemberId, string? DlCodeExceptionally, string? Remark, List<string>? DealerCodes);
+record CardExceptionActionDto(int Id, string? RemarkHtv, string? By);

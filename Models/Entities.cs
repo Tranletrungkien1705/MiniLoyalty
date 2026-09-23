@@ -19,6 +19,8 @@ public enum ChangeRequestStatus { Pending = 0, Approve = 1, Finish = 2, Cancel =
 
 /// <summary>Loại yêu cầu thay đổi (Crd_MemberChangeInfo.RequestType): ChangeInfo = đổi thông tin, CancelMember = huỷ hội viên.</summary>
 public enum ChangeRequestType { ChangeInfo = 0, CancelMember = 1 }   // TConst.RequestType.ChangeInfo/CancelMember
+/// <summary>Trạng thái yêu cầu đặc cách thẻ (Crd_Card.CardStatus của kỳ thẻ đặc cách): PENDING → APPROVE, hoặc CANCEL khi từ chối.</summary>
+public enum CardExceptionStatus { Pending = 0, Approve = 1, Cancel = 2 }   // TConst.CardStatus.Pending/Approve/Cancel
 
 /// <summary>Hạng thẻ — xếp theo điểm tích lũy trọn đời (lifetime), kèm % chiết khấu.</summary>
 public class RankTier
@@ -291,6 +293,46 @@ public class MemberChangeRequestDtl : IOrgOwned
     public string? ColumnValueNew { get; set; }             // Crd_MemberChangeInfoDtl.ColumnValueNew — giá trị mới
     public ChangeRequestStatus DtlStatus { get; set; } = ChangeRequestStatus.Pending;   // Crd_MemberChangeInfoDtl.RequestDtlStatus
     public string? Remark { get; set; }                     // Crd_MemberChangeInfoDtl.Remark
-
     public MemberChangeRequest Request { get; set; } = null!;
+}
+
+/// <summary>
+/// Yêu cầu đặc cách thẻ (Crd_Card_RequestExceptionX / Crd_Card_ApprExceptionX): hội viên/đại lý đề nghị
+/// cấp một KỲ THẺ ĐẶC CÁCH (FlagExceptionally=1) — thẻ mới kế thừa hạng thẻ hiện tại nhưng được phép
+/// sử dụng tại một số đại lý chỉ định (Crd_CardDealerUseException). Khi tạo, hệ thống sinh 1 kỳ thẻ mới
+/// ở trạng thái PENDING (CardNoPrev = kỳ thẻ cũ). Khi duyệt (Approve), kỳ thẻ đang hiệu lực bị huỷ
+/// (CardStatus=Cancel) và kỳ thẻ đặc cách được kích hoạt (CardStatus=Approve).
+/// </summary>
+public class CardException : IOrgOwned
+{
+    public int Id { get; set; }
+    public Guid OrgId { get; set; }
+    public int MemberId { get; set; }                       // Crd_Card.MemberNo — hội viên đề nghị
+    public string CardNo { get; set; } = "";                // Crd_Card.CardNo — mã kỳ thẻ đặc cách (mới)
+    public string? CardNoPrev { get; set; }                 // Crd_Card.CardNoPrev — kỳ thẻ cũ (kỳ thẻ đang hiệu lực)
+    public int CardTypeUseId { get; set; }                  // Crd_Card.CardTypeUse — hạng thẻ sử dụng (kế thừa hạng hiện tại)
+    public string? DLCodeExceptionally { get; set; }        // Crd_Card.DLCodeExceptionally — đại lý đặc cách
+    public CardExceptionStatus Status { get; set; } = CardExceptionStatus.Pending;   // Crd_Card.CardStatus
+    public string? Remark { get; set; }                     // Crd_Card.Remark — ghi chú đại lý
+    public string? RemarkHTV { get; set; }                  // ghi chú HTV khi duyệt/từ chối
+    public DateTime CreatedAt { get; set; } = DateTime.Now; // Crd_Card.CreateDTimeUTC
+    public DateTime? ApproveAt { get; set; }                // Crd_Card.ApproveDTimeUTC
+    public string? ApproveBy { get; set; }                  // Crd_Card.ApproveBy
+    public Member Member { get; set; } = null!;
+    public RankTier? CardTypeUse { get; set; }
+    public List<CardExceptionDealer> Dealers { get; set; } = [];   // Crd_CardDealerUseException — đại lý được dùng thẻ đặc cách
+}
+
+/// <summary>
+/// Đại lý được phép sử dụng kỳ thẻ đặc cách (Crd_CardDealerUseException): danh sách đại lý chỉ định
+/// theo kỳ thẻ đặc cách — "Danh sách đại lý sử dụng đặc cách theo kỳ thẻ".
+/// </summary>
+public class CardExceptionDealer : IOrgOwned
+{
+    public int Id { get; set; }
+    public Guid OrgId { get; set; }
+    public int CardExceptionId { get; set; }                // Crd_CardDealerUseException.CardNo (FK tới kỳ thẻ đặc cách)
+    public string DealerCode { get; set; } = "";            // Crd_CardDealerUseException.DealerCode — mã đại lý
+    public string? Remark { get; set; }                     // Crd_CardDealerUseException.Remark
+    public CardException CardException { get; set; } = null!;
 }
