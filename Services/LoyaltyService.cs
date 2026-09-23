@@ -40,6 +40,7 @@ public interface ILoyaltyService
     Task<PointTransaction> AwardKmbhAsync(int memberId, int? points = null, string? refNo = null);
     Task<PointTransaction> RecordServiceTurnAsync(int memberId, int qty, string? refNo);
     Task<PointTransaction> RecordConsumptionAsync(int memberId, decimal amount, string? refNo);
+    Task<PointTransaction> RecordPointIncreaseAsync(int memberId, int rankPoints, string? refNo);
     Task<List<ServicePolicy>> ServicePoliciesAsync();
     Task<MemberDiscountTransaction> ApplyServiceDiscountAsync(int memberId, decimal amount, string? refNo);
     Task<List<MemberDiscountTransaction>> DiscountsAsync(int memberId);
@@ -424,6 +425,28 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
         db.ServicePolicies.Include(p => p.RankTier).OrderBy(p => p.RankTierId).ToListAsync();
 
     /// <summary>
+    /// Tích điểm xét hạng nhập tay (DealPointType = POINTINCREASE, Crd_CardTransactionInCrease):
+    /// cộng thêm ĐIỂM XÉT HẠNG (PointChRankTotal) cho hội viên ngoài luồng tự động — dùng khi hỗ trợ
+    /// migrate dữ liệu hoặc bù điểm bị thiếu. KHÔNG cộng điểm khả dụng (PointChTotal = 0), chỉ cộng
+    /// điểm xét hạng tích trong kỳ (Member.PointCardRank) để phục vụ xét hạng cuối kỳ.
+    /// Ghi 1 giao dịch POINTINCREASE (Points = 0, PointChRankTotal = rankPoints).
+    /// </summary>
+    public async Task<PointTransaction> RecordPointIncreaseAsync(int memberId, int rankPoints, string? refNo)
+    {
+        if (rankPoints <= 0) throw new ArgumentException("Điểm xét hạng cộng thêm phải > 0.", nameof(rankPoints));
+        var m = await db.Members.FirstOrDefaultAsync(x => x.Id == memberId) ?? throw new KeyNotFoundException();
+        m.PointCardRank += rankPoints;   // chỉ cộng điểm xét hạng trong kỳ, KHÔNG đổi điểm khả dụng
+        var tx = new PointTransaction
+        {
+            MemberId = memberId, Type = PointTxType.PointIncrease, Points = 0, PointChRankTotal = rankPoints,
+            BalanceAfter = m.Points, Note = $"Tích điểm xét hạng (hỗ trợ) +{rankPoints:N0} điểm", RefNo = refNo
+        };
+        db.PointTransactions.Add(tx);
+        await db.SaveChangesAsync();
+        return tx;
+    }
+
+    /// <summary>
     /// dùng dịch vụ, áp % chiết khấu theo hạng thẻ hiện tại (RankTier.DiscountPercent) lên doanh thu
     /// dịch vụ. Ghi 1 giao dịch chiết khấu (không đổi điểm). Tiền chiết khấu = doanh thu × %/100.
     /// </summary>
@@ -530,6 +553,38 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
         });
         await db.SaveChangesAsync();
         return (true, $"Đã sử dụng ưu đãi \"{p.Name}\" (-{p.PointCost:N0} điểm). Còn lại {m.Points:N0} điểm.");
+    }
+
+    /// <summary>
+    /// Ghi nhận sử dụng ưu đãi KHÔNG trừ điểm (DealPointType = PRPROGRAM, Crd_DealUsePromotion):
+    /// hội viên dùng một chương trình ưu đãi (voucher giảm giá, tặng phụ kiện...) mà ưu đãi không quy về điểm.
+    /// Chỉ GHI NHẬN số lượng ưu đãi đã dùng (QtyPrChTotal/QtyPrUsed) để tracking, KHÔNG đổi điểm khả dụng
+    /// (PointChTotal = 0) và KHÔNG đổi điểm tích lũy trọn đời. Giảm số lượng ưu đãi còn lại (Qty).
+    /// </summary>
+    public async Task<(bool ok, string msg)> RecordPromotionUseAsync(int memberId, int promotionId, int qty, string? refNo)
+    {
+        if (qty <= 0) qty = 1;
+        var m = await db.Members.FirstOrDefaultAsync(x => x.Id == memberId);
+        if (m == null) return (false, "Không tìm thấy hội viên.");
+        var p = await db.Promotions.FirstOrDefaultAsync(x => x.Id == promotionId);
+        if (p == null || !p.IsActive) return (false, "Ưu đãi không khả dụng.");
+        if (p.Qty < qty) return (false, $"Ưu đãi không đủ số lượng (cần {qty}, còn {p.Qty}).");
+
+        p.Qty -= qty;   // giảm số lượng ưu đãi còn lại; KHÔNG trừ điểm
+        db.PointTransactions.Add(new PointTransaction
+        {
+            MemberId = memberId, Type = PointTxType.PrProgram, Points = 0, BalanceAfter = m.Points,
+            PrProgramCode = p.Code, QtyPrChTotal = qty, QtyPrUsed = qty,
+            Note = $"Ghi nhận sử dụng ưu đãi: {p.Name} (x{qty})", RefNo = refNo
+        });
+        db.MemberPromotionUses.Add(new MemberPromotionUse
+        {
+            MemberId = memberId, PromotionId = p.Id, Kind = PromotionUseKind.PrProgram, PrProgramCode = p.Code,
+            Points = 0, BalanceAfter = m.Points, QtyPrChTotal = qty, QtyPrUsed = qty, RefNo = refNo,
+            Note = $"Ghi nhận sử dụng ưu đãi {p.Code} ({p.Name}) x{qty}"
+        });
+        await db.SaveChangesAsync();
+        return (true, $"Đã ghi nhận sử dụng ưu đãi \"{p.Name}\" (x{qty}), không trừ điểm.");
     }
 
     public Task<List<MemberPromotionUse>> PromotionUsesAsync(int memberId) =>

@@ -163,6 +163,16 @@ public static class Seeder
                 Note = "Tích điểm tiêu dùng dịch vụ 1.500.000đ (1.000đ = 1 điểm)", CreatedAt = DateTime.Now.AddDays(-5)
             });
             db.Members.Add(cons);
+            // Tích điểm xét hạng nhập tay (DealPointType=POINTINCREASE) — minh hoạ cộng điểm xét hạng (không đổi điểm khả dụng).
+            var inc = M("Đinh Văn Tú", "0911444444", 400, 400);
+            inc.PointCardRank = 400;
+            inc.Transactions.Add(new PointTransaction
+            {
+                Type = PointTxType.PointIncrease, Points = 0, PointChRankTotal = 600, BalanceAfter = 400,
+                RefNo = "INC-DEMO-001", Note = "Tích điểm xét hạng (hỗ trợ) +600 điểm", CreatedAt = DateTime.Now.AddDays(-6)
+            });
+            inc.PointCardRank += 600;
+            db.Members.Add(inc);
             await db.SaveChangesAsync();
         }
     }
