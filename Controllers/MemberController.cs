@@ -135,6 +135,15 @@ public class MemberController(ILoyaltyService svc) : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> RecordPromotion(int id, int promotionId, int qty, string? note)
+    {
+        if (qty <= 0) { TempData["Error"] = "Số lượng phải > 0."; return RedirectToAction(nameof(Details), new { id }); }
+        var (ok, msg) = await svc.RecordPromotionUseAsync(id, promotionId, qty, note);
+        TempData[ok ? "Success" : "Error"] = msg;
+        return RedirectToAction(nameof(Details), new { id });
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
     public async Task<IActionResult> PointIncrease(int id, int rankPoints, string? note)
     {
         if (rankPoints <= 0) { TempData["Error"] = "Điểm xét hạng phải > 0."; return RedirectToAction(nameof(Details), new { id }); }

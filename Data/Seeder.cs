@@ -156,6 +156,18 @@ public static class Seeder
                 RefNo = "DUP-DEMO-001", Note = $"Sử dụng ưu đãi {pr.Code} ({pr.Name})", CreatedAt = DateTime.Now.AddDays(-2)
             });
             prm.Transactions.Add(new PointTransaction { Type = PointTxType.PointUse, Points = -pr.PointCost, BalanceAfter = 2500 - pr.PointCost, Note = $"Sử dụng ưu đãi: {pr.Name}", RefNo = "DUP-DEMO-001", CreatedAt = DateTime.Now.AddDays(-2) });
+            db.Members.Add(prm);
+            // Ghi nhận sử dụng ưu đãi KHÔNG trừ điểm (DealPointType=PRPROGRAM, Crd_DealUsePromotion) — minh hoạ tracking số lần dùng ưu đãi.
+            var prmRec = M("Trần Quốc Bảo", "0911777777", 1200, 1200);
+            var prRec = db.Promotions.Local.First();
+            prmRec.PromotionUses.Add(new MemberPromotionUse
+            {
+                PromotionId = prRec.Id, Kind = PromotionUseKind.PrProgram, PrProgramCode = prRec.Code,
+                Points = 0, BalanceAfter = 1200, QtyPrChTotal = 2, QtyPrUsed = 2,
+                RefNo = "DUP-DEMO-002", Note = $"Ghi nhận sử dụng ưu đãi {prRec.Code} ({prRec.Name}) x2", CreatedAt = DateTime.Now.AddDays(-1)
+            });
+            prmRec.Transactions.Add(new PointTransaction { Type = PointTxType.PrProgram, Points = 0, BalanceAfter = 1200, PrProgramCode = prRec.Code, QtyPrChTotal = 2, QtyPrUsed = 2, Note = $"Ghi nhận sử dụng ưu đãi: {prRec.Name} (x2)", RefNo = "DUP-DEMO-002", CreatedAt = DateTime.Now.AddDays(-1) });
+            db.Members.Add(prmRec);
             // Tích điểm tiêu dùng dịch vụ (DealPointType=CONSUMPTION) — minh hoạ quy đổi doanh thu RO thành điểm theo hạng.
             var cons = M("Hồ Nhật Nam", "0911333333", 1500, 800);
             cons.PointCardRank = 1500;

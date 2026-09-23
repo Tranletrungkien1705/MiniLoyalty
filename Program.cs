@@ -195,6 +195,18 @@ app.MapPost("/api/promotion/use", async (PromotionUseDto dto, ILoyaltyService sv
     return Results.Ok(new { ok, msg, memberCode = member!.Code, points = member.Points });
 });
 
+// API ghi nhận sử dụng ưu đãi không trừ điểm (DealPointType=PRPROGRAM): tracking số lần dùng ưu đãi, không đổi điểm.
+app.MapPost("/api/promotion/record", async (PromotionRecordDto dto, ILoyaltyService svc) =>
+{
+    var m = dto.Phone is { Length: > 0 } p ? await svc.GetByPhoneAsync(p) : null;
+    if (m == null && dto.MemberId is { } mid) m = await svc.GetAsync(mid);
+    if (m == null) return Results.NotFound(new { error = "Không tìm thấy hội viên" });
+    var (ok, msg) = await svc.RecordPromotionUseAsync(m.Id, dto.PromotionId, dto.Qty, dto.RefNo);
+    if (!ok) return Results.BadRequest(new { ok, error = msg });
+    var member = await svc.GetAsync(m.Id);
+    return Results.Ok(new { ok, msg, memberCode = member!.Code, points = member.Points });
+});
+
 // API tích điểm xét hạng nhập tay (DealPointType=POINTINCREASE): cộng điểm xét hạng trong kỳ, không đổi điểm khả dụng.
 app.MapPost("/api/pointincrease", async (PointIncreaseDto dto, ILoyaltyService svc) =>
 {
@@ -265,6 +277,7 @@ record DiscountDto(string? Phone, int? MemberId, decimal Amount, string? RefNo);
 record VoucherAwardDto(string? Phone, int? MemberId, int Points, string? VoucherCode, string? RefNo, DateTime? Expiry);
 record VoucherUseDto(string? Phone, int? MemberId, int Points, string? VoucherCode, string? RefNo);
 record PromotionUseDto(string? Phone, int? MemberId, int PromotionId, string? RefNo);
+record PromotionRecordDto(string? Phone, int? MemberId, int PromotionId, int Qty, string? RefNo);
 record PointIncreaseDto(string? Phone, int? MemberId, int RankPoints, string? RefNo);
 record InactiveDto(string? Phone, int? MemberId, string? Remark, string? By);
 record SupportAdjustDto(string? Phone, int? MemberId, int Points, string? Reason, string? RefNo);
