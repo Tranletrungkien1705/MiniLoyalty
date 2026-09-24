@@ -592,6 +592,17 @@ app.MapGet("/api/prmvouchernewcar/calc", async (string? modelCode, ILoyaltyServi
     return Results.Ok(new { p.PrmVoucherCode, p.PrmVoucherName, p.FlagAllModel, p.PointVoucherAllModel, p.PointUseLimitAllModel, p.ValidityPeriod, p.EffDateStart, p.EffDateEnd });
 });
 
+// API tặng điểm voucher xe mới theo chương trình đang hiệu lực (Crd_Member_PerformVoucherNewCarX, DealPointType=VOUCHERXM).
+app.MapPost("/api/vouchernewcar/award", async (VoucherNewCarAwardDto dto, ILoyaltyService svc) =>
+{
+    var m = dto.MemberId.HasValue ? await svc.GetAsync(dto.MemberId.Value) : await svc.GetByPhoneAsync(dto.Phone ?? "");
+    if (m == null) return Results.NotFound(new { error = "Không tìm thấy hội viên" });
+    var (ok, msg, tx) = await svc.AwardVoucherNewCarAsync(m.Id, dto.ModelCode);
+    if (!ok) return Results.BadRequest(new { ok, error = msg });
+    var member = await svc.GetAsync(m.Id);
+    return Results.Ok(new { ok, msg, points = tx!.Points, voucherCode = tx.VoucherCode, expiry = tx.ExpiryDate, pointVoucher = member!.PointVoucher });
+});
+
 // API danh sách hội viên đang trong vòng đời duyệt ĐĂNG KÝ (Crd_Member.RegisStatus): PENDING → APPROVE1 → APPROVE2 → FINISH.
 app.MapGet("/api/memberapproval", async (RegisStatus? status, ILoyaltyService svc) =>
 {
@@ -653,6 +664,7 @@ record ServiceTurnDto(string? Phone, int? MemberId, int Qty, string? RefNo);
 record ConsumptionDto(string? Phone, int? MemberId, decimal Amount, string? RefNo);
 record DiscountDto(string? Phone, int? MemberId, decimal Amount, string? RefNo);
 record VoucherAwardDto(string? Phone, int? MemberId, int Points, string? VoucherCode, string? RefNo, DateTime? Expiry);
+record VoucherNewCarAwardDto(string? Phone, int? MemberId, string? ModelCode);
 record VoucherUseDto(string? Phone, int? MemberId, int Points, string? VoucherCode, string? RefNo);
 record PromotionUseDto(string? Phone, int? MemberId, int PromotionId, string? RefNo);
 record PromotionRecordDto(string? Phone, int? MemberId, int PromotionId, int Qty, string? RefNo);

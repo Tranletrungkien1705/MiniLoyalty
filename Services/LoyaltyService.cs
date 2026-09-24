@@ -77,6 +77,8 @@ public interface ILoyaltyService
     Task<MemberDiscountTransaction> ApplyServiceDiscountAsync(int memberId, decimal amount, string? refNo);
     Task<List<MemberDiscountTransaction>> DiscountsAsync(int memberId);
     Task<MemberVoucherTransaction> AwardVoucherAsync(int memberId, int points, string? voucherCode, string? refNo, DateTime? expiry = null);
+    /// <summary>Tặng điểm voucher xe mới theo chương trình đang hiệu lực (Crd_Member_PerformVoucherNewCarX, DealPointType=VOUCHERXM).</summary>
+    Task<(bool ok, string msg, MemberVoucherTransaction? tx)> AwardVoucherNewCarAsync(int memberId, string? modelCode = null, DateTime? today = null);
     Task<(bool ok, string msg)> UseVoucherAsync(int memberId, int points, string? voucherCode, string? refNo);
     Task<List<MemberVoucherTransaction>> VouchersAsync(int memberId);
     Task<List<Promotion>> PromotionsAsync(bool activeOnly = true);
@@ -656,9 +658,60 @@ public class LoyaltyService(AppDbContext db) : ILoyaltyService
     }
 
     /// <summary>
-    /// Sử dụng điểm voucher (DealPointType = VOUCHERSD, Crd_MemberVoucherTransaction): hội viên dùng
-    /// điểm voucher để quy đổi tại đại lý. Trừ vào Member.PointVoucher; chặn nếu vượt số dư voucher.
+    /// Tặng điểm voucher xe mới theo chương trình đang hiệu lực (Crd_Member_PerformVoucherNewCarX,
+    /// Transaction.AddPoint.cs, DealPointType = VOUCHERXM): khi hội viên mua xe mới, hệ thống tra chương trình
+    /// Prm_VoucherNewCar đang FINISH + trong khoảng hiệu lực khớp dòng xe (ModelCode) của hội viên, rồi cộng
+    /// điểm voucher tặng vào Member.PointVoucher (KHÔNG dùng xét hạng) và ghi 1 giao dịch Crd_MemberVoucherTransaction.
+    /// Điểm tặng = PointVoucherAllModel nếu chương trình áp dụng tất cả dòng xe, ngược lại = PointVoucher của dòng
+    /// khớp trong Prm_VoucherNewCarDtl. Hạn dùng = cuối tháng của (ngày chạy + ValidityPeriod ngày).
+    /// Idempotent theo (hội viên, chương trình): mỗi hội viên chỉ nhận 1 lần/chương trình.
     /// </summary>
+    public async Task<(bool ok, string msg, MemberVoucherTransaction? tx)> AwardVoucherNewCarAsync(int memberId, string? modelCode = null, DateTime? today = null)
+    {
+        var m = await db.Members.FirstOrDefaultAsync(x => x.Id == memberId);
+        if (m == null) return (false, "Không tìm thấy hội viên.", null);
+
+        var d = (today ?? DateTime.Today).Date;
+        var prm = await CalcPrmVoucherNewCarAsync(modelCode, d);
+        if (prm == null)
+            return (false, "Không có chương trình tặng điểm voucher xe mới đang hiệu lực cho dòng xe này.", null);
+
+        // Điểm voucher tặng: tất cả dòng xe → PointVoucherAllModel; theo dòng xe → PointVoucher của dòng khớp (Idx).
+        int points;
+        if (prm.FlagAllModel)
+        {
+            points = prm.PointVoucherAllModel;
+        }
+        else
+        {
+            var spec = prm.Specs.FirstOrDefault(s => s.ModelCode == modelCode);
+            var dtl = spec == null ? null : prm.Details.FirstOrDefault(x => x.Idx == spec.Idx);
+            points = dtl?.PointVoucher ?? 0;
+        }
+        if (points <= 0)
+            return (false, "Chương trình không cấu hình điểm voucher tặng cho dòng xe này.", null);
+
+        // Idempotent: mỗi hội viên chỉ nhận 1 lần/chương trình (theo mã voucher).
+        var already = await db.MemberVoucherTransactions.AnyAsync(t =>
+            t.MemberId == memberId && t.Type == VoucherTxType.Award && t.VoucherCode == prm.PrmVoucherCode);
+        if (already)
+            return (false, $"Hội viên đã nhận điểm voucher của chương trình {prm.PrmVoucherCode}.", null);
+
+        // Hạn dùng = cuối tháng của (ngày chạy + ValidityPeriod ngày) — theo EOMONTH(DATEADD(DAY, ValidityPeriod, @objCreateDate)).
+        var expiryBase = d.AddDays(prm.ValidityPeriod);
+        var expiry = new DateTime(expiryBase.Year, expiryBase.Month, DateTime.DaysInMonth(expiryBase.Year, expiryBase.Month));
+
+        m.PointVoucher += points;
+        var tx = new MemberVoucherTransaction
+        {
+            MemberId = memberId, Type = VoucherTxType.Award, Points = points, BalanceAfter = m.PointVoucher,
+            VoucherCode = prm.PrmVoucherCode, RefNo = $"VCXM.{DateTime.Now:yyyyMMdd.HHmmss}", ExpiryDate = expiry,
+            Note = $"Tặng điểm voucher xe mới theo chương trình {prm.PrmVoucherCode} ({prm.PrmVoucherName})"
+        };
+        db.MemberVoucherTransactions.Add(tx);
+        await db.SaveChangesAsync();
+        return (true, $"Đã tặng {points:N0} điểm voucher xe mới (chương trình {prm.PrmVoucherCode}).", tx);
+    }
     public async Task<(bool ok, string msg)> UseVoucherAsync(int memberId, int points, string? voucherCode, string? refNo)
     {
         if (points <= 0) return (false, "Số điểm voucher sử dụng phải > 0.");

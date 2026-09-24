@@ -98,6 +98,9 @@ public class Member : IOrgOwned
     // (Crd_MemberController.GetDetailForDMS) — DMS gọi loyalty để tìm hội viên trước khi vào xưởng dịch vụ.
     public string? CarNo { get; set; }         // Crd_Member.CarNo — biển số xe
     public string? VIN { get; set; }           // Crd_Member.VIN — số khung
+    // Dòng xe của hội viên (Crd_Member.ModelCode): dùng để khớp chương trình tặng điểm voucher xe mới
+    // (Crd_Member_PerformVoucherNewCarX — Prm_VoucherNewCarSpec.ModelCode).
+    public string? ModelCode { get; set; }     // Crd_Member.ModelCode — mã dòng xe
     public int Points { get; set; }            // điểm khả dụng (đổi được)
     public int LifetimePoints { get; set; }    // điểm tích lũy trọn đời (xếp hạng)
     public int PointVoucher { get; set; }      // Crd_Member.PointVoucher — tổng điểm voucher còn lại (không dùng xét hạng)

@@ -154,6 +154,11 @@ public static class Seeder
                 RefNo = "VOUCHERSD-DEMO-001", Note = "Sử dụng điểm voucher (VCH-NEWCAR-2026)", CreatedAt = DateTime.Now.AddDays(-4)
             });
             db.Members.Add(vch);
+            // Hội viên mua xe mới có dòng xe (Crd_Member.ModelCode) — minh hoạ tặng điểm voucher xe mới theo
+            // chương trình đang hiệu lực (Crd_Member_PerformVoucherNewCarX, DealPointType=VOUCHERXM).
+            var vchNew = M("Đinh Quốc Bảo", "0910111111", 1500, 700);
+            vchNew.ModelCode = "VIOS";
+            db.Members.Add(vchNew);
             // Sử dụng điểm đổi ưu đãi (DealPointType=POINTUSE, Crd_DealUsePromotion) — minh hoạ trừ điểm khả dụng theo ưu đãi.
             var prm = M("Lý Minh Quân", "0911222222", 3000, 2500);
             var pr = db.Promotions.Local.First();

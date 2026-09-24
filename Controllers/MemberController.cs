@@ -118,6 +118,15 @@ public class MemberController(ILoyaltyService svc) : Controller
         return RedirectToAction(nameof(Details), new { id });
     }
 
+    // Tặng điểm voucher xe mới theo chương trình đang hiệu lực (Crd_Member_PerformVoucherNewCarX, DealPointType=VOUCHERXM).
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> AwardVoucherNewCar(int id, string? modelCode)
+    {
+        var (ok, msg, _) = await svc.AwardVoucherNewCarAsync(id, modelCode);
+        TempData[ok ? "Success" : "Error"] = msg;
+        return RedirectToAction(nameof(Details), new { id });
+    }
+
     [HttpPost, ValidateAntiForgeryToken]
     public async Task<IActionResult> UseVoucher(int id, int points, string? voucherCode, string? note)
     {
