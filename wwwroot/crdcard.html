@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MiniLoyalty — Thẻ / kỳ xét hạng (Crd_Card)</title>
+<style>
+  :root{color-scheme:light dark;--line:#8883;--accent:#db2777}
+  *{box-sizing:border-box} body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;max-width:1280px;margin:24px auto;padding:0 16px;line-height:1.5}
+  h1{font-size:20px;margin:0 0 2px} .muted{opacity:.65;font-size:13px}
+  nav a{font-size:13px;margin-right:12px;color:var(--accent)}
+  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:14px 0}
+  input,button,select{font:inherit;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:transparent;color:inherit;width:100%}
+  button{cursor:pointer;width:auto} button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .bar{display:flex;gap:8px;align-items:center;margin:10px 0;flex-wrap:wrap}
+  table{width:100%;border-collapse:collapse;font-size:12.5px} th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+  th{opacity:.7;font-size:11px;text-transform:uppercase}
+  .err{color:#dc2626} .ok{color:#16a34a} #msg{min-height:18px;font-size:13px}
+  .tblwrap{overflow-x:auto} .pill{font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;background:#8882}
+  .gap{font-size:12px;border:1px dashed var(--line);border-radius:8px;padding:8px 10px;margin:10px 0}
+  .up{color:#16a34a} .down{color:#dc2626}
+</style></head>
+<body>
+<h1>Thẻ hội viên / kỳ xét hạng <span class="muted">(port 1:1 CrdCardController.cs — Crd_Card)</span></h1>
+<nav><a href="/crdmember.html">Hội viên</a><a href="/crdcard.html">Thẻ / kỳ xét hạng</a><a href="/crdcardtransaction.html">Giao dịch điểm</a><a href="/crddiscounttransaction.html">Chiết khấu dịch vụ</a><a href="/">SPA gốc</a></nav>
+<div class="muted">Nguồn: WA_Crd_Card_Get (CrdCardController.cs:163) → <b>Crd_Card_GetX_New20251229</b> (Master.Loyalty.cs:19484).
+Đã chọn đúng bản LIVE: hàm bao gọi <code>Crd_Card_GetX_New20251229</code> tại Master.Loyalty.cs:19054, bản cũ <code>Crd_Card_GetX</code> (:19117) là mã chết.
+Ô tìm port 1:1 <code>Crd_CardSearch</code> (ModelsUI/Crd_CardUI.cs:10-33).</div>
+
+<div class="grid">
+  <input id="CardNo" placeholder="Mã thẻ (CardNo)"><input id="MemberNo" placeholder="Mã hội viên"><input id="PhoneNo" placeholder="Số điện thoại"><input id="IDCardNo" placeholder="CMT/CCCD">
+  <input id="CarNo" placeholder="Biển số xe"><input id="VIN" placeholder="Số khung (VIN)"><input id="DLCodeRegis" placeholder="Đại lý phát hành">
+  <select id="CardSourceCode"><option value="">Loại kỳ thẻ: —</option><option value="NEW">NEW (làm mới)</option><option value="RENEW">RENEW (làm lại)</option><option value="UP">UP (tăng hạng)</option><option value="KEEP">KEEP (duy trì)</option><option value="DOWN">DOWN (xuống hạng)</option></select>
+  <select id="CardTypeUse"><option value="">Hạng sử dụng: —</option><option value="I">I</option><option value="N">N</option><option value="S">S</option><option value="G">G</option><option value="P">P</option></select>
+  <select id="CardStatus"><option value="">TT kỳ xét hạng: —</option><option value="PENDING">PENDING</option><option value="APPROVE">APPROVE</option><option value="CANCEL">CANCEL</option></select>
+  <select id="MemberStatus"><option value="">TT hội viên: —</option><option value="PENDING">PENDING</option><option value="APPROVE">APPROVE</option><option value="CANCEL">CANCEL</option></select>
+  <select id="FlagExceptionally"><option value="">Cờ đặc cách: —</option><option value="1">1 Có</option><option value="0">0 Không</option></select>
+  <input id="EffDateStartFrom" type="date" title="Bắt đầu kỳ xét hạng từ"><input id="EffDateStartTo" type="date" title="Bắt đầu kỳ xét hạng đến">
+  <input id="MemberActiveDateFrom" type="date" title="Ngày kích hoạt HV từ"><input id="MemberActiveDateTo" type="date" title="Ngày kích hoạt HV đến">
+  <input id="InactiveDTimeFrom" type="date" title="Ngày hủy hội viên từ"><input id="InactiveDTimeTo" type="date" title="Ngày hủy hội viên đến">
+</div>
+<div class="bar">
+  <button class="primary" onclick="load(0)">Tìm</button>
+  <button onclick="document.querySelectorAll('.grid input,.grid select').forEach(e=>e.value='');load(0)">Xoá điều kiện</button>
+  <span class="muted">Số dòng/trang</span><select id="RecordCount" style="width:auto"><option>20</option><option selected>50</option><option>100</option></select>
+  <button onclick="load(start-take)">◀ Trước</button><button onclick="load(start+take)">Sau ▶</button>
+  <span id="msg"></span>
+</div>
+<div class="muted" id="sum"></div>
+<div class="gap"><b>GUARD CỨNG của nguồn</b> (Master.Loyalty.cs:19544-19552):
+<code>and cc.CardNo = (select top 1 cc.CardNo … order by cc.CreateDTimeUTC desc)</code> — màn chỉ hiện
+<b>kỳ xét hạng MỚI NHẤT</b> của từng hội viên, không hiện các kỳ cũ. Bỏ guard này thì số dòng nở ra mà build vẫn xanh.
+<br>Thứ tự hạng thấp→cao: <b>I &lt; N &lt; S &lt; G &lt; P</b> (Const.Main.BE.cs:1592).</div>
+<div id="gapbox" class="gap" hidden></div>
+<div class="tblwrap"><table><thead><tr>
+  <th>Mã thẻ</th><th>Thẻ kỳ trước</th><th>Mã HV</th><th>Tên HV</th><th>Loại kỳ</th><th>Hành động hạng</th>
+  <th>Hạng SD</th><th>Hạng SD trước</th><th>Hạng thực</th><th>Hạng thực trước</th><th>Hạng SD dự kiến</th>
+  <th>Từ ngày</th><th>Đến ngày</th><th>Điểm tiêu dùng</th><th>Điểm còn lại</th><th>Điểm xét hạng</th>
+  <th>DT xét hạng</th><th>Lượt DV</th><th>Điểm tích (PointAccumulated)</th><th>Điểm tiêu (PointUse)</th><th>AmountRef</th>
+  <th>TT thẻ</th><th>cc_FlagShow</th><th>cm_FlagShow</th>
+</tr></thead><tbody id="rows"><tr><td colspan="24" class="muted">Đang tải…</td></tr></tbody></table></div>
+
+<script>
+let start = 0, take = 50;
+const F = id => document.getElementById(id);
+const msg = (t, ok) => { const m = F("msg"); m.textContent = t; m.className = ok ? "ok" : "err"; };
+const d = v => v ? String(v).slice(0, 10) : "";
+const n = v => (v === null || v === undefined) ? "" : Number(v).toLocaleString("vi-VN");
+const RANK = ["I", "N", "S", "G", "P"];
+
+function body() {
+  const o = { RecordStart: start, RecordCount: take };
+  ["CardNo","MemberNo","PhoneNo","IDCardNo","CarNo","VIN","DLCodeRegis","CardSourceCode","CardTypeUse","CardStatus","MemberStatus","FlagExceptionally"]
+    .forEach(k => { const v = F(k).value.trim(); if (v) o[k] = v; });
+  ["EffDateStartFrom","EffDateStartTo","MemberActiveDateFrom","MemberActiveDateTo","InactiveDTimeFrom","InactiveDTimeTo"]
+    .forEach(k => { const v = F(k).value; if (v) o[k] = v; });
+  return o;
+}
+
+// So hạng theo THỨ TỰ I<N<S<G<P, không so chuỗi (so chuỗi thì "G" > "S" — sai nghiệp vụ).
+function arrow(now, prev) {
+  const a = RANK.indexOf(now || ""), b = RANK.indexOf(prev || "");
+  if (a < 0 || b < 0 || a === b) return "";
+  return a > b ? ' <span class="up">▲</span>' : ' <span class="down">▼</span>';
+}
+
+async function load(s) {
+  take = parseInt(F("RecordCount").value, 10) || 50;
+  start = Math.max(0, s ?? 0);
+  msg("Đang tải…", true);
+  const r = await fetch("/api/crd/card/get", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body()) });
+  if (!r.ok) { msg("Lỗi " + r.status, false); return; }
+  const j = await r.json();
+  F("sum").textContent = `MyCount = ${j.myCount} · đang xem dòng ${j.myCount ? start + 1 : 0}–${Math.min(start + take, j.myCount)}`;
+  if (j.gapCols?.length) { F("gapbox").hidden = false; F("gapbox").innerHTML = "<b>Cột nguồn CHƯA port được</b> (" + j.gapCols.length + "): <code>" + j.gapCols.join(", ") + "</code><br>" + j.gapReason; }
+  F("rows").innerHTML = (j.items || []).map(x => `<tr>
+    <td><b>${x.cardNo}</b></td><td>${x.cardNoPrev ?? ""}</td><td>${x.memberNo}</td><td>${x.memberName ?? ""}</td>
+    <td>${x.cardSourceCode ?? ""}</td><td>${x.rankActionType ?? ""}</td>
+    <td><span class="pill">${x.cardTypeUse ?? ""}</span>${arrow(x.cardTypeUse, x.cardTypeUsePrev)}</td><td>${x.cardTypeUsePrev ?? ""}</td>
+    <td><span class="pill">${x.cardTypeInit ?? ""}</span></td><td>${x.cardTypeInitPrev ?? ""}</td><td>${x.cardTypeUseExpect ?? ""}</td>
+    <td>${d(x.effDateStart)}</td><td>${d(x.effDateEnd)}</td>
+    <td>${n(x.pointTotal)}</td><td>${n(x.pointAvail)}</td><td>${n(x.pointCardRank)}</td>
+    <td>${n(x.amountAvail)}</td><td>${n(x.qtyVisitAvail)}</td>
+    <td>${n(x.pointAccumulated)}</td><td>${n(x.pointUse)}</td><td>${n(x.amountRef)}</td>
+    <td>${x.cardStatus ?? ""}</td><td>${x.cc_FlagShow ?? ""}</td><td>${x.cm_FlagShow ?? ""}</td></tr>`).join("")
+    || '<tr><td colspan="24" class="muted">Không có dòng nào khớp.</td></tr>';
+  msg("Xong.", true);
+}
+load(0);
+</script>
+</body></html>

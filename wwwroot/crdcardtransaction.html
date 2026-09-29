@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MiniLoyalty — Giao dịch điểm (Crd_CardTransaction)</title>
+<style>
+  :root{color-scheme:light dark;--line:#8883;--accent:#db2777}
+  *{box-sizing:border-box} body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;max-width:1340px;margin:24px auto;padding:0 16px;line-height:1.5}
+  h1{font-size:20px;margin:0 0 2px} .muted{opacity:.65;font-size:13px}
+  nav a{font-size:13px;margin-right:12px;color:var(--accent)}
+  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:14px 0}
+  input,button,select{font:inherit;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:transparent;color:inherit;width:100%}
+  button{cursor:pointer;width:auto} button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .bar{display:flex;gap:8px;align-items:center;margin:10px 0;flex-wrap:wrap}
+  table{width:100%;border-collapse:collapse;font-size:12.5px} th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+  th{opacity:.7;font-size:11px;text-transform:uppercase}
+  .err{color:#dc2626} .ok{color:#16a34a} #msg{min-height:18px;font-size:13px}
+  .tblwrap{overflow-x:auto} .pill{font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;background:#8882}
+  .gap{font-size:12px;border:1px dashed var(--line);border-radius:8px;padding:8px 10px;margin:10px 0}
+  tr.dc{background:#db277712} .chk{display:flex;align-items:center;gap:6px;font-size:12.5px}
+  .chk input{width:auto}
+</style></head>
+<body>
+<h1>Giao dịch điểm hội viên <span class="muted">(port 1:1 CrdCardTransactionController.cs — Crd_CardTransaction)</span></h1>
+<nav><a href="/crdmember.html">Hội viên</a><a href="/crdcard.html">Thẻ / kỳ xét hạng</a><a href="/crdcardtransaction.html">Giao dịch điểm</a><a href="/crddiscounttransaction.html">Chiết khấu dịch vụ</a><a href="/">SPA gốc</a></nav>
+<div class="muted">Nguồn: WA_Crd_CardTransaction_Get (CrdCardTransactionController.cs:24) → Crd_CardTransaction_GetX (Master.Loyalty.cs:21441).
+Ô tìm port 1:1 <code>Crd_CardTransactionSearch</code> (ModelsUI/Crd_CardTransactionUI.cs:9-52).</div>
+
+<div class="grid">
+  <input id="MemberNo" placeholder="Mã hội viên"><input id="CardNo" placeholder="Mã kỳ xét hạng (CardNo)"><input id="PhoneNo" placeholder="Số điện thoại"><input id="VIN" placeholder="Số khung (VIN)">
+  <input id="IDCardNo" placeholder="CMT/CCCD"><input id="DLCode" placeholder="Đại lý thực hiện (DLCode)"><input id="PrProgramCode" placeholder="Mã chương trình ưu đãi">
+  <select id="CardTypeUse"><option value="">Hạng sử dụng: —</option><option value="I">I</option><option value="N">N</option><option value="S">S</option><option value="G">G</option><option value="P">P</option></select>
+  <input id="CreateDTimeUTCFrom" type="date" title="Ngày thực hiện từ"><input id="CreateDTimeUTCTo" type="date" title="Ngày thực hiện đến">
+  <input id="EffDateStartFrom" type="date" title="Bắt đầu kỳ từ"><input id="EffDateStartTo" type="date" title="Bắt đầu kỳ đến">
+  <input id="UsePrmDTimeFrom" type="date" title="Ngày dùng ưu đãi từ"><input id="UsePrmDTimeTo" type="date" title="Ngày dùng ưu đãi đến">
+  <input id="PointRefFrom" type="number" placeholder="PointRef từ"><input id="PointRefTo" type="number" placeholder="PointRef đến">
+  <input id="PointChRankTotalFrom" type="number" placeholder="Điểm xét hạng từ"><input id="PointChRankTotalTo" type="number" placeholder="Điểm xét hạng đến">
+  <input id="AmountChTotalFrom" type="number" placeholder="AmountChTotal từ"><input id="AmountChTotalTo" type="number" placeholder="AmountChTotal đến">
+  <select id="FlagPoint"><option value="">FlagPoint: —</option><option value="1">1</option><option value="0">0</option></select>
+  <input id="DLCPCode" placeholder="Đại lý của user (RBAC)">
+  <label class="chk"><input type="checkbox" id="FlagCheckAuthor"> Bật chặn theo đại lý (FlagCheckAuthor='1')</label>
+</div>
+
+<div class="muted"><b>Loại điểm (DealPointType)</b> — chọn nhiều; port 1:1 danh mục Const.Main.BE.cs:1528-1547:</div>
+<div class="bar" id="dpt"></div>
+
+<div class="bar">
+  <button class="primary" onclick="load(0)">Tìm</button>
+  <button onclick="document.querySelectorAll('.grid input,.grid select').forEach(e=>{if(e.type==='checkbox')e.checked=false;else e.value=''});document.querySelectorAll('#dpt input').forEach(e=>e.checked=false);load(0)">Xoá điều kiện</button>
+  <span class="muted">Số dòng/trang</span><select id="RecordCount" style="width:auto"><option>20</option><option selected>50</option><option>100</option></select>
+  <button onclick="load(start-take)">◀ Trước</button><button onclick="load(start+take)">Sau ▶</button>
+  <span id="msg"></span>
+</div>
+<div class="muted" id="sum"></div>
+<div class="gap"><b>Hai loại dòng — port 1:1 Master.Loyalty.cs:21698-21821.</b>
+Chiết khấu dịch vụ nằm ở <b>BẢNG RIÊNG</b> <code>Crd_MemberDiscountTransaction</code>; nguồn chỉ <code>union all</code>
+bảng đó vào màn này <b>khi điều kiện lọc có chứa DISCOUNTRO</b>. Dòng chiết khấu (nền hồng) có mọi cột điểm-hạng
+(<code>PointChTotal / AmountChTotal / …Init / …Differ</code>) = 0 và chỉ 3 cột
+<code>DiscountRate / DiscountAmount / DiscountRevenue</code> mang giá trị; dòng điểm thường thì ngược lại
+(3 cột chiết khấu = 0, Master.Loyalty.cs:21635-21637).
+<br><b>Cột nguồn CHƯA port:</b> <code>PrProgramName, Remark, Unit</code> — cần Mst_PromotionProgram + Mst_PromotionProgramDtl
+(left join Master.Loyalty.cs:21653-21656), 2 bảng này chưa có ở MiniLoyalty.
+<br><b>Bẫy đã port đúng:</b> hằng nguồn ghi <code>TRANSFERBENIFITS</code> (sai chính tả ở NGUỒN) — giữ nguyên văn, không tự sửa thành BENEFITS.</div>
+<div class="tblwrap"><table><thead><tr>
+  <th>AutoId</th><th>Số GD (RefNo)</th><th>Loại điểm</th><th>Mã HV</th><th>Tên HV</th><th>SĐT</th><th>Biển số</th>
+  <th>Mã kỳ thẻ</th><th>Hạng SD</th><th>Hạng thực</th><th>Đại lý</th>
+  <th>PointChTotal</th><th>AmountChTotal</th><th>PointChRankTotal</th><th>PointChTotalInit</th><th>AmountChTotalInit</th><th>AmountChTotalDiffer</th>
+  <th>PointRef</th><th>AmountRef</th><th>% chiết khấu</th><th>Tiền chiết khấu</th><th>DT chiết khấu</th>
+  <th>Hạn dùng điểm</th><th>Ngày thực hiện</th><th>Chương trình</th>
+</tr></thead><tbody id="rows"><tr><td colspan="25" class="muted">Đang tải…</td></tr></tbody></table></div>
+
+<script>
+let start = 0, take = 50;
+const F = id => document.getElementById(id);
+const msg = (t, ok) => { const m = F("msg"); m.textContent = t; m.className = ok ? "ok" : "err"; };
+const d = v => v ? String(v).slice(0, 10) : "";
+const n = v => (v === null || v === undefined) ? "" : Number(v).toLocaleString("vi-VN");
+
+// Danh mục DealPointType — nguyên văn Const.Main.BE.cs:1528-1547 (kể cả TRANSFERBENIFITS viết sai ở nguồn).
+const TYPES = [
+  ["SALES", "Mua xe mới"], ["LOYALTY", "Loyalty"], ["INTRODUCTION", "Giới thiệu mua xe"],
+  ["TRANSFERBENIFITS", "Chuyển quyền lợi"], ["BIRTHDAY", "Sinh nhật"], ["PRPROGRAM", "Dùng ưu đãi"],
+  ["POINTINCREASE", "Tích điểm xét hạng"], ["POINTUSE", "Sử dụng điểm"], ["CONSUMPTION", "Tích điểm tiêu dùng"],
+  ["SERVICETURN", "Lượt dịch vụ"], ["POINTEXPIRY", "Điểm hết hạn"], ["SUPPORT", "Hỗ trợ"],
+  ["KMBH", "Điểm khuyến mại bán xe"], ["VOUCHERXM", "Voucher xe mới"], ["VOUCHERSD", "Sử dụng voucher"],
+  ["DISCOUNTRO", "Chiết khấu dịch vụ (bảng riêng)"], ["VOUCHERTSN", "Voucher sinh nhật"],
+];
+F("dpt").innerHTML = TYPES.map(([v, t]) =>
+  `<label class="chk"><input type="checkbox" value="${v}"> <span title="${t}">${v}</span></label>`).join("");
+
+function body() {
+  const o = { RecordStart: start, RecordCount: take };
+  ["MemberNo","CardNo","PhoneNo","VIN","IDCardNo","DLCode","PrProgramCode","CardTypeUse","FlagPoint","DLCPCode"]
+    .forEach(k => { const v = F(k).value.trim(); if (v) o[k] = v; });
+  ["CreateDTimeUTCFrom","CreateDTimeUTCTo","EffDateStartFrom","EffDateStartTo","UsePrmDTimeFrom","UsePrmDTimeTo"]
+    .forEach(k => { const v = F(k).value; if (v) o[k] = v; });
+  ["PointRefFrom","PointRefTo","PointChRankTotalFrom","PointChRankTotalTo","AmountChTotalFrom","AmountChTotalTo"]
+    .forEach(k => { const v = F(k).value; if (v !== "") o[k] = Number(v); });
+  if (F("FlagCheckAuthor").checked) o.FlagCheckAuthor = "1";
+  const sel = [...document.querySelectorAll("#dpt input:checked")].map(e => e.value);
+  if (sel.length) o.DealPointType = sel.join(",");
+  return o;
+}
+
+async function load(s) {
+  take = parseInt(F("RecordCount").value, 10) || 50;
+  start = Math.max(0, s ?? 0);
+  msg("Đang tải…", true);
+  const r = await fetch("/api/crd/cardtransaction/get", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body()) });
+  if (!r.ok) { msg("Lỗi " + r.status, false); return; }
+  const j = await r.json();
+  F("sum").textContent = `MyCount = ${j.myCount} · đang xem dòng ${j.myCount ? start + 1 : 0}–${Math.min(start + take, j.myCount)}`;
+  F("rows").innerHTML = (j.items || []).map(x => {
+    const dc = x.dealPointType === "DISCOUNTRO";
+    return `<tr class="${dc ? "dc" : ""}">
+    <td>${x.autoId}</td><td>${x.refNo ?? ""}</td><td><span class="pill">${x.dealPointType ?? ""}</span></td>
+    <td>${x.memberNo ?? ""}</td><td>${x.memberName ?? ""}</td><td>${x.phoneNo ?? ""}</td><td>${x.carNo ?? ""}</td>
+    <td>${x.cardNo ?? ""}</td><td>${x.cardTypeUse ?? ""}</td><td>${x.cardTypeInit ?? ""}</td><td>${x.dlCode ?? ""}</td>
+    <td>${n(x.pointChTotal)}</td><td>${n(x.amountChTotal)}</td><td>${n(x.pointChRankTotal)}</td>
+    <td>${n(x.pointChTotalInit)}</td><td>${n(x.amountChTotalInit)}</td><td>${n(x.amountChTotalDiffer)}</td>
+    <td>${n(x.pointRef)}</td><td>${n(x.amountRef)}</td>
+    <td>${x.discountRate ? x.discountRate + "%" : ""}</td><td>${x.discountAmount ? n(x.discountAmount) : ""}</td><td>${x.discountRevenue ? n(x.discountRevenue) : ""}</td>
+    <td>${d(x.pointExpiryDTime)}</td><td>${d(x.createDTimeUTC)}</td><td>${x.prProgramCode ?? ""}</td></tr>`;
+  }).join("") || '<tr><td colspan="25" class="muted">Không có dòng nào khớp.</td></tr>';
+  msg("Xong.", true);
+}
+load(0);
+</script>
+</body></html>
