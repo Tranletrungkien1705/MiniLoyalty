@@ -11,11 +11,12 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục chính sách sinh nhật (Mst_BirthPolicy) của dự án nguồn 2022.7.Loyalty (#70).
+// PORT 1:1 — màn danh mục chính sách sinh nhật (Mst_BirthPolicy) của dự án nguồn 2022.7.Loyalty (#70, #71).
 //
 // Nguồn controller (tầng gate):
 //   Mst_BirthPolicyController.cs:23-103    Search -> WA_Mst_BirthPolicy_Get (#70)
-//   Mst_BirthPolicyController.cs:294-319   strWhereClause_Mst_BirthPolicy (mệnh đề lọc Search)
+//   Mst_BirthPolicyController.cs:104-213   GetAllActive -> WA_Mst_BirthPolicy_Get (#71)
+//   Mst_BirthPolicyController.cs:294-319   strWhereClause_Mst_BirthPolicy (mệnh đề lọc Search / GetAllActive)
 // Nguồn API:
 //   MstBirthPolicyController.cs:168-238    WA_Mst_BirthPolicy_Get
 // Nguồn biz:
@@ -102,6 +103,29 @@ public class Mst_BirthPolicyControllerPort : ControllerBase
             Data = new PageInfo<object>(rows, itemCount, pageCount, pageIndex, pageSize)
         });
     }
+
+    /// <summary>
+    /// Port 1:1 <c>Mst_BirthPolicyController.GetAllActive</c> (nguồn gate Mst_BirthPolicyController.cs:104-213).
+    /// Nguồn gọi <c>strWhereClause_Mst_BirthPolicy</c> với <c>FlagActive = "1"</c> (:130-134) ⇒ lọc
+    /// <c>FlagActive IN ('1')</c> (:308-316). <c>OrgID</c> chỉ được gán vào request (:132, :144),
+    /// hàm lọc KHÔNG dùng OrgID ⇒ KHÔNG lọc theo OrgID.
+    /// Không body: RecordStart = "0", RecordCount = "123456000" (nguồn Ft_RecordStart/Ft_RecordCount :146-147).
+    /// Khối Ext/tree (:156-180) bị comment ở nguồn ⇒ KHÔNG port.
+    /// Dùng lại GetXAsync của Search (#70): MyIdxSeq + 12 cột + FlagShow.
+    /// Trả <c>Ok(new { Success = true, Data = ... })</c> — Data là MẢNG TRẦN, rỗng thì <c>null</c>
+    /// (nguồn :127 khởi tạo null, :153-155 chỉ gán khi có dòng, :193-198 trả thẳng listMst_BirthPolicy).
+    /// </summary>
+    [HttpPost("getallactive")]
+    public async Task<IActionResult> GetAllActive()
+    {
+        // Nguồn: Ft_RecordStart = "0", Ft_RecordCount = "123456000" (gate Mst_BirthPolicyController.cs:146-147).
+        // FlagActive = "1" (gate :133) ⇒ lọc IN ('1'); OrgID không lọc.
+        var (_, rows) = await GetXAsync(null, "1", 0, 123456000);
+
+        // Nguồn :193-198: Data = listMst_BirthPolicy (mảng trần); rỗng ⇒ null (:127, :153-155).
+        return Ok(new { Success = true, Data = rows.Count > 0 ? rows : null });
+    }
+
 
     /// <summary>
     /// Lọc + đếm + chia trang theo LogLUDTimeUTC desc — dùng cho Search (Master.Loyalty.cs:10877-11085).
