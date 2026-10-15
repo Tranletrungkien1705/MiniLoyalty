@@ -25,6 +25,7 @@ namespace MiniLoyalty.Controllers.Port;
 //   Mst_CarBrandController.cs:557-621  DeleteMultiple      -> WA_Mst_CarBrand_Delete (#83)
 //   Mst_CarBrandController.cs:625-769  Import              -> WA_Mst_CarBrand_Create (#84)
 //   Mst_CarBrandController.cs:774-852  Export              -> WA_Mst_CarBrand_Get (#85)
+//   Mst_CarBrandController.cs:855-887  ExportTemplate      -> (không qua service/biz, không đọc DB) (#86)
 // Nguồn API:
 //   MstCarBrandController.cs:238-307   WA_Mst_CarBrand_Get
 //   MstCarBrandController.cs:20-90     WA_Mst_CarBrand_Create
@@ -74,6 +75,9 @@ namespace MiniLoyalty.Controllers.Port;
 //     Ft_RecordStart = "0", Ft_RecordCount = "123456000" (:813-814); rỗng -> ServiceException("Không có dữ liệu") (:838)
 //     -> 400 ErridnLoyalty.Mst_CarBrand_Export; từ điển 3 cột GetImportDicColums() (BrandCode, BrandName, FlagActive);
 //     file + sheet "Mst_CarBrand" (:827-828); trả Url tải file (:830-833).
+//   * ExportTemplate: danh sách rỗng kiểu Mst_CarBrand (:863); từ điển GetImportDicColumsTemplate()
+//     2 cột (BrandCode -> "Mã hiệu xe (*)", BrandName -> "Tên hiệu xe (*)"); file + sheet "Mst_CarBrand" (:867-868);
+//     trả Url tải file (:869-873). Khởi tạo danh sách rỗng, không qua service/biz, không đọc DB.
 //
 // GAP:
 //   - NetworkID: nguồn lấy NetworkID = orgUserUI.NetworkId từ user đăng nhập (Mst_CarBrandController.cs:731);
@@ -891,6 +895,52 @@ public class Mst_CarBrandControllerPort : ControllerBase
         PortExcel.ExportToExcelFromList(rows, dicColNames, physicalPath, "Mst_CarBrand");
 
         // Trả URL tải file: Data = { Url = GetRequestBaseAddress() + url } (:829-833)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+            }
+        });
+    }
+
+    // ============================================================================================
+    // ExportTemplate — nguồn gate Mst_CarBrandController.cs:855-887.
+    // Action này KHÔNG kiểm quyền ở nguồn (không có CheckGatewayAuthentication và không có CheckAuthorize).
+    // Không gọi tầng service, không truy vấn cơ sở dữ liệu.
+    // Khởi tạo danh sách rỗng kiểu Mst_CarBrand (:863).
+    // Lấy từ điển 2 cột mẫu import từ GetImportDicColumsTemplate (:865, :903-911) gồm:
+    //   1. BrandCode -> "Mã hiệu xe (*)"
+    //   2. BrandName -> "Tên hiệu xe (*)"
+    // (Dùng lại hàm GetImportDicColumsTemplate() đã có ở action Import #84, không tạo bản thứ hai).
+    // Sinh đường dẫn file mẫu qua PortExcel.GenExcelExportFilePath(webRoot, "Mst_CarBrand") (:867).
+    // Xuất file Excel qua PortExcel.ExportToExcelFromList(list, dicColNames, physicalPath, "Mst_CarBrand") (:868).
+    // Trả về Success = true, Data = { Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath } (:869-873).
+    // Không có nhánh báo lỗi khi danh sách rỗng (khác với Export).
+    // ============================================================================================
+    [HttpPost("exporttemplate")]
+    public IActionResult ExportTemplate()
+    {
+        // Khởi tạo danh sách rỗng kiểu Mst_CarBrand (gate Mst_CarBrandController.cs:863)
+        var list = new List<Mst_CarBrand>();
+
+        // Lấy từ điển 2 cột mẫu import (gate Mst_CarBrandController.cs:865) — dùng lại GetImportDicColumsTemplate() của action import
+        var dicColNames = GetImportDicColumsTemplate();
+
+        // Xác định thư mục webRoot và sinh đường dẫn file (gate Mst_CarBrandController.cs:867)
+        var webRoot = _env.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = Path.Combine(_env.ContentRootPath, "wwwroot");
+        }
+
+        var (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Mst_CarBrand");
+
+        // Ghi danh sách rỗng ra file Excel với tên sheet Mst_CarBrand (gate Mst_CarBrandController.cs:868)
+        PortExcel.ExportToExcelFromList(list, dicColNames, physicalPath, "Mst_CarBrand");
+
+        // Trả URL tải file với Success = true (gate Mst_CarBrandController.cs:869-873)
         return Ok(new
         {
             Success = true,
