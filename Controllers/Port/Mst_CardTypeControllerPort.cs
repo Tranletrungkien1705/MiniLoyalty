@@ -547,13 +547,13 @@ public class Mst_CardTypeControllerPort(AppDbContext db, IConfiguration config, 
     //       4. Crd_Member.CardTypeUse (20221108.z11.Crd_Member.Crd_Card.sql:472)
     //       5. Mst_RankPolicy.CardType (20221026.CreateDatabase.sql:273 — bổ sung sau khi port bảng ở #227)
     //       6. Mst_PolicyMoneyToPointServiceDtl.CardType (20221026.CreateDatabase.sql:647 — bổ sung sau khi port bảng ở #194)
+    //       7. Mst_BirthPolicyDtl.CardType (20221026.CreateDatabase.sql:422 — bổ sung sau khi port bảng ở #70)
     //     Nếu có bản ghi con -> rollback + PortResult.Fail("Mst_CardType_Delete", "Check.CardType", strCardType, "FK", "<Bang.Cot>").
     //   * Xoá dòng Mst_CardType (:6692-6695) và CommitSafety (:6606).
     //   * Thành công: gate :532-533 SetSuccess + Data = null.
     //
     // GAP:
     //   * Các bảng FK còn lại trong DDL nguồn chưa có ở đích -> thêm kiểm tra khi port các bảng đó:
-    //     - Mst_BirthPolicyDtl.CardType (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
     //     - Mst_PromotionProgramSpec.CardType (DDL nguồn khai FK_MstCartType_Mst_PromotionPrDtl trên Spec(CardType) nhưng Spec KHÔNG có cột CardType — DDL lỗi, tên gợi ý Mst_PromotionProgramDtl.CardType; CHƯA giả lập, cần xác nhận DB thật)
     //
     // Bỏ qua có chủ đích (loại Đ):
@@ -737,8 +737,16 @@ public class Mst_CardTypeControllerPort(AppDbContext db, IConfiguration config, 
                 return PortResult.Fail("Mst_CardType_Delete", "Check.CardType", strCardType, "FK", "Mst_PolicyMoneyToPointServiceDtl.CardType");
             }
 
+            // 4.7. Mst_BirthPolicyDtl.CardType (FK_MstCardTp_MstBirthPolicyDtl — 20221026.CreateDatabase.sql:422; bảng port ở #70)
+            var hasBirthPolicyDtl = await db.Set<Mst_BirthPolicyDtl>().AnyAsync(x =>
+                EF.Functions.Like((x.CardType ?? "").ToLower(), PortQuery.Equal(strCardType), PortQuery.Esc));
+            if (hasBirthPolicyDtl)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_CardType_Delete", "Check.CardType", strCardType, "FK", "Mst_BirthPolicyDtl.CardType");
+            }
+
             // GAP: Các bảng FK còn lại trong DDL nguồn chưa có ở đích -> thêm kiểm tra khi port các bảng đó:
-            // - Mst_BirthPolicyDtl.CardType (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
             // - Mst_PromotionProgramSpec.CardType (DDL nguồn khai FK_MstCartType_Mst_PromotionPrDtl trên Spec(CardType) nhưng Spec KHÔNG có cột CardType — DDL lỗi, tên gợi ý Mst_PromotionProgramDtl.CardType; CHƯA giả lập, cần xác nhận DB thật)
 
             // 5. Xoá dòng Mst_CardType (Master.Loyalty.cs:6692-6695 DeleteX)
