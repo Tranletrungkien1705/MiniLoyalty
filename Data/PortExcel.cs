@@ -69,6 +69,35 @@ public static class PortExcel
         wb.SaveAs(filePath);
     }
 
+    /// <summary>
+    /// Port `ExcelImportNew.Query(filePath, "A2")` của các action Import (vd `Mst_ProvinceController.cs` Import).
+    /// DLL nguồn không có mã ⇒ GIẢ ĐỊNH (cần xác nhận với file mẫu thật): dòng 1 = tiêu đề (đúng file `ExportTemplate` sinh ra),
+    /// dữ liệu bắt đầu từ ô bắt đầu (mặc định A2), cột ánh xạ THEO VỊ TRÍ vào khoá của từ điển mẫu Import
+    /// (nguồn kiểm `table.Columns.Count != GetImportDicColumsTemplate().Count` rồi đọc `dr[TblX.Cot]`).
+    /// Trả về: số cột đọc được ở dòng tiêu đề + danh sách dòng (bỏ qua dòng trống hoàn toàn).
+    /// </summary>
+    public static (int columnCount, List<Dictionary<string, string?>> rows) ReadSheet(Stream xlsx, IReadOnlyList<string> keysInOrder, int firstDataRow = 2)
+    {
+        using var wb = new XLWorkbook(xlsx);
+        var ws = wb.Worksheets.First();
+        var lastCol = ws.Row(Math.Max(1, firstDataRow - 1)).LastCellUsed()?.Address.ColumnNumber ?? 0;
+        var rows = new List<Dictionary<string, string?>>();
+        var lastRow = ws.LastRowUsed()?.RowNumber() ?? 0;
+        for (var r = firstDataRow; r <= lastRow; r++)
+        {
+            var row = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+            var any = false;
+            for (var c = 0; c < keysInOrder.Count; c++)
+            {
+                var s = ws.Cell(r, c + 1).GetString();
+                if (!string.IsNullOrWhiteSpace(s)) any = true;
+                row[keysInOrder[c]] = string.IsNullOrEmpty(s) ? null : s;
+            }
+            if (any) rows.Add(row);
+        }
+        return (lastCol, rows);
+    }
+
     /// <summary>Port `GetRequestBaseAddress()` (`BaseController.cs:403-410`): scheme://host[:port không mặc định].</summary>
     public static string GetRequestBaseAddress(HttpRequest req)
     {
