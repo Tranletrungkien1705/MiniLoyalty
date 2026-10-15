@@ -4,7 +4,7 @@ Nguồn mẫu số: `D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.Web
 
 **Mẫu số (N)**: 337
 
-**Tiến độ hiện tại**: 72/337 (21.36%)
+**Tiến độ hiện tại**: 73/337 (21.66%)
 
 Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã có` (đã port từ trước, có bằng chứng) · `Bỏ` (scaffold/không nghiệp vụ, ghi lý do) · `Cần xem tay`.
 
@@ -78,7 +78,7 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 66 | Map_QueryDealer_MemberController/Search | Đã làm | 904a579 |
 | 67 | Map_QueryDealer_MemberController/SearchForRePort | Đã làm | f3f9453 |
 | 68 | Map_QueryDealer_MemberController/Create | Chưa làm | - |
-| 69 | Map_QueryDealer_MemberController/ExportExcel | Chưa làm | - |
+| 69 | Map_QueryDealer_MemberController/ExportExcel | Đã làm | 8c79bfa |
 | 70 | Mst_BirthPolicyController/Search | Chưa làm | - |
 | 71 | Mst_BirthPolicyController/GetAllActive | Chưa làm | - |
 | 72 | Mst_BirthPolicyController/GetByBirthPolicyNo | Chưa làm | - |
