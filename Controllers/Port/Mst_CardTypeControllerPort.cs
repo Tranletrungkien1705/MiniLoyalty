@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using MiniLoyalty.Data;
+using MiniLoyalty.Models;
 using MiniLoyalty.Models.Port;
 
 namespace MiniLoyalty.Controllers.Port;
@@ -11,16 +12,27 @@ namespace MiniLoyalty.Controllers.Port;
 // Nguồn controller (tầng gate):
 //   Mst_CardTypeController.cs:25-105   Search       ->  WA_Mst_CardType_Get
 //   Mst_CardTypeController.cs:106-215  GetAllActive ->  WA_Mst_CardType_Get
+//   Mst_CardTypeController.cs:216-279  GetByCardType -> WA_Mst_CardType_Get
+//   Mst_CardTypeController.cs:329-414  Create       ->  WA_Mst_CardType_Create
+//   Mst_CardTypeController.cs:418-485  Update       ->  WA_Mst_CardType_Update
+//   Mst_CardTypeController.cs:489-552  Delete       ->  WA_Mst_CardType_Delete
 //   Mst_CardTypeController.cs:283-308  strWhereClause_Mst_CardType (dựng mệnh đề lọc)
 // Nguồn API:  MstCardTypeController.cs:239-308  WA_Mst_CardType_Get
-// Nguồn biz:  Master.Loyalty.cs:5329 (WAS_Mst_CardType_Get) -> :5430 (Mst_CardType_Get)
-//             -> :5583-5737 (Mst_CardType_GetX — SQL thật)
+//             MstCardTypeController.cs:21-91    WA_Mst_CardType_Create
+//             MstCardTypeController.cs:93-163   WA_Mst_CardType_Update
+//             MstCardTypeController.cs:166-236  WA_Mst_CardType_Delete
+// Nguồn biz:  Master.Loyalty.cs:5329 (WAS_Mst_CardType_Get) -> :5430 (Mst_CardType_Get) -> :5583-5737 (Mst_CardType_GetX)
+//             Master.Loyalty.cs:5738 (WAS_Mst_CardType_Create) -> :5821 (Mst_CardType_Create) -> :5968 (Mst_CardType_CreateX)
+//             Master.Loyalty.cs:6100 (WAS_Mst_CardType_Update) -> :6185 (Mst_CardType_Update) -> :6339 (Mst_CardType_UpdateX)
+//             Master.Loyalty.cs:6428 (WAS_Mst_CardType_Delete) -> :6507 (Mst_CardType_Delete) -> :6645 (Mst_CardType_DeleteX)
 //
 // GIỮ ĐÚNG NGUỒN:
 //   * Endpoint là POST (nguồn [AcceptVerbs("POST")]).
 //   * Lọc KeyWord: like '%x%' trên CardTypeName (:290).
 //   * Lọc FlagActive: danh sách `in ('a','b')` (:299-304).
 //   * Chia trang theo CardType asc (:5643) rồi sắp trang theo Value asc (:5683).
+//   * Delete: kiểm tra rỗng -> invalid_CartType; CheckDB -> Mst_CardType_CheckDB_CardTypeNotFound;
+//     giả lập 4 FK đích -> Mst_CardType_Delete; xoá dòng -> Success = true, Data = null.
 // ============================================================================================
 
 /// <summary>Port 1:1 <c>Mst_CardTypeSearch</c> — tham số lọc + phân trang của màn.</summary>
@@ -67,6 +79,14 @@ public class MstCardTypeUpdateReq
     public string? CardTypeName { get; set; }         // Tên loại thẻ — :6150
     public System.Text.Json.JsonElement? Value { get; set; }  // Giá trị/ngưỡng — :6151 (Convert.ToDouble)
     public string? FlagActive { get; set; }           // Cờ hoạt động — :6152 (StdFlag)
+}
+
+/// <summary>
+/// Port 1:1 <c>Delete</c> — body chỉ có CardType (Mst_CardTypeController.cs:489-552).
+/// </summary>
+public class MstCardTypeDeleteReq
+{
+    public string? CardType { get; set; }             // Mã loại thẻ cần xoá — :489, :513
 }
 
 [ApiController]
@@ -438,6 +458,127 @@ public class Mst_CardTypeControllerPort(AppDbContext db) : ControllerBase
             await tx.CommitAsync();
 
             // 9. Thành công: gate :471-472 SetSuccess + Data = null.
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+        catch (Exception)
+        {
+            await tx.RollbackAsync();
+            throw;
+        }
+    }
+
+    // ============================================================================================
+    // Delete — nguồn Mst_CardTypeController.cs:489-552 (gate) -> MstCardTypeController.cs:166-236 (API)
+    //   -> Master.Loyalty.cs:6428 (WAS_Mst_CardType_Delete) -> :6507-6643 (Mst_CardType_Delete)
+    //   -> :6645-6701 (Mst_CardType_DeleteX) -> :5264-5325 (Mst_CardType_CheckDB).
+    //
+    // GIỮ ĐÚNG NGUỒN:
+    //   * Kiểm tra mã rỗng tại gate (:508, :538): CardType rỗng -> ném ServiceException("invalid_CartType", "invalid_CartType")
+    //     (GIỮ NGUYÊN lỗi chính tả chữ "CartType" từ nguồn).
+    //   * Mở 1 transaction cho toàn bộ nghiệp vụ (Master.Loyalty.cs:6540 _cf.db.BeginTransaction()).
+    //   * Chuẩn hoá mã qua StdParam (:6671): Trim + ToUpper, rỗng -> null.
+    //   * CheckDB(CardType, FlagExist "1") (:6677-6682 -> Mst_CardType_CheckDB :5264-5325):
+    //     FlagExist "1" + KHÔNG có dòng -> Mst_CardType_CheckDB_CardTypeNotFound.
+    //   * Giả lập 4 ràng buộc khoá ngoại (FK) đã có ở đích (SQL Server chặn xoá nếu còn bản ghi con):
+    //       1. Crd_Card.CardTypeInit (20221108.z11.Crd_Member.Crd_Card.sql:437)
+    //       2. Crd_Card.CardTypeUse (20221108.z11.Crd_Member.Crd_Card.sql:446)
+    //       3. Crd_Member.CardTypeInit (20221108.z11.Crd_Member.Crd_Card.sql:463)
+    //       4. Crd_Member.CardTypeUse (20221108.z11.Crd_Member.Crd_Card.sql:472)
+    //     Nếu có bản ghi con -> rollback + PortResult.Fail("Mst_CardType_Delete", "Check.CardType", strCardType, "FK", "<Bang.Cot>").
+    //   * Xoá dòng Mst_CardType (:6692-6695) và CommitSafety (:6606).
+    //   * Thành công: gate :532-533 SetSuccess + Data = null.
+    //
+    // GAP:
+    //   * Các bảng FK còn lại trong DDL nguồn chưa có ở đích -> thêm kiểm tra khi port các bảng đó:
+    //     - Mst_RankPolicy.CardType (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
+    //     - Mst_BirthPolicyDtl.CardType (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
+    //     - Mst_PromotionProgramSpec.CardType (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
+    //     - Mst_PolicyMoneyToPointServiceDtl.CardType (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
+    //
+    // Bỏ qua có chủ đích (loại Đ):
+    //   * CheckGatewayAuthentication/CheckAuthorize (gate :498-499), Sys_User_CheckAuthorize (:6562-6576):
+    //     hệ thống đích chưa có hệ phân quyền.
+    //   * Ghi RequestLog/ReturnLog (:6543-6550, :6633-6640).
+    // ============================================================================================
+    [HttpPost("delete")]
+    public async Task<IActionResult> Delete([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] MstCardTypeDeleteReq? req)
+    {
+        // 1. Kiểm tra mã rỗng tại gate (Mst_CardTypeController.cs:508, 538):
+        //    Giữ nguyên lỗi chính tả nguồn: ServiceException("invalid_CartType", "invalid_CartType")
+        if (string.IsNullOrWhiteSpace(req?.CardType))
+        {
+            return PortResult.Fail("invalid_CartType", "Check.CardType", req?.CardType);
+        }
+
+        // 2. Mở 1 transaction cho toàn bộ nghiệp vụ (Master.Loyalty.cs:6540 _cf.db.BeginTransaction()).
+        await using var tx = await db.Database.BeginTransactionAsync();
+        try
+        {
+            // 3. Chuẩn hoá mã qua StdParam: Trim, ToUpper, rỗng -> null (Master.Loyalty.cs:6671)
+            string? strCardType = StdParam(req.CardType);
+
+            // 4. CheckDB(CardType, FlagExist "1") (Master.Loyalty.cs:6677-6682 -> Mst_CardType_CheckDB :5264-5325):
+            //    FlagExist "1" + KHÔNG có dòng -> Mst_CardType_CheckDB_CardTypeNotFound.
+            var entity = await db.Set<Mst_CardType>().FirstOrDefaultAsync(x =>
+                EF.Functions.Like((x.CardType ?? "").ToLower(), PortQuery.Equal(strCardType ?? ""), PortQuery.Esc));
+            if (entity == null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_CardType_CheckDB_CardTypeNotFound", "Check.CardType", strCardType);
+            }
+
+            // 5. Giả lập 4 ràng buộc khoá ngoại (FK) đã có ở đích (SQL Server chặn xoá nếu còn bản ghi con):
+            //    Dùng Like + PortQuery.Equal trên CardTypeInit/CardTypeUse của CrdCards và CrdMembers.
+            // 5.1. Crd_Card.CardTypeInit (20221108.z11.Crd_Member.Crd_Card.sql:437)
+            var hasCardInit = await db.CrdCards.AnyAsync(x =>
+                EF.Functions.Like((x.CardTypeInit ?? "").ToLower(), PortQuery.Equal(strCardType!), PortQuery.Esc));
+            if (hasCardInit)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_CardType_Delete", "Check.CardType", strCardType, "FK", "Crd_Card.CardTypeInit");
+            }
+
+            // 5.2. Crd_Card.CardTypeUse (20221108.z11.Crd_Member.Crd_Card.sql:446)
+            var hasCardUse = await db.CrdCards.AnyAsync(x =>
+                EF.Functions.Like((x.CardTypeUse ?? "").ToLower(), PortQuery.Equal(strCardType!), PortQuery.Esc));
+            if (hasCardUse)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_CardType_Delete", "Check.CardType", strCardType, "FK", "Crd_Card.CardTypeUse");
+            }
+
+            // 5.3. Crd_Member.CardTypeInit (20221108.z11.Crd_Member.Crd_Card.sql:463)
+            var hasMemberInit = await db.CrdMembers.AnyAsync(x =>
+                EF.Functions.Like((x.CardTypeInit ?? "").ToLower(), PortQuery.Equal(strCardType!), PortQuery.Esc));
+            if (hasMemberInit)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_CardType_Delete", "Check.CardType", strCardType, "FK", "Crd_Member.CardTypeInit");
+            }
+
+            // 5.4. Crd_Member.CardTypeUse (20221108.z11.Crd_Member.Crd_Card.sql:472)
+            var hasMemberUse = await db.CrdMembers.AnyAsync(x =>
+                EF.Functions.Like((x.CardTypeUse ?? "").ToLower(), PortQuery.Equal(strCardType!), PortQuery.Esc));
+            if (hasMemberUse)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_CardType_Delete", "Check.CardType", strCardType, "FK", "Crd_Member.CardTypeUse");
+            }
+
+            // GAP: Các bảng FK còn lại trong DDL nguồn chưa có ở đích -> thêm kiểm tra khi port các bảng đó:
+            // - Mst_RankPolicy.CardType (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
+            // - Mst_BirthPolicyDtl.CardType (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
+            // - Mst_PromotionProgramSpec.CardType (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
+            // - Mst_PolicyMoneyToPointServiceDtl.CardType (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
+
+            // 6. Xoá dòng Mst_CardType (Master.Loyalty.cs:6692-6695 DeleteX)
+            db.Set<Mst_CardType>().Remove(entity);
+            await db.SaveChangesAsync();
+
+            // 7. Commit (Master.Loyalty.cs:6606 TDALUtils.DBUtils.CommitSafety)
+            await tx.CommitAsync();
+
+            // 8. Thành công: gate Mst_CardTypeController.cs:532-533 SetSuccess + Data = null
             return Ok(new { Success = true, Data = (object?)null });
         }
         catch (Exception)
