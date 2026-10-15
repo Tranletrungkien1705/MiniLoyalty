@@ -10,7 +10,7 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục dòng xe (Mst_CarModel) của dự án nguồn 2022.7.Loyalty (#97, #98, #99, #100, #101).
+// PORT 1:1 — màn danh mục dòng xe (Mst_CarModel) của dự án nguồn 2022.7.Loyalty (#97, #98, #99, #100, #101, #102).
 //
 // Nguồn controller (tầng gate):
 //   Mst_CarModelController.cs:25-105   Search              -> WA_Mst_CarModel_Get
@@ -18,11 +18,13 @@ namespace MiniLoyalty.Controllers.Port;
 //   Mst_CarModelController.cs:217-280  GetByModelCode      -> WA_Mst_CarModel_Get
 //   Mst_CarModelController.cs:329-414  Create              -> WA_Mst_CarModel_Create
 //   Mst_CarModelController.cs:418-485  Update              -> WA_Mst_CarModel_Update
+//   Mst_CarModelController.cs:489-552  Delete              -> WA_Mst_CarModel_Delete (#102)
 //   Mst_CarModelController.cs:284-305  strWhereClause_Mst_CarModel (mệnh đề lọc Search)
 //   Mst_CarModelController.cs:306-325  strWhereClause_Mst_CarModel_By_ModelCode (mệnh đề lọc GetByModelCode)
 // Nguồn API:
 //   MstCarModelController.cs:20-90     WA_Mst_CarModel_Create
 //   MstCarModelController.cs:92-162    WA_Mst_CarModel_Update
+//   MstCarModelController.cs:165-235   WA_Mst_CarModel_Delete
 //   MstCarModelController.cs:238-307   WA_Mst_CarModel_Get
 // Nguồn biz:
 //   Master.Loyalty.cs:1434-1534        WAS_Mst_CarModel_Get
@@ -34,6 +36,9 @@ namespace MiniLoyalty.Controllers.Port;
 //   Master.Loyalty.cs:2251-2336        WAS_Mst_CarModel_Update
 //   Master.Loyalty.cs:2337-2492        Mst_CarModel_Update
 //   Master.Loyalty.cs:2494-2592        Mst_CarModel_UpdateX
+//   Master.Loyalty.cs:2593-2671        WAS_Mst_CarModel_Delete
+//   Master.Loyalty.cs:2672-2808        Mst_CarModel_Delete
+//   Master.Loyalty.cs:2810-2866        Mst_CarModel_DeleteX
 //   Master.Loyalty.cs:1843-1906        Mst_CarModel_CheckDB
 //   Master.Loyalty.cs:28-91            Mst_CarBrand_CheckDB
 //
@@ -54,14 +59,18 @@ namespace MiniLoyalty.Controllers.Port;
 //     Nhánh OrgID (:315-318) trỏ tới cột không tồn tại — mã chết, không port; FlagActive (:319-322) không truyền nên không chạy.
 //     Hàng FlagActive '0' vẫn lấy. Ft_RecordStart = "0", Ft_RecordCount = "1" (:254-255).
 //     Trả Lst_Mst_CarModel[0] hoặc null (:261-264).
+//   * Delete: kiểm tra ModelCode rỗng tại gate -> invalid_ModelCode;
+//     CheckDB(ModelCode, FlagExist "1") -> Mst_CarModel_CheckDB_CarModelNotFound;
+//     GAP FK: Prm_CarRecommendSpec/Prm_CarNewSpec chua port;
+//     xoá dòng -> Success = true, Data = null.
 //
 // Bỏ qua có chủ đích (loại Đ):
-//   - CheckGatewayAuthentication: gate :34, :226; API MstCarModelController.cs:259-264
-//   - CheckAuthorize: gate :35, :227 (hệ thống đích chưa có hệ phân quyền)
+//   - CheckGatewayAuthentication: gate :34, :226, :498; API MstCarModelController.cs:259-264, :187-192
+//   - CheckAuthorize: gate :35, :227, :499 (hệ thống đích chưa có hệ phân quyền)
 //   - Nguồn gọi bằng tài khoản hệ thống viết cứng (tài khoản + mật khẩu viết cứng — KHÔNG chép giá trị),
 //     đích chưa có phân quyền; KHÔNG chép thông tin đăng nhập vào mã
-//   - Ghi RequestLog/ReturnLog: Master.Loyalty.cs:1578-1586, 1676-1684
-//   - Sys_User_CheckAuthorize: Master.Loyalty.cs:1592-1606
+//   - Ghi RequestLog/ReturnLog: Master.Loyalty.cs:1578-1586, 1676-1684, 2708-2715, 2798-2805
+//   - Sys_User_CheckAuthorize: Master.Loyalty.cs:1592-1606, 2727-2741
 // ============================================================================================
 
 /// <summary>Port 1:1 <c>Mst_CarModelSearch</c> — tham số lọc + phân trang của màn (Mst_CarModelController.cs:25, 52-56).</summary>
@@ -106,6 +115,14 @@ public class MstCarModelUpdateReq
     public string? ModelName { get; set; }            // Tên dòng xe — :2538 (StdStr — KHÔNG viết hoa)
     public string? Remark { get; set; }               // Ghi chú — :2539 (StdStr)
     public string? FlagActive { get; set; }           // Cờ hoạt động — :2540 (StdFlag)
+}
+
+/// <summary>
+/// Port 1:1 <c>Delete</c> — body chỉ có ModelCode (Mst_CarModelController.cs:489-552).
+/// </summary>
+public class MstCarModelDeleteReq
+{
+    public string? ModelCode { get; set; }            // Mã dòng xe cần xoá — :489, :513
 }
 
 [ApiController]
@@ -418,6 +435,114 @@ public class Mst_CarModelControllerPort : ControllerBase
 
             // 7. Thành công: gate :471-472 SetSuccess + Data = null.
             return Ok(new { Success = true, Data = (object?)null });
+        }
+        catch (Exception)
+        {
+            await tx.RollbackAsync();
+            throw;
+        }
+    }
+
+    // ============================================================================================
+    // Delete — nguồn Mst_CarModelController.cs:489-552 (gate) -> MstCarModelController.cs:165-235 (API)
+    //   -> Master.Loyalty.cs:2593-2671 (WAS_Mst_CarModel_Delete) -> :2672-2808 (Mst_CarModel_Delete)
+    //   -> :2810-2866 (Mst_CarModel_DeleteX) -> :1843-1906 (Mst_CarModel_CheckDB).
+    //
+    // GIỮ ĐÚNG NGUỒN:
+    //   * Kiểm tra ModelCode rỗng tại gate (Mst_CarModelController.cs:508, 538): ModelCode rỗng -> ném
+    //     ServiceException("invalid_ModelCode", "invalid_ModelCode").
+    //   * Tách phần biz sau bước kiểm rỗng thành DeleteXAsync(modelCode) (1 transaction/lần)
+    //     để hạng mục DeleteMultiple sau này tái sử dụng.
+    //   * Mở 1 transaction cho mỗi lần xóa (Master.Loyalty.cs:2705 _cf.db.BeginTransaction()).
+    //   * Chuẩn hoá mã qua StdParam (:2836): Trim + ToUpper, rỗng -> null.
+    //   * Mst_CarModel_CheckDB(ModelCode, FlagExist "1", "") (:2842-2847 -> :1843-1906):
+    //     FlagExist "1" + không có dòng (hoặc strModelCode rỗng) -> ErridnLoyalty.Mst_CarModel_CheckDB_CarModelNotFound.
+    //   * Ràng buộc khoá ngoại (GAP FK): Trong DDL nguồn, Prm_CarRecommendSpec.ModelCode
+    //     (20221026.CreateDatabase.sql:91, FK_MstCarModel_PrmCRSpec) và Prm_CarNewSpec.ModelCode
+    //     (20221017.z11.UpdDB.30.Promotion.sql:104, FK_MstCarModel_PrmCNSpec) có FK trỏ tới Mst_CarModel.
+    //     CẢ HAI CHƯA CÓ ở đích -> KHÔNG giả lập.
+    //     GAP: khi port Prm_CarRecommendSpec/Prm_CarNewSpec phai chan xoa -> Mst_CarModel_Delete.
+    //   * Xoá dòng Mst_CarModel (Master.Loyalty.cs:2857 dtDB_Mst_CarModel.Rows[0].Delete()) và CommitSafety (:2771).
+    //   * Thành công: gate :532-533 SetSuccess + Data = null.
+    //
+    // Bỏ qua có chủ đích (loại Đ):
+    //   * CheckGatewayAuthentication/CheckAuthorize (gate :498-499), Sys_User_CheckAuthorize (:2727-2741):
+    //     hệ thống đích chưa có hệ phân quyền.
+    //   * Ghi RequestLog/ReturnLog (:2708-2715, :2798-2805).
+    // ============================================================================================
+    [HttpPost("delete")]
+    public async Task<IActionResult> Delete([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] MstCarModelDeleteReq? req)
+    {
+        // 1. Kiểm tra mã rỗng tại gate (Mst_CarModelController.cs:508, 538):
+        //    ModelCode rỗng -> ném ServiceException("invalid_ModelCode", "invalid_ModelCode")
+        if (string.IsNullOrWhiteSpace(req?.ModelCode))
+        {
+            return PortResult.Fail("invalid_ModelCode", "Check.ModelCode", req?.ModelCode);
+        }
+
+        // 2. Thực hiện nghiệp vụ xóa qua DeleteXAsync (1 transaction)
+        var err = await DeleteXAsync(req.ModelCode);
+        if (err != null)
+        {
+            return err;
+        }
+
+        // 3. Thành công: gate Mst_CarModelController.cs:532-533 SetSuccess + Data = null
+        return Ok(new
+        {
+            Success = true,
+            Data = (object?)null
+        });
+    }
+
+    /// <summary>
+    /// Nghiệp vụ xóa 1 dòng xe — 1 transaction riêng biệt.
+    /// Nguồn: WA_Mst_CarModel_Delete (MstCarModelController.cs:165-235) -> WAS_Mst_CarModel_Delete (Master.Loyalty.cs:2593-2671)
+    /// -> Mst_CarModel_Delete (Master.Loyalty.cs:2672-2808) -> Mst_CarModel_DeleteX (Master.Loyalty.cs:2810-2866)
+    /// -> Mst_CarModel_CheckDB (Master.Loyalty.cs:1843-1906).
+    /// Hạng mục DeleteMultiple sau này sẽ dùng lại hàm này cho từng phần tử.
+    /// </summary>
+    private async Task<IActionResult?> DeleteXAsync(string? modelCode)
+    {
+        // 1. Mở 1 transaction cho nghiệp vụ xóa (Master.Loyalty.cs:2705 _cf.db.BeginTransaction()).
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // 2. Chuẩn hoá mã qua StdParam: Trim, ToUpper, rỗng -> null (Master.Loyalty.cs:2836)
+            string? strModelCode = StdParam(modelCode);
+
+            // 3. Mst_CarModel_CheckDB(ModelCode, Flag "1", "") (Master.Loyalty.cs:2842-2847 -> :1843-1906):
+            //    FlagExist "1" + KHÔNG có dòng (hoặc strModelCode rỗng) -> ErridnLoyalty.Mst_CarModel_CheckDB_CarModelNotFound.
+            if (string.IsNullOrEmpty(strModelCode))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_CarModel_CheckDB_CarModelNotFound", "Check.ModelCode", strModelCode);
+            }
+
+            // Tìm dòng bằng Like + PortQuery.Equal (hạ chữ 2 phía, SQL Server collation không phân biệt hoa thường)
+            var entity = await _db.Set<Mst_CarModel>().FirstOrDefaultAsync(x =>
+                EF.Functions.Like((x.ModelCode ?? "").ToLower(), PortQuery.Equal(strModelCode), PortQuery.Esc));
+
+            if (entity == null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_CarModel_CheckDB_CarModelNotFound", "Check.ModelCode", strModelCode);
+            }
+
+            // 4. Ràng buộc khoá ngoại (GAP FK):
+            //    Trong DDL nguồn, Prm_CarRecommendSpec.ModelCode (20221026.CreateDatabase.sql:91, FK_MstCarModel_PrmCRSpec)
+            //    và Prm_CarNewSpec.ModelCode (20221017.z11.UpdDB.30.Promotion.sql:104, FK_MstCarModel_PrmCNSpec) có FK trỏ tới Mst_CarModel.
+            //    Cả hai bảng này CHƯA CÓ ở đích -> KHÔNG giả lập.
+            //    GAP: khi port Prm_CarRecommendSpec/Prm_CarNewSpec phai chan xoa -> Mst_CarModel_Delete.
+
+            // 5. Xoá dòng Mst_CarModel (Master.Loyalty.cs:2857 dtDB_Mst_CarModel.Rows[0].Delete())
+            _db.Set<Mst_CarModel>().Remove(entity);
+            await _db.SaveChangesAsync();
+
+            // 6. Commit transaction (Master.Loyalty.cs:2771 TDALUtils.DBUtils.CommitSafety)
+            await tx.CommitAsync();
+
+            return null;
         }
         catch (Exception)
         {
