@@ -5,26 +5,37 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using MiniLoyalty.Data;
 using MiniLoyalty.Models.Port;
 
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 từ dự án nguồn 2022.7.Loyalty — Mst_PromotionProgramController/Search (#205), GetAllActive (#206), GetByPrProgramCode (#207).
+// PORT 1:1 từ dự án nguồn 2022.7.Loyalty — Mst_PromotionProgramController:
+//   - Search (#205)
+//   - GetAllActive (#206)
+//   - GetByPrProgramCode (#207)
+//   - Save (#208) — action GHI upsert xóa-ghi lại trong 1 transaction
 //
 // Nguồn tra cứu (chỉ đọc):
 //   - Gate controller: 13.ClientGate/V10/idn.Loyalty.WebAPI/Controllers/Mst_PromotionProgramController.cs
 //     * Search: :32-113 (KHÔNG có giá trị mặc định cho Ft_PageIndex và Ft_PageSize -> mặc định kiểu int là 0)
 //     * GetAllActive: :114-223 (gọi strWhereClause với FlagActive="1" nhưng hàm lọc chỉ xử lý KeyWord => FlagActive BỊ BỎ QUA, Ft_RecordStart="0", Ft_RecordCount="123456000")
 //     * GetByPrProgramCode: :224-307 (lọc PrProgramCode =, không lọc FlagActive, Ft_RecordStart="0", Ft_RecordCount="1", xin cả 3 bảng)
+//     * Save: :311-402 (body rỗng -> "strJson null" -> Mst_PromotionProgram_Save. Khối Get Seq :345-366 BỊ COMMENT -> PrProgramCode do client gửi.
+//       Gate ép FlagActive = '1' tại :384. Header null -> NullReference -> Mst_PromotionProgram_Save. Thành công Data = null).
 //     * strWhereClause_Mst_PromotionProgram: :718-730 (chỉ lọc KeyWord -> PrProgramCode like '%kw%', OrgID KHÔNG dùng)
 //     * strWhereClause_Mst_PromotionProgram_By_PrProgramCode: :732-743 (lọc PrProgramCode =)
 //   - Service: WA_Mst_PromotionProgram_Get (11.BackEnd/V10/idn.Loyalty.Biz.Web/Controllers/MstPromotionProgramController.cs:22-90)
+//              WA_Mst_PromotionProgram_Save (11.BackEnd/V10/idn.Loyalty.Biz.Web/Controllers/MstPromotionProgramController.cs:93-163)
 //   - Biz LIVE:
 //     * WAS_Mst_PromotionProgram_Get: Master.Loyalty.cs:13997-14119
 //     * Mst_PromotionProgram_Get: Master.Loyalty.cs:14120-14279
-//     * Mst_PromotionProgram_GetX: Master.Loyalty.cs:14280-14543 (SQL draft :14340-14350, summary :14352-14354, filter :14356-14364, header :14390-14412, Dtl :14427-14440, Spec :14451-14464)
+//     * Mst_PromotionProgram_GetX: Master.Loyalty.cs:14280-14543
+//     * WAS_Mst_PromotionProgram_Save: Master.Loyalty.cs:13893-13995 (Lst Dtl/Spec null -> rỗng; FlagIsDelete không gửi -> bIsDelete = false)
+//     * Mst_PromotionProgram_Save: Master.Loyalty.cs:13736-13891 (1 transaction duy nhất, commit :13854, rollback :13862)
+//     * Mst_PromotionProgram_SaveX: Master.Loyalty.cs:13179-13734
 //   - DDL: 11.BackEnd/V10/05.Refs.Biz/Migrate/20221006.QUYNHNTN/20221026.CreateDatabase.sql
 //     * Mst_PromotionProgram: :490-509 (11 cột), PK PrProgramCode tại :506-509.
 //     * Mst_PromotionProgramDtl: :466-484 (10 cột), PK composite (PrProgramCode, CardType) tại :481-484.
@@ -33,27 +44,24 @@ namespace MiniLoyalty.Controllers.Port;
 //       FK PrProgramCode -> Mst_PromotionProgram (:512-519) — chỉ ghi comment.
 //       FK DLCode -> Mst_DealerCP.DLCPCode (:522-528) — chỉ ghi comment.
 //
-// ĐẶC TẢ NGHIỆP VỤ & QUY TẮC PORT:
-//   1. Phân trang: Gate Search(OrgID, KeyWord, Ft_PageIndex, Ft_PageSize) không có giá trị mặc định trong signature.
-//      Khi client gửi {} hoặc thiếu Ft_PageSize, int mặc định 0 -> Ft_PageSize = 0 -> RecordCount = 0 -> DataList rỗng.
-//      PageCount chỉ tính khi DataList không rỗng (gate :88-96); nếu DataList rỗng thì PageCount = 0.
-//      Khi tính PageCount, nếu pageSize == 0 thì fallback về PageSizeConfig (10).
-//   2. Lọc:
-//      - Search: Chỉ lọc KeyWord trên PrProgramCode (like '%kw%'). OrgID gate có nhận nhưng hàm strWhereClause không dùng.
-//      - GetByPrProgramCode (#207): Lọc PrProgramCode = (so khớp bằng, không phân biệt hoa/thường qua PortQuery.Equal).
-//        Không lọc FlagActive (PR03 inactive vẫn lấy). PrProgramCode rỗng -> không truy vấn, Data trả 3 trường null.
-//   3. Tính cột ListDealer (Master.Loyalty.cs:14393-14406):
-//      - FlagAllDL == "0": nối chuỗi các DLCode từ Mst_PromotionProgramSpec theo PrProgramCode phân cách dấu phẩy.
-//        Nguồn dùng STUFF + FOR XML PATH không ORDER BY -> đích sắp DLCode asc để thứ tự xác định; nếu không có Spec -> null.
-//      - FlagAllDL == "1": trả về 'Tất cả'.
-//      - Khác ("0", "1"): trả về chuỗi rỗng ''.
-//   4. Dtl và Spec (#207):
-//      - Dtl: MyIdxSeq + 10 cột DDL, order by LogLUDTimeUTC desc (hòa trùng: sắp phụ theo CardType asc, ghi comment).
-//      - Spec: MyIdxSeq + 8 cột DDL, order by LogLUDTimeUTC desc (hòa trùng: sắp phụ theo DLCode asc, ghi comment).
-//   5. Ability (Master.Loyalty.cs:14337, 14408-14409, 14432-14433, 14456-14457):
-//      Nguồn phân quyền myCache_Mst_PromotionProgram_ViewAbility_Get (System.Mix.cs:1655-1790) dựa trên user đăng nhập:
-//      FlagRoot '1' -> thấy mọi chương trình; user đại lý FlagRoot '0' -> chỉ thấy chương trình có Spec.DLCode = đại lý hoặc FlagAllDL='1'.
-//      Hệ thống đích chưa có session user / phân quyền -> coi như Root (thấy toàn bộ), ghi GAP.
+// ĐẶC TẢ NGHIỆP VỤ & QUY TẮC PORT SAVE (#208):
+//   1. Không sinh seq: Khối Get Seq (gate :345-366) BỊ COMMENT ở nguồn -> PrProgramCode do client gửi lên.
+//      Chuẩn hoá bằng StdParam (Trim().ToUpperInvariant(), rỗng -> null). Thiếu hoặc rỗng -> Mst_PromotionProgram_Save.
+//   2. Gate ép FlagActive '1' (gate :384). Header null gây NullReferenceException -> Mst_PromotionProgram_Save.
+//      CheckDB (:13245-13276) so sánh PrProgramCode với "1" là mã vô nghĩa / dead code, bỏ qua.
+//      PrProgramName rỗng -> Mst_PromotionProgram_SaveX_InvalidPrProgramName (:13285-13295).
+//      Nhánh kiểm EffDateStart (:13300-13330) chỉ chạy khi xóa (bIsDelete = true) -> không chạy ở Save.
+//      EffDateStart / EffDateEnd null hoặc sai định dạng date -> Mst_PromotionProgram_Save.
+//   3. Dtl: Qty, Remark, Unit giữ nguyên chế độ ""; CardType chuẩn hoá bằng StdParam; FlagActive StdFlag (thiếu -> '0').
+//      DDL Mst_PromotionProgramDtl khai FK CardType sai bảng (REFERENCES Mst_CardTypeDtl) — GAP, không kiểm tra CardType tồn tại.
+//      Trùng CardType trong danh sách Dtl -> vi phạm PK composite -> Mst_PromotionProgram_Save.
+//   4. Spec: DLCode chuẩn hoá bằng StdParam; Remark giữ nguyên chế độ ""; FlagActive gán cứng TConst.PRMCRStatus.Pending = "PENDING" (:13516).
+//      FK DLCode -> Mst_DealerCP: giả lập kiểm tra tồn tại DLCode trong Mst_DealerCP. Không có -> Mst_PromotionProgram_Save.
+//      Trùng DLCode trong danh sách Spec -> vi phạm PK composite -> Mst_PromotionProgram_Save.
+//   5. Upsert xóa - ghi lại trong 1 transaction (:13562-13706): Xóa Spec cũ, Dtl cũ, Header cũ của cùng PrProgramCode rồi insert mới.
+//      Lỗi bất kỳ -> rollback + PortResult.Fail("Mst_PromotionProgram_Save", ...). Thành công Data = null (:389).
+//   6. GAP: OrgID/NetworkID/LogLUBy từ session user UI (đích: NetworkID lấy từ IConfiguration["Biz_NetworkID"] ?? "1001",
+//      OrgID lấy từ IConfiguration["Biz_OrgID"], LogLUBy = "port"); FK CardType Dtl; phân quyền ability/gate; RequestLog/ReturnLog.
 // ============================================================================================
 
 /// <summary>
@@ -74,16 +82,56 @@ public class MstPromotionProgramGetByPrProgramCodeReq
     public string? PrProgramCode { get; set; }
 }
 
+/// <summary>
+/// Port 1:1 <c>Save</c> request — body nhận Mst_PromotionProgram, Lst_Mst_PromotionProgramDtl, Lst_Mst_PromotionProgramSpec (gate :319-322, #208).
+/// </summary>
+public class MstPromotionProgramSaveReq
+{
+    public MstPromotionProgramSaveHeaderReq? Mst_PromotionProgram { get; set; }
+    public List<MstPromotionProgramSaveDtlReq>? Lst_Mst_PromotionProgramDtl { get; set; }
+    public List<MstPromotionProgramSaveSpecReq>? Lst_Mst_PromotionProgramSpec { get; set; }
+}
+
+public class MstPromotionProgramSaveHeaderReq
+{
+    public string? PrProgramCode { get; set; }
+    public string? PrProgramName { get; set; }
+    public string? EffDateStart { get; set; }
+    public string? EffDateEnd { get; set; }
+    public string? Remark { get; set; }
+    public string? FlagAllDL { get; set; }
+    public string? FlagActive { get; set; }
+}
+
+public class MstPromotionProgramSaveDtlReq
+{
+    public string? CardType { get; set; }
+    [System.Text.Json.Serialization.JsonNumberHandling(System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString)]
+    public double? Qty { get; set; }
+    public string? Unit { get; set; }
+    public string? FlagActive { get; set; }
+    public string? Remark { get; set; }
+}
+
+public class MstPromotionProgramSaveSpecReq
+{
+    public string? DLCode { get; set; }
+    public string? Remark { get; set; }
+    public string? FlagActive { get; set; }
+}
+
 [ApiController]
 [Route("api/mst_promotionprogram")]
 [Produces("application/json")]
 public class Mst_PromotionProgramControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly IConfiguration _config;
 
-    public Mst_PromotionProgramControllerPort(AppDbContext db)
+    public Mst_PromotionProgramControllerPort(AppDbContext db, IConfiguration config)
     {
         _db = db;
+        _config = config;
     }
 
     /// <summary>
@@ -186,6 +234,291 @@ public class Mst_PromotionProgramControllerPort : ControllerBase
                 Lst_Mst_PromotionProgramSpec = lst_Mst_PromotionProgramSpec
             }
         });
+    }
+
+    /// <summary>
+    /// Port 1:1 <c>Mst_PromotionProgramController.Save</c> (nguồn gate Mst_PromotionProgramController.cs:311-402, #208).
+    /// Chuỗi gọi: gate Save -> API WA_Mst_PromotionProgram_Save (MstPromotionProgramController.cs:93-163)
+    /// -> BIZ WAS_Mst_PromotionProgram_Save (Master.Loyalty.cs:13893-13995)
+    /// -> BIZ Mst_PromotionProgram_Save (Master.Loyalty.cs:13736-13891)
+    /// -> BIZ Mst_PromotionProgram_SaveX (Master.Loyalty.cs:13179-13734).
+    ///
+    /// ĐẶC TẢ NGHIỆP VỤ & QUY TẮC PORT:
+    /// 1. Không seq: Khối Get Seq (gate :345-366) BỊ COMMENT ở nguồn -> PrProgramCode do client gửi lên.
+    ///    Chuẩn hoá bằng StdParam (Trim().ToUpperInvariant(), rỗng -> null). Thiếu hoặc rỗng -> Mst_PromotionProgram_Save.
+    /// 2. Header:
+    ///    - Gate ép FlagActive = '1' (Mst_PromotionProgramController.cs:384). Nếu header null -> NullReferenceException -> Mst_PromotionProgram_Save.
+    ///    - PrProgramName chuẩn hoá bằng StdStr (Trim(), rỗng -> null). Nếu rỗng -> Mst_PromotionProgram_SaveX_InvalidPrProgramName (:13285-13295).
+    ///    - EffDateStart, EffDateEnd: MyDateTime NOT NULL. Parse thất bại hoặc thiếu -> Mst_PromotionProgram_Save (:13232-13233, insert :13602-13603).
+    ///    - FlagAllDL: StdFlag (đúng '1' -> '1', khác/thiếu -> '0').
+    ///    - Remark: StdStr.
+    ///    - CheckDB (:13245-13276): Đoạn kiểm dtDB_Mst_PromotionProgram so sánh PrProgramCode với "1" là mã vô nghĩa / dead code, bỏ qua.
+    ///    - Nhánh kiểm EffDateStart (:13300-13330) chỉ chạy khi xóa (bIsDelete = true) -> KHÔNG chạy ở Save.
+    /// 3. Dtl (Master.Loyalty.cs:13407-13431):
+    ///    - Lst null -> danh sách rỗng (:13928-13933).
+    ///    - CardType: StdParam.
+    ///    - Qty, Remark, Unit: giữ nguyên chế độ "" (Remark KHÔNG trim).
+    ///    - FlagActive: StdFlag (đúng '1' -> '1', khác/thiếu -> '0').
+    ///    - GAP CardType FK: DDL Mst_PromotionProgramDtl khai FK CardType sai bảng (REFERENCES Mst_CardTypeDtl thay vì Mst_CardType)
+    ///      -> nguồn không kiểm tra CardType tồn tại trong danh mục thẻ, bỏ qua FK check.
+    ///    - Trùng CardType trong Dtl -> vi phạm PK composite (PrProgramCode, CardType) -> Mst_PromotionProgram_Save.
+    /// 4. Spec (Master.Loyalty.cs:13493-13518):
+    ///    - Lst null -> danh sách rỗng (:13934-13939).
+    ///    - DLCode: StdParam.
+    ///    - Remark: giữ nguyên chế độ "" (Remark KHÔNG trim).
+    ///    - Spec PENDING: FlagActive gán cứng TConst.PRMCRStatus.Pending = "PENDING" (:13516, Const.Main.BE.cs:653).
+    ///    - FK DLCode -> Mst_DealerCP (DDL FK_MstDealerCp_Mst_ProPrSpec): Giả lập kiểm tra tồn tại DLCode trong Mst_DealerCP.
+    ///      Không tồn tại -> Mst_PromotionProgram_Save.
+    ///    - Trùng DLCode trong Spec -> vi phạm PK composite (DLCode, PrProgramCode) -> Mst_PromotionProgram_Save.
+    /// 5. Upsert xóa - ghi lại trong 1 transaction (Master.Loyalty.cs:13562-13706):
+    ///    - Xóa Spec cũ, Dtl cũ, Header cũ có cùng PrProgramCode (so khớp không phân biệt hoa/thường: Like + PortQuery.Equal).
+    ///    - Insert Header mới, Dtl mới, Spec mới.
+    ///    - Lỗi bất kỳ -> rollback toàn bộ + PortResult.Fail("Mst_PromotionProgram_Save", ...).
+    ///    - Thành công -> Data = null (gate :389).
+    /// 6. GAP:
+    ///    - GAP OrgID: OrgID và NetworkID nguồn lấy từ session user UI / context; hệ thống đích lấy NetworkID từ IConfiguration["Biz_NetworkID"] ?? "1001",
+    ///      OrgID từ IConfiguration["Biz_OrgID"], LogLUBy = "port".
+    ///    - GAP CardType FK: DDL khai sai bảng.
+    ///    - Phân quyền gate (CheckGatewayAuthentication, CheckAuthorize), ability và RequestLog/ReturnLog.
+    /// </summary>
+    [HttpPost("save")]
+    public async Task<IActionResult> Save(
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] MstPromotionProgramSaveReq? req)
+    {
+        // 0. Body rỗng / null: gate :320-327 ném ServiceException("strJson null") -> mã mặc định Mst_PromotionProgram_Save.
+        if (req == null)
+        {
+            return PortResult.Fail("Mst_PromotionProgram_Save", "Check.strJson", null);
+        }
+
+        // Header null (ví dụ `{}`): gate :384 truy cập objRQ_Mst_PromotionProgram.Mst_PromotionProgram.FlagActive = '1'
+        // ném NullReferenceException -> mã mặc định Mst_PromotionProgram_Save.
+        if (req.Mst_PromotionProgram == null)
+        {
+            return PortResult.Fail("Mst_PromotionProgram_Save", "Check.Mst_PromotionProgram", null);
+        }
+
+        var header = req.Mst_PromotionProgram;
+
+        // Chuẩn hoá input header (Master.Loyalty.cs:13230-13236):
+        var strPrProgramCode = StdParam(header.PrProgramCode);
+        var strPrProgramName = StdStr(header.PrProgramName);
+        var strRemark = StdStr(header.Remark);
+        var strFlagAllDL = StdFlag(header.FlagAllDL);
+        // Gate ép FlagActive = '1' tại Mst_PromotionProgramController.cs:384, sau đó StdFlag('1') = '1'
+        const string strFlagActive = "1";
+
+        // CheckDB (:13245-13276): Đoạn kiểm dtDB_Mst_PromotionProgram so sánh PrProgramCode với "1" là mã vô nghĩa / dead code, bỏ qua.
+
+        // Kiểm tra PrProgramName (Master.Loyalty.cs:13285-13295): rỗng -> Mst_PromotionProgram_SaveX_InvalidPrProgramName
+        if (string.IsNullOrEmpty(strPrProgramName))
+        {
+            return PortResult.Fail("Mst_PromotionProgram_SaveX_InvalidPrProgramName", "Check.PrProgramName", strPrProgramName);
+        }
+
+        // Nhánh kiểm EffDateStart (:13300-13330) chỉ chạy khi xóa (bIsDelete = true) -> KHÔNG chạy ở Save.
+
+        // Chuẩn hoá và kiểm tra Dtl (Master.Loyalty.cs:13407-13431):
+        var dtlInputList = req.Lst_Mst_PromotionProgramDtl ?? new List<MstPromotionProgramSaveDtlReq>();
+        var newDtls = new List<Mst_PromotionProgramDtl>();
+        var seenCardTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        var networkId = _config["Biz_NetworkID"] ?? "1001";
+        var orgId = _config["Biz_OrgID"];
+        var now = DateTime.UtcNow;
+
+        foreach (var item in dtlInputList)
+        {
+            var cardType = StdParam(item.CardType);
+            if (string.IsNullOrEmpty(cardType))
+            {
+                // CardType là PK composite NOT NULL -> lỗi Mst_PromotionProgram_Save
+                return PortResult.Fail("Mst_PromotionProgram_Save", "Check.CardType", item.CardType);
+            }
+
+            // Kiểm tra trùng CardType trong danh sách Dtl -> vi phạm PK composite -> Mst_PromotionProgram_Save
+            if (!seenCardTypes.Add(cardType))
+            {
+                return PortResult.Fail("Mst_PromotionProgram_Save", "Check.CardType", cardType);
+            }
+
+            // GAP: KHÔNG kiểm CardType trong Mst_CardType vì DDL khai sai bảng (REFERENCES Mst_CardTypeDtl)
+            // Qty, Remark, Unit giữ nguyên chế độ "" (Remark KHÔNG trim)
+            // FlagActive chuẩn hoá bằng StdFlag (thiếu hoặc khác '1' -> '0')
+            newDtls.Add(new Mst_PromotionProgramDtl
+            {
+                PrProgramCode = strPrProgramCode ?? "",
+                CardType = cardType,
+                NetworkID = networkId,
+                OrgID = orgId,
+                Qty = item.Qty,
+                Unit = item.Unit, // Giữ nguyên không trim
+                FlagActive = StdFlag(item.FlagActive),
+                Remark = item.Remark, // Giữ nguyên không trim
+                LogLUDTimeUTC = now,
+                LogLUBy = "port"
+            });
+        }
+
+        // Chuẩn hoá và kiểm tra Spec (Master.Loyalty.cs:13493-13518):
+        var specInputList = req.Lst_Mst_PromotionProgramSpec ?? new List<MstPromotionProgramSaveSpecReq>();
+        var newSpecs = new List<Mst_PromotionProgramSpec>();
+        var seenDLCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var item in specInputList)
+        {
+            var dlCode = StdParam(item.DLCode);
+            if (string.IsNullOrEmpty(dlCode))
+            {
+                // DLCode là PK composite NOT NULL -> lỗi Mst_PromotionProgram_Save
+                return PortResult.Fail("Mst_PromotionProgram_Save", "Check.DLCode", item.DLCode);
+            }
+
+            // Kiểm tra trùng DLCode trong danh sách Spec -> vi phạm PK composite -> Mst_PromotionProgram_Save
+            if (!seenDLCodes.Add(dlCode))
+            {
+                return PortResult.Fail("Mst_PromotionProgram_Save", "Check.DLCode", dlCode);
+            }
+
+            // FK DLCode -> Mst_DealerCP (DDL FK_MstDealerCp_Mst_ProPrSpec):
+            // Giả lập kiểm tra tồn tại DLCode trong Mst_DealerCP. Không tồn tại -> Mst_PromotionProgram_Save
+            var dlCodeParam = PortQuery.Equal(dlCode);
+            var dealerExists = await _db.Set<Mst_DealerCP>().AsNoTracking()
+                .AnyAsync(x => EF.Functions.Like((x.DLCPCode ?? "").ToLower(), dlCodeParam, PortQuery.Esc));
+            if (!dealerExists)
+            {
+                return PortResult.Fail("Mst_PromotionProgram_Save", "Check.DLCode", dlCode);
+            }
+
+            // Remark giữ nguyên chế độ "" (Remark KHÔNG trim)
+            // Spec PENDING: FlagActive gán cứng TConst.PRMCRStatus.Pending = "PENDING" (Master.Loyalty.cs:13516, Const.Main.BE.cs:653)
+            newSpecs.Add(new Mst_PromotionProgramSpec
+            {
+                DLCode = dlCode,
+                PrProgramCode = strPrProgramCode ?? "",
+                NetworkID = networkId,
+                OrgID = orgId,
+                FlagActive = "PENDING",
+                Remark = item.Remark, // Giữ nguyên không trim
+                LogLUDTimeUTC = now,
+                LogLUBy = "port"
+            });
+        }
+
+        // Kiểm tra PrProgramCode (cột NOT NULL / PK):
+        if (string.IsNullOrEmpty(strPrProgramCode))
+        {
+            return PortResult.Fail("Mst_PromotionProgram_Save", "Check.PrProgramCode", header.PrProgramCode);
+        }
+
+        // Kiểm tra EffDateStart và EffDateEnd (cột MyDateTime NOT NULL trong DB):
+        if (!TryParseEffDate(header.EffDateStart, out var effDateStartUtc))
+        {
+            return PortResult.Fail("Mst_PromotionProgram_Save", "Check.EffDateStart", header.EffDateStart);
+        }
+        if (!TryParseEffDate(header.EffDateEnd, out var effDateEndUtc))
+        {
+            return PortResult.Fail("Mst_PromotionProgram_Save", "Check.EffDateEnd", header.EffDateEnd);
+        }
+
+        // Cập nhật lại PrProgramCode cho các dòng Dtl và Spec sau khi đã validate PrProgramCode không null
+        foreach (var d in newDtls) d.PrProgramCode = strPrProgramCode;
+        foreach (var s in newSpecs) s.PrProgramCode = strPrProgramCode;
+
+        // Upsert xoá - ghi lại trong 1 transaction (Master.Loyalty.cs:13562-13706):
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            var codeParam = PortQuery.Equal(strPrProgramCode);
+
+            // 1. Xoá Spec cũ của cùng PrProgramCode (Master.Loyalty.cs:13563-13569)
+            var oldSpecs = await _db.Set<Mst_PromotionProgramSpec>()
+                .Where(s => EF.Functions.Like((s.PrProgramCode ?? "").ToLower(), codeParam, PortQuery.Esc))
+                .ToListAsync();
+            if (oldSpecs.Count > 0)
+            {
+                _db.Set<Mst_PromotionProgramSpec>().RemoveRange(oldSpecs);
+            }
+
+            // 2. Xoá Dtl cũ của cùng PrProgramCode (Master.Loyalty.cs:13570-13576)
+            var oldDtls = await _db.Set<Mst_PromotionProgramDtl>()
+                .Where(d => EF.Functions.Like((d.PrProgramCode ?? "").ToLower(), codeParam, PortQuery.Esc))
+                .ToListAsync();
+            if (oldDtls.Count > 0)
+            {
+                _db.Set<Mst_PromotionProgramDtl>().RemoveRange(oldDtls);
+            }
+
+            // 3. Xoá Header cũ của cùng PrProgramCode (Master.Loyalty.cs:13578-13584)
+            var oldHeader = await _db.Set<Mst_PromotionProgram>()
+                .Where(h => EF.Functions.Like((h.PrProgramCode ?? "").ToLower(), codeParam, PortQuery.Esc))
+                .ToListAsync();
+            if (oldHeader.Count > 0)
+            {
+                _db.Set<Mst_PromotionProgram>().RemoveRange(oldHeader);
+            }
+
+            await _db.SaveChangesAsync();
+
+            // 4. Insert Header mới (Master.Loyalty.cs:13596-13623)
+            var newHeader = new Mst_PromotionProgram
+            {
+                PrProgramCode = strPrProgramCode,
+                NetworkID = networkId,
+                OrgID = orgId,
+                PrProgramName = strPrProgramName,
+                EffDateStart = effDateStartUtc,
+                EffDateEnd = effDateEndUtc,
+                FlagAllDL = strFlagAllDL,
+                FlagActive = strFlagActive, // Luôn '1' do gate ép
+                Remark = strRemark,
+                LogLUDTimeUTC = now,
+                LogLUBy = "port"
+            };
+            _db.Set<Mst_PromotionProgram>().Add(newHeader);
+
+            // 5. Insert Dtl mới (Master.Loyalty.cs:13629-13654)
+            if (newDtls.Count > 0)
+            {
+                _db.Set<Mst_PromotionProgramDtl>().AddRange(newDtls);
+            }
+
+            // 6. Insert Spec mới (Master.Loyalty.cs:13659-13680)
+            if (newSpecs.Count > 0)
+            {
+                _db.Set<Mst_PromotionProgramSpec>().AddRange(newSpecs);
+            }
+
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return PortResult.Fail("Mst_PromotionProgram_Save", "Exception", ex.Message);
+        }
+    }
+
+    private static string? StdParam(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim().ToUpperInvariant();
+    private static string? StdStr(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+    private static string StdFlag(string? s) => s?.Trim() == "1" ? "1" : "0";
+
+    private static bool TryParseEffDate(string? s, out DateTime dt)
+    {
+        dt = default;
+        if (string.IsNullOrWhiteSpace(s)) return false;
+        if (DateTime.TryParse(s, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out dt)
+            || DateTime.TryParse(s, out dt))
+        {
+            if (dt >= new DateTime(1900, 1, 1) && dt <= new DateTime(2100, 1, 1, 23, 59, 59))
+            {
+                dt = DateTime.SpecifyKind(dt, DateTimeKind.Utc);
+                return true;
+            }
+        }
+        return false;
     }
 
     /// <summary>
