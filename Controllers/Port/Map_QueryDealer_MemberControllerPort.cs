@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
@@ -16,6 +18,7 @@ namespace MiniLoyalty.Controllers.Port;
 // PORT 1:1 — màn truy vấn hội viên theo đại lý (Map_QueryDealer_Member) của dự án nguồn 2022.7.Loyalty.
 //   - Hạng mục #66: Search -> WA_Map_QueryDealer_Member_Get
 //   - Hạng mục #67: SearchForRePort -> WA_Rpt_Map_QueryDealer_Member
+//   - Hạng mục #69: ExportExcel -> WA_Rpt_Map_QueryDealer_Member (xuất Excel báo cáo)
 //
 // Nguồn Search (#66):
 //   Gate: Map_QueryDealer_MemberController.cs:31-104 Search -> WA_Map_QueryDealer_Member_Get
@@ -28,25 +31,35 @@ namespace MiniLoyalty.Controllers.Port;
 //   API:  ReportController.cs:865 WA_Rpt_Map_QueryDealer_Member
 //   Biz:  Report.cs:11398-11900 -> Rpt_Map_QueryDealer_MemberX (:11645-11900)
 //
-// GIỮ ĐÚNG NGUỒN VÀ ĐIỂM KHÁC BIỆT #67 VS #66:
-//   * Endpoint: POST /api/map_querydealer_member/searchforreport (gate Map_QueryDealer_MemberController.cs:106).
-//   * Tham số gate #67: 7 tham số QueryDateFrom, QueryDateTo, MemberNo, PhoneNo, DLCPCode, CarNo, VIN (:106-107).
+// Nguồn ExportExcel (#69):
+//   Gate: Map_QueryDealer_MemberController.cs:333-422 ExportExcel -> WA_Rpt_Map_QueryDealer_Member
+//   Từ điển cột: Map_QueryDealer_MemberController.cs:426-442 GetImportDicColums (11 cột)
+//   API:  ReportController.cs:865 WA_Rpt_Map_QueryDealer_Member
+//   Biz:  Report.cs:11398-11900 -> Rpt_Map_QueryDealer_MemberX (:11645-11900)
+//
+// GIỮ ĐÚNG NGUỒN VÀ ĐIỂM KHÁC BIỆT #67 / #69 VS #66:
+//   * Endpoint #67: POST /api/map_querydealer_member/searchforreport (gate Map_QueryDealer_MemberController.cs:106).
+//   * Endpoint #69: POST /api/map_querydealer_member/exportexcel (gate Map_QueryDealer_MemberController.cs:333).
+//   * Tham số gate #67 và #69: 7 tham số QueryDateFrom, QueryDateTo, MemberNo, PhoneNo, DLCPCode, CarNo, VIN (:106-107, :333-334).
 //     - Khác #66: KHÔNG có CardNo, IDCardNo, EffDateStartFrom/To, PointRefFrom/To, FlagPoint.
-//     - QueryDateFrom / QueryDateTo: Ở #66 là nhánh chết; ở #67 ĐƯỢC TRUYỀN VÀO hàm lọc (:149-157)
+//     - QueryDateFrom / QueryDateTo: Ở #66 là nhánh chết; ở #67 và #69 ĐƯỢC TRUYỀN VÀO hàm lọc (:149-157)
 //       tạo điều kiện Map_QueryDealer_Member.QueryDate >= và QueryDate <=.
 //     - Parse ngày theo InvariantCulture; sai định dạng ngày -> SQL lỗi chuyển kiểu -> trả HTTP 400 ErridnLoyalty.Rpt_Map_QueryDealer_Member (Report.cs:11526).
 //   * Bước 1: Draft (#tbl_Map_QueryDealer_Member_Filter_Draft Report.cs:11708-11726) tương tự #66, dùng chung logic.
 //   * Bước 2: Final (#tbl_Map_QueryDealer_Member_Final Report.cs:11759-11788):
+//     - Tách phần tính dòng Final thành hàm private GetReportRowsAsync dùng chung cho SearchForRePort (#67) và ExportExcel (#69).
 //     - Join: t, Map_QueryDealer_Member mqdm, Crd_Member cm, left join Mst_DealerCP mdcp, left join Mst_Province mp (:11775-11783).
 //     - ĐIỀU KIỆN QUAN TRỌNG (:11785): where mqdm.DLCPCode <> cm.DLCodeRegis (CHỈ giữ lượt tra cứu của đại lý KHÁC đại lý mở thẻ).
 //     - Cột trả về: t.MyIdxSeq, mqdm.*, mdcp.DLCPName, cm.VIN, cm.CarNo, cm.PhoneNo, cm.CardTypeUse, cm.MemberName,
 //       cm.ModelCode, cm.DLCodeRegis, mp.ProvinceName, cm.ModelName, cm.ModelCode + ':' + cm.ModelName ModelCodeName (:11760-11772).
 //     - ModelCodeName (:11772): Toán tử `+` trong SQL trả về null nếu ModelCode HOẶC ModelName null.
 //     - Sắp xếp: order by mqdm.LogLUDTimeUTC desc (:11787).
-//   * CountRow (:11791): select Count(0) MyCount from #tbl_Map_QueryDealer_Member_Final -> đếm SAU KHI lọc <>.
-//   * Lst_Rpt_Map_QueryDealer_Member (:11809-11823): count(distinct MemberNo) trong bảng Final
-//     -> trả về mảng [{ CountMember = n }] LUÔN CÓ 1 phần tử kể cả khi n = 0.
-//   * Output gate (:177-182): Data = new { Lst_Map_QueryDealer_Member (null nếu rỗng), Lst_Rpt_Map_QueryDealer_Member, CountRow = MyCount }.
+//   * Output SearchForRePort (#67) (gate :177-182): Data = new { Lst_Map_QueryDealer_Member (null nếu rỗng), Lst_Rpt_Map_QueryDealer_Member, CountRow = MyCount }.
+//   * Output ExportExcel (#69) (gate :391-409):
+//     - Nếu danh sách rỗng -> throw ServiceException("Không có dữ liệu") (:406-409) -> 400 PortResult.Fail("Map_QueryDealer_Member_ExportExcel", "Message", "Không có dữ liệu").
+//     - Từ điển 11 cột GetImportDicColums() (:426-442) đúng thứ tự: MemberNo, QueryDate, DLCPCode, DLCPName, MemberName, PhoneNo, CardTypeUse, ProvinceName, CarNo, ModelCodeName, DLCodeRegis.
+//     - File prefix & tên sheet "Map_QueryDealer_Member" (:397-398).
+//     - Trả Data = { Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath } (:399-403).
 //   * Ability (Report.cs:11682-11694): Lấy DLCPCode của user đăng nhập; nếu khác rỗng và khác "HTV" thì lọc mqdm.DLCPCode = <đại lý user>.
 //     Đích CHƯA có Sys_User / session user -> coi như HTV (không lọc đại lý).
 //     GAP: khi có Sys_User / session user phải giới hạn theo đại lý của user.
@@ -87,16 +100,61 @@ public class MapQueryDealerMemberSearchForReportReq
     public string? VIN { get; set; }                // :107 — Crd_Member.VIN =
 }
 
+/// <summary>
+/// Port 1:1 tham số request của Gate ExportExcel (Map_QueryDealer_MemberController.cs:333-334).
+/// Đúng 7 tham số nhận từ client: QueryDateFrom, QueryDateTo, MemberNo, PhoneNo, DLCPCode, CarNo, VIN.
+/// </summary>
+public class MapQueryDealerMemberExportExcelReq
+{
+    public string? QueryDateFrom { get; set; }      // :333 — Map_QueryDealer_Member.QueryDate >=
+    public string? QueryDateTo { get; set; }        // :333 — Map_QueryDealer_Member.QueryDate <=
+    public string? MemberNo { get; set; }           // :333 — Map_QueryDealer_Member.MemberNo =
+    public string? PhoneNo { get; set; }            // :333 — Crd_Member.PhoneNo =
+    public string? DLCPCode { get; set; }           // :334 — Tách dấu phẩy -> Map_QueryDealer_Member.DLCPCode IN
+    public string? CarNo { get; set; }              // :334 — Crd_Member.CarNo =
+    public string? VIN { get; set; }                // :334 — Crd_Member.VIN =
+}
+
+/// <summary>
+/// Dòng kết quả báo cáo dùng chung cho SearchForRePort (#67) và ExportExcel (#69)
+/// tương ứng với các cột của bảng tạm #tbl_Map_QueryDealer_Member_Final (Report.cs:11760-11772).
+/// </summary>
+public class MapQueryDealerMemberReportRow
+{
+    public long MyIdxSeq { get; set; }              // :11760 MyIdxSeq
+    public string DLCPCode { get; set; } = "";      // :11761 mqdm.* (DLCPCode)
+    public string MemberNo { get; set; } = "";      // :11761 MemberNo
+    public string NetworkID { get; set; } = "";     // :11761 NetworkID
+    public DateTime QueryDate { get; set; }         // :11761 QueryDate
+    public string? Remark { get; set; }             // :11761 Remark
+    public string? FlagActive { get; set; }         // :11761 FlagActive
+    public DateTime? LogLUDTimeUTC { get; set; }    // :11761 LogLUDTimeUTC
+    public string? LogLUBy { get; set; }            // :11761 LogLUBy
+    public string? DLCPName { get; set; }           // :11762 mdcp.DLCPName
+    public string? VIN { get; set; }                // :11763 cm.VIN
+    public string? CarNo { get; set; }              // :11764 cm.CarNo
+    public string? PhoneNo { get; set; }            // :11765 cm.PhoneNo
+    public string? CardTypeUse { get; set; }        // :11766 cm.CardTypeUse
+    public string? MemberName { get; set; }         // :11767 cm.MemberName
+    public string? ModelCode { get; set; }          // :11768 cm.ModelCode
+    public string? DLCodeRegis { get; set; }        // :11769 cm.DLCodeRegis
+    public string? ProvinceName { get; set; }       // :11770 mp.ProvinceName
+    public string? ModelName { get; set; }          // :11771 cm.ModelName
+    public string? ModelCodeName { get; set; }      // :11772 cm.ModelCode + ':' + cm.ModelName
+}
+
 [ApiController]
 [Route("api/map_querydealer_member")]
 [Produces("application/json")]
 public class Map_QueryDealer_MemberControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly IWebHostEnvironment _env;
 
-    public Map_QueryDealer_MemberControllerPort(AppDbContext db)
+    public Map_QueryDealer_MemberControllerPort(AppDbContext db, IWebHostEnvironment env)
     {
         _db = db;
+        _env = env;
     }
 
     /// <summary>
@@ -130,43 +188,180 @@ public class Map_QueryDealer_MemberControllerPort : ControllerBase
     {
         var r = req ?? new MapQueryDealerMemberSearchForReportReq();
 
+        var (error, rows, countMember) = await GetReportRowsAsync(
+            r.QueryDateFrom,
+            r.QueryDateTo,
+            r.MemberNo,
+            r.PhoneNo,
+            r.DLCPCode,
+            r.CarNo,
+            r.VIN);
+
+        if (error != null)
+        {
+            return error;
+        }
+
+        // Summary CountRow (Report.cs:11791): select Count(0) MyCount from #tbl_Map_QueryDealer_Member_Final
+        // Đếm số dòng của bảng Final SAU KHI lọc <> (CountRow sau lọc)
+        int countRow = rows.Count;
+
+        // Rpt CountMember (Report.cs:11809-11823): count(distinct MemberNo) trong bảng Final
+        // Luôn trả về mảng 1 phần tử [{ CountMember = n }] kể cả khi n = 0
+        var lstRpt = new List<object> { new { CountMember = countMember } };
+
+        // Gate Map_QueryDealer_MemberController.cs:166-182:
+        // Lst_Map_QueryDealer_Member = null nếu rỗng (:166-169)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Lst_Map_QueryDealer_Member = rows.Count > 0 ? rows : null,
+                Lst_Rpt_Map_QueryDealer_Member = lstRpt,
+                CountRow = countRow
+            }
+        });
+    }
+
+    /// <summary>
+    /// Port 1:1 Map_QueryDealer_MemberController.ExportExcel (gate Map_QueryDealer_MemberController.cs:333-422).
+    /// Xuất báo cáo truy vấn hội viên theo đại lý ra file Excel.
+    /// Nguồn gate :333-422, từ điển cột :426-442, biz Report.cs:11645-11900.
+    /// </summary>
+    [HttpPost("exportexcel")]
+    public async Task<IActionResult> ExportExcel([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] MapQueryDealerMemberExportExcelReq? req)
+    {
+        var r = req ?? new MapQueryDealerMemberExportExcelReq();
+
+        // 1. Lấy dữ liệu báo cáo: dùng chung logic với SearchForRePort (#67)
+        // Tham số + hàm lọc + service Y HỆT SearchForRePort (gate :333-334): QueryDateFrom, QueryDateTo, MemberNo, PhoneNo, DLCPCode, CarNo, VIN
+        var (error, rows, _) = await GetReportRowsAsync(
+            r.QueryDateFrom,
+            r.QueryDateTo,
+            r.MemberNo,
+            r.PhoneNo,
+            r.DLCPCode,
+            r.CarNo,
+            r.VIN);
+
+        if (error != null)
+        {
+            return error;
+        }
+
+        // 2. Kiểm tra danh sách rỗng (gate :391, :406-409):
+        // if (objRT_Map_QueryDealer_Member.Lst_Map_QueryDealer_Member != null && objRT_Map_QueryDealer_Member.Lst_Map_QueryDealer_Member.Count > 0)
+        // else throw new mbiz.core.Exceptions.ServiceException("Không có dữ liệu");
+        // -> PortResult.Fail("Map_QueryDealer_Member_ExportExcel", "Message", "Không có dữ liệu")
+        if (rows == null || rows.Count == 0)
+        {
+            return PortResult.Fail("Map_QueryDealer_Member_ExportExcel", "Message", "Không có dữ liệu");
+        }
+
+        // 3. Tạo thư mục và đường dẫn file Excel xuất: GenExcelExportFilePath (gate :397)
+        var webRoot = _env.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = Path.Combine(_env.ContentRootPath, "wwwroot");
+        }
+
+        // 4. Từ điển 11 cột GetImportDicColums() (gate :395, :426-442) đúng thứ tự:
+        //    MemberNo -> "Mã hội viên", QueryDate -> "Ngày truy vấn", DLCPCode -> "Mã đại lý truy vấn",
+        //    DLCPName -> "Tên đại lý", MemberName -> "Tên hội viên", PhoneNo -> "Điện thoại",
+        //    CardTypeUse -> "Hạng thẻ", ProvinceName -> "Tỉnh/TP", CarNo -> "Biển số xe",
+        //    ModelCodeName -> "Model", DLCodeRegis -> "Đại lý mở thẻ"
+        var dicColNames = GetImportDicColums();
+        var (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Map_QueryDealer_Member");
+
+        // 5. Ghi file Excel: ExcelExport.ExportToExcelFromList(list, dicColNames, filePath, "Map_QueryDealer_Member") (gate :398)
+        PortExcel.ExportToExcelFromList(rows, dicColNames, physicalPath, "Map_QueryDealer_Member");
+
+        // 6. Trả URL tải file (gate :399-403):
+        // objJsonResultEntry.SetSuccess();
+        // objJsonResultEntry.Data = new { Url = string.Format("{0}{1}", GetRequestBaseAddress(), url) };
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Url = $"{PortExcel.GetRequestBaseAddress(Request)}{virtualPath}"
+            }
+        });
+    }
+
+    /// <summary>
+    /// Từ điển 11 cột xuất Excel theo đúng thứ tự của gate Map_QueryDealer_MemberController.cs:426-442.
+    /// </summary>
+    private static Dictionary<string, string> GetImportDicColums()
+    {
+        return new Dictionary<string, string>
+        {
+            { "MemberNo", "Mã hội viên" },          // :430
+            { "QueryDate", "Ngày truy vấn" },       // :431
+            { "DLCPCode", "Mã đại lý truy vấn" },   // :432
+            { "DLCPName", "Tên đại lý" },           // :433
+            { "MemberName", "Tên hội viên" },       // :434
+            { "PhoneNo", "Điện thoại" },            // :435
+            { "CardTypeUse", "Hạng thẻ" },          // :436
+            { "ProvinceName", "Tỉnh/TP" },          // :437
+            { "CarNo", "Biển số xe" },              // :438
+            { "ModelCodeName", "Model" },           // :439
+            { "DLCodeRegis", "Đại lý mở thẻ" }      // :440
+        };
+    }
+
+    /// <summary>
+    /// Thực hiện nghiệp vụ báo cáo dùng chung cho SearchForRePort (#67) và ExportExcel (#69).
+    /// Nguồn SQL: Report.cs:11645-11900 (Rpt_Map_QueryDealer_MemberX).
+    /// Trả về: (IActionResult? Error, List&lt;MapQueryDealerMemberReportRow&gt; Rows, int DistinctMemberCount).
+    /// </summary>
+    private async Task<(IActionResult? Error, List<MapQueryDealerMemberReportRow> Rows, int DistinctMemberCount)> GetReportRowsAsync(
+        string? queryDateFromStr,
+        string? queryDateToStr,
+        string? memberNo,
+        string? phoneNo,
+        string? dlcpCode,
+        string? carNo,
+        string? vin)
+    {
         // Parse QueryDateFrom và QueryDateTo theo InvariantCulture.
         // Nếu sai định dạng ngày -> SQL lỗi chuyển kiểu kẹp trong try/catch -> 400 ErridnLoyalty.Rpt_Map_QueryDealer_Member (Report.cs:11526).
         DateTime? queryDateFrom = null;
-        if (!string.IsNullOrWhiteSpace(r.QueryDateFrom))
+        if (!string.IsNullOrWhiteSpace(queryDateFromStr))
         {
-            if (DateTime.TryParse(r.QueryDateFrom, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dtFrom))
+            if (DateTime.TryParse(queryDateFromStr, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dtFrom))
             {
                 queryDateFrom = DateTime.SpecifyKind(dtFrom, DateTimeKind.Utc);
             }
             else
             {
-                return PortResult.Fail("Rpt_Map_QueryDealer_Member", "Check.QueryDate", r.QueryDateFrom);
+                return (PortResult.Fail("Rpt_Map_QueryDealer_Member", "Check.QueryDate", queryDateFromStr), new List<MapQueryDealerMemberReportRow>(), 0);
             }
         }
 
         DateTime? queryDateTo = null;
-        if (!string.IsNullOrWhiteSpace(r.QueryDateTo))
+        if (!string.IsNullOrWhiteSpace(queryDateToStr))
         {
-            if (DateTime.TryParse(r.QueryDateTo, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dtTo))
+            if (DateTime.TryParse(queryDateToStr, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dtTo))
             {
                 queryDateTo = DateTime.SpecifyKind(dtTo, DateTimeKind.Utc);
             }
             else
             {
-                return PortResult.Fail("Rpt_Map_QueryDealer_Member", "Check.QueryDate", r.QueryDateTo);
+                return (PortResult.Fail("Rpt_Map_QueryDealer_Member", "Check.QueryDate", queryDateToStr), new List<MapQueryDealerMemberReportRow>(), 0);
             }
         }
 
-        // Gate: RecordStart = "0", RecordCount = "123456000" (gate Map_QueryDealer_MemberController.cs:156-157).
+        // Gate: RecordStart = "0", RecordCount = "123456000" (gate Map_QueryDealer_MemberController.cs:156-157 và :381-382).
         var draftWithSeq = await GetDraftItemsAsync(
             cardNo: null,
             idCardNo: null,
-            dlcpCode: r.DLCPCode,
-            memberNo: r.MemberNo,
-            carNo: r.CarNo,
-            phoneNo: r.PhoneNo,
-            vin: r.VIN,
+            dlcpCode: dlcpCode,
+            memberNo: memberNo,
+            carNo: carNo,
+            phoneNo: phoneNo,
+            vin: vin,
             queryDateFrom: queryDateFrom,
             queryDateTo: queryDateTo,
             recordStart: 0,
@@ -175,24 +370,11 @@ public class Map_QueryDealer_MemberControllerPort : ControllerBase
 
         if (draftWithSeq.Count == 0)
         {
-            // Khi không có bản ghi nào:
-            // Lst_Map_QueryDealer_Member = null (:166)
-            // CountRow = 0 (:179-181)
-            // Lst_Rpt_Map_QueryDealer_Member = [{ CountMember = 0 }] (:11820 count(t.MemberNo) trên bảng rỗng trả về 1 dòng 0)
-            return Ok(new
-            {
-                Success = true,
-                Data = new
-                {
-                    Lst_Map_QueryDealer_Member = (List<object>?)null,
-                    Lst_Rpt_Map_QueryDealer_Member = new List<object> { new { CountMember = 0 } },
-                    CountRow = 0
-                }
-            });
+            return (null, new List<MapQueryDealerMemberReportRow>(), 0);
         }
 
         // -----------------------------------------------------------------------------------------
-        // BƯỚC 2: SELECT CUỐI cho #67 (Report.cs:11759-11788)
+        // BƯỚC 2: SELECT CUỐI cho #67 và #69 (Report.cs:11759-11788)
         // select
         //     t.MyIdxSeq
         //     , mqdm.*
@@ -237,7 +419,7 @@ public class Map_QueryDealer_MemberControllerPort : ControllerBase
             .Where(p => provinceCodes.Contains(p.ProvinceCode))
             .ToListAsync();
 
-        var finalRows = new List<object>();
+        var finalRows = new List<MapQueryDealerMemberReportRow>();
         var finalMemberNos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var t in draftWithSeq)
@@ -275,52 +457,32 @@ public class Map_QueryDealer_MemberControllerPort : ControllerBase
 
             finalMemberNos.Add(t.MemberNo);
 
-            finalRows.Add(new
+            finalRows.Add(new MapQueryDealerMemberReportRow
             {
-                t.MyIdxSeq,
-                mqdm.DLCPCode,
-                mqdm.MemberNo,
-                mqdm.NetworkID,
-                mqdm.QueryDate,
-                mqdm.Remark,
-                mqdm.FlagActive,
-                mqdm.LogLUDTimeUTC,
-                mqdm.LogLUBy,
+                MyIdxSeq = t.MyIdxSeq,
+                DLCPCode = mqdm.DLCPCode,
+                MemberNo = mqdm.MemberNo,
+                NetworkID = mqdm.NetworkID,
+                QueryDate = mqdm.QueryDate,
+                Remark = mqdm.Remark,
+                FlagActive = mqdm.FlagActive,
+                LogLUDTimeUTC = mqdm.LogLUDTimeUTC,
+                LogLUBy = mqdm.LogLUBy,
                 DLCPName = mdcp?.DLCPName,
-                cm.VIN,
-                cm.CarNo,
-                cm.PhoneNo,
-                cm.CardTypeUse,
-                cm.MemberName,
-                cm.ModelCode,
-                cm.DLCodeRegis,
+                VIN = cm.VIN,
+                CarNo = cm.CarNo,
+                PhoneNo = cm.PhoneNo,
+                CardTypeUse = cm.CardTypeUse,
+                MemberName = cm.MemberName,
+                ModelCode = cm.ModelCode,
+                DLCodeRegis = cm.DLCodeRegis,
                 ProvinceName = mp?.ProvinceName,
-                cm.ModelName,
+                ModelName = cm.ModelName,
                 ModelCodeName = modelCodeName
             });
         }
 
-        // Summary CountRow (Report.cs:11791): select Count(0) MyCount from #tbl_Map_QueryDealer_Member_Final
-        // Đếm số dòng của bảng Final SAU KHI lọc <> (CountRow sau lọc)
-        int countRow = finalRows.Count;
-
-        // Rpt CountMember (Report.cs:11809-11823): count(distinct MemberNo) trong bảng Final
-        // Luôn trả về mảng 1 phần tử [{ CountMember = n }] kể cả khi n = 0
-        int countMember = finalMemberNos.Count;
-        var lstRpt = new List<object> { new { CountMember = countMember } };
-
-        // Gate Map_QueryDealer_MemberController.cs:166-182:
-        // Lst_Map_QueryDealer_Member = null nếu rỗng (:166-169)
-        return Ok(new
-        {
-            Success = true,
-            Data = new
-            {
-                Lst_Map_QueryDealer_Member = finalRows.Count > 0 ? finalRows : null,
-                Lst_Rpt_Map_QueryDealer_Member = lstRpt,
-                CountRow = countRow
-            }
-        });
+        return (null, finalRows, finalMemberNos.Count);
     }
 
     /// <summary>
