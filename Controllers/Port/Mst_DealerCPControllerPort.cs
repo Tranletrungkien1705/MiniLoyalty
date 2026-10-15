@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -14,7 +16,7 @@ namespace MiniLoyalty.Controllers.Port;
 /// <summary>
 /// Port 1:1 Mst_DealerCPController.cs — Mst_DealerCP
 /// Chuỗi gọi nguồn:
-///   gate: Mst_DealerCPController.cs:26-106 (Search) + :107-230 (GetAllActive) + :231-296 (GetByDLCPCode) + :297-360 (GetByOrgID) + :364-389 (strWhereClause_Mst_DealerCP) + :390-406 (strWhereClause_Mst_DealerCP_By_DLCPCode) + :407-419 (strWhereClause_Mst_DealerCP_By_OrgID) + :436-521 (CreateOld) + :700-770 (Update) + :774-837 (Delete) + :839-903 (DeleteMultiple)
+///   gate: Mst_DealerCPController.cs:26-106 (Search) + :107-230 (GetAllActive) + :231-296 (GetByDLCPCode) + :297-360 (GetByOrgID) + :364-389 (strWhereClause_Mst_DealerCP) + :390-406 (strWhereClause_Mst_DealerCP_By_DLCPCode) + :407-419 (strWhereClause_Mst_DealerCP_By_OrgID) + :436-521 (CreateOld) + :700-770 (Update) + :774-837 (Delete) + :839-903 (DeleteMultiple) + :1175-1253 (Export)
 ///   API:  MstDealerCPController.cs:21-90 (WA_Mst_DealerCP_Get) + :93-162 (WA_Mst_DealerCP_Create) + :165-234 (WA_Mst_DealerCP_Update) + :236-305 (WA_Mst_DealerCP_Delete)
 ///   biz:  Master.Loyalty.cs:3937-4050 (WAS_Mst_DealerCP_Get) -> :4051-4206 (Mst_DealerCP_Get) -> :4209-4433 (Mst_DealerCP_GetX)
 ///         Master.Loyalty.cs:2973-3055 (WAS_Mst_DealerCP_Create) -> :3056-3202 (Mst_DealerCP_Create) -> :3205-3322 (Mst_DealerCP_CreateX) -> :2870-2934 (Mst_DealerCP_CheckDB) -> :2935-2971 (Mst_DealerCP_UpdBU)
@@ -22,8 +24,8 @@ namespace MiniLoyalty.Controllers.Port;
 ///         Master.Loyalty.cs:3662-3739 (WAS_Mst_DealerCP_Delete) -> :3740-3876 (Mst_DealerCP_Delete) -> :3878-3935 (Mst_DealerCP_DeleteX) -> :2870-2934 (Mst_DealerCP_CheckDB)
 ///
 /// Bỏ qua có chủ đích (loại Đ):
-/// - CheckGatewayAuthentication: gate Mst_DealerCPController.cs:35, 120, 306, 456, 720, 783, 859; API MstDealerCPController.cs:42, 114, 186, 257
-/// - CheckAuthorize: gate Mst_DealerCPController.cs:36, 121, 307, 457, 721, 784, 860; dòng :241 đã bị comment out ở nguồn
+/// - CheckGatewayAuthentication: gate Mst_DealerCPController.cs:35, 120, 306, 456, 720, 783, 859, 1185; API MstDealerCPController.cs:42, 114, 186, 257
+/// - CheckAuthorize: gate Mst_DealerCPController.cs:36, 121, 307, 457, 721, 784, 860, 1186; dòng :241 đã bị comment out ở nguồn
 /// - Nguồn gọi bằng tài khoản hệ thống viết cứng (tài khoản + mật khẩu viết cứng tại :264-265 — KHÔNG chép giá trị), đích chưa có phân quyền; KHÔNG chép thông tin đăng nhập vào mã
 /// - Sys_User_CheckAuthorize: Master.Loyalty.cs:4107-4124, 3117-3130, 3475-3489, 3795-3809 (hệ thống đích chưa có hệ phân quyền)
 /// - Ghi RequestLog/ReturnLog: Master.Loyalty.cs:4097-4104, 4196-4203, 3098-3105, 3192-3199, 3456-3463, 3553-3560, 3776-3783, 3866-3873
@@ -38,11 +40,13 @@ public class Mst_DealerCPControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly IConfiguration _config;
+    private readonly IWebHostEnvironment _env;
 
-    public Mst_DealerCPControllerPort(AppDbContext db, IConfiguration config)
+    public Mst_DealerCPControllerPort(AppDbContext db, IConfiguration config, IWebHostEnvironment env)
     {
         _db = db;
         _config = config;
+        _env = env;
     }
 
     /// <summary>
@@ -218,6 +222,85 @@ public class Mst_DealerCPControllerPort : ControllerBase
             Success = true,
             Data = pageInfo
         });
+    }
+
+    /// <summary>
+    /// Port 1:1 Export action từ gate Mst_DealerCPController.cs:1175-1253.
+    /// Body JSON: { OrgID, KeyWord, FlagActive }.
+    /// Gọi GetXAsync(keyWord: req.KeyWord, flagActiveCsv: req.FlagActive, recordStart: 0, recordCount: 123456000, getDealer: true, getMap: false).
+    /// Nguồn: OrgID nhận từ client nhưng hàm strWhereClause_Mst_DealerCP (:364-389) KHÔNG sử dụng OrgID để lọc, giữ đúng hành vi nguồn (không lọc OrgID).
+    /// Khi danh sách rỗng -> trả về 400 ErridnLoyalty.Mst_DealerCP_Export kèm Params Message = "Không có dữ liệu" (gate :1239).
+    /// Khi có dữ liệu -> sinh đường dẫn file qua PortExcel.GenExcelExportFilePath(webRoot, "Mst_DealerCP"),
+    /// ghi dữ liệu bằng PortExcel.ExportToExcelFromList(rows, dic, filePath, "Mst_DealerCP"),
+    /// trả về Success = true, Data = { Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath } (:1231-1234).
+    /// </summary>
+    [HttpPost("export")]
+    public async Task<IActionResult> Export([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] Mst_DealerCPExportRequest? req)
+    {
+        req ??= new Mst_DealerCPExportRequest();
+
+        // Nguồn: strWhereClause_Mst_DealerCP (:364-389) chỉ lọc theo KeyWord và FlagActive,
+        // OrgID truyền vào (:1199) nhưng KHÔNG được sử dụng trong hàm tạo WHERE clause -> không lọc OrgID.
+        // Ft_RecordStart = "0", Ft_RecordCount = Ft_RecordCount (123456000), Rt_Cols_Mst_DealerCP = "*", Rt_Cols_Map_DealerCP_Org = null (:1214-1218).
+        var (_, rows, _) = await GetXAsync(
+            keyWord: req.KeyWord,
+            flagActiveCsv: req.FlagActive,
+            recordStart: 0,
+            recordCount: 123456000,
+            getDealer: true,
+            getMap: false,
+            dlcpCodeEqual: null,
+            mapOrgIdEqual: null);
+
+        // Nguồn :1222-1240: nếu danh sách rỗng -> throw ServiceException("Không có dữ liệu")
+        if (rows == null || rows.Count == 0)
+        {
+            return PortResult.Fail("Mst_DealerCP_Export", "Message", "Không có dữ liệu");
+        }
+
+        // Tạo thư mục và đường dẫn file Excel xuất: BaseController.GenExcelExportFilePath (:1228)
+        var webRoot = _env.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = Path.Combine(_env.ContentRootPath, "wwwroot");
+        }
+
+        var dicColNames = GetExportDicColums();
+        var (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Mst_DealerCP");
+
+        // Ghi danh sách ra file Excel: ExcelExport.ExportToExcelFromList (:1229)
+        PortExcel.ExportToExcelFromList(rows, dicColNames, physicalPath, "Mst_DealerCP");
+
+        // Trả URL tải file: Data = { Url = GetRequestBaseAddress() + url } (:1231-1234)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+            }
+        });
+    }
+
+    /// <summary>
+    /// Từ điển cột xuất Excel: Mst_DealerCPController.cs:1292-1305 (GetExportDicColums).
+    /// Giữ đúng thứ tự 8 cột xuất từ nguồn:
+    /// DLCPCode ("Mã đại lý"), DLCPName ("Tên đại lý"), DLCPCodeParent ("Mã đại lý cha"), DLCPPhoneNo ("Số điện thoại"),
+    /// mnnt_MST ("MST"), mnnt_NNTFullName ("Tên công ty"), mnnt_ContactEmail ("Email"), FlagActive ("Trạng thái").
+    /// </summary>
+    private static Dictionary<string, string> GetExportDicColums()
+    {
+        return new Dictionary<string, string>
+        {
+            { "DLCPCode", "Mã đại lý" },
+            { "DLCPName", "Tên đại lý" },
+            { "DLCPCodeParent", "Mã đại lý cha" },
+            { "DLCPPhoneNo", "Số điện thoại" },
+            { "mnnt_MST", "MST" },
+            { "mnnt_NNTFullName", "Tên công ty" },
+            { "mnnt_ContactEmail", "Email" },
+            { "FlagActive", "Trạng thái" }
+        };
     }
 
     /// <summary>
@@ -1082,6 +1165,16 @@ public class Mst_DealerCPGetByDLCPCodeRequest
 public class Mst_DealerCPGetByOrgIDRequest
 {
     public string? OrgID { get; set; }
+}
+
+/// <summary>
+/// Request model cho action Export — khớp tham số tại Mst_DealerCPController.cs:1175
+/// </summary>
+public class Mst_DealerCPExportRequest
+{
+    public string? OrgID { get; set; }
+    public string? KeyWord { get; set; }
+    public string? FlagActive { get; set; }
 }
 
 /// <summary>
