@@ -5,3 +5,5 @@ obj/
 
 node_modules/
 clientapp/dist/
+
+wwwroot/TempFiles/
