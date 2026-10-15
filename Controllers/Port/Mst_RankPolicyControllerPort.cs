@@ -10,11 +10,12 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục chính sách xếp hạng (Mst_RankPolicy) của dự án nguồn 2022.7.Loyalty (#227).
+// PORT 1:1 — màn danh mục chính sách xếp hạng (Mst_RankPolicy) của dự án nguồn 2022.7.Loyalty (#227, #228).
 //
 // Nguồn controller (tầng gate):
-//   Mst_RankPolicyController.cs:23-103   Search -> WA_Mst_RankPolicy_Get
-//   Mst_RankPolicyController.cs:281-298  strWhereClause_Mst_RankPolicy (mệnh đề lọc Search)
+//   Mst_RankPolicyController.cs:23-103   Search -> WA_Mst_RankPolicy_Get (#227)
+//   Mst_RankPolicyController.cs:104-213  GetAllActive -> WA_Mst_RankPolicy_Get (#228)
+//   Mst_RankPolicyController.cs:281-298  strWhereClause_Mst_RankPolicy (mệnh đề lọc Search / GetAllActive)
 // Nguồn API:
 //   MstRankPolicyController.cs:95-163   WA_Mst_RankPolicy_Get
 // Nguồn biz:
@@ -107,6 +108,29 @@ public class Mst_RankPolicyControllerPort : ControllerBase
             Data = new PageInfo<object>(rows, itemCount, pageCount, pageIndex, pageSize)
         });
     }
+
+    /// <summary>
+    /// Port 1:1 <c>Mst_RankPolicyController.GetAllActive</c> (nguồn gate Mst_RankPolicyController.cs:104-213).
+    /// Nguồn gọi <c>strWhereClause_Mst_RankPolicy</c> với <c>FlagActive = "1"</c> (:130-134) ⇒ lọc
+    /// <c>FlagActive IN ('1')</c> (:288-295). <c>OrgID</c> chỉ được gán vào request (:132, :144),
+    /// hàm lọc KHÔNG dùng OrgID ⇒ KHÔNG lọc theo OrgID.
+    /// Không body: RecordStart = "0", RecordCount = "123456000" (nguồn Ft_RecordStart/Ft_RecordCount :146-147).
+    /// Khối Ext/tree (:156-188) bị comment ở nguồn ⇒ KHÔNG port.
+    /// Dùng lại GetXAsync của Search (#227): select cuối từ Mst_CardType đang hoạt động left join chính sách.
+    /// Trả <c>Ok(new { Success = true, Data = ... })</c> — Data là MẢNG TRẦN, rỗng thì <c>null</c>
+    /// (nguồn :127 khởi tạo null, :153-155 chỉ gán khi có dòng, :193-200 trả thẳng listMst_RankPolicy).
+    /// </summary>
+    [HttpPost("getallactive")]
+    public async Task<IActionResult> GetAllActive()
+    {
+        // Nguồn: Ft_RecordStart = "0", Ft_RecordCount = "123456000" (gate Mst_RankPolicyController.cs:146-147).
+        // FlagActive = "1" (gate :133) ⇒ lọc IN ('1'); OrgID không lọc.
+        var (_, rows) = await GetXAsync("1", 0, 123456000);
+
+        // Nguồn :193-200: Data = listMst_RankPolicy (mảng trần); rỗng ⇒ null (:127, :153-155).
+        return Ok(new { Success = true, Data = rows.Count > 0 ? rows : null });
+    }
+
 
     /// <summary>
     /// Thực hiện 2 bước truy vấn nghiệp vụ của Mst_RankPolicy_GetX (Master.Loyalty.cs:7697-7872).
