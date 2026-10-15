@@ -10,7 +10,7 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục dòng xe (Mst_CarModel) của dự án nguồn 2022.7.Loyalty (#97, #98, #99, #100, #101, #102).
+// PORT 1:1 — màn danh mục dòng xe (Mst_CarModel) của dự án nguồn 2022.7.Loyalty (#97, #98, #99, #100, #101, #102, #103).
 //
 // Nguồn controller (tầng gate):
 //   Mst_CarModelController.cs:25-105   Search              -> WA_Mst_CarModel_Get
@@ -19,6 +19,7 @@ namespace MiniLoyalty.Controllers.Port;
 //   Mst_CarModelController.cs:329-414  Create              -> WA_Mst_CarModel_Create
 //   Mst_CarModelController.cs:418-485  Update              -> WA_Mst_CarModel_Update
 //   Mst_CarModelController.cs:489-552  Delete              -> WA_Mst_CarModel_Delete (#102)
+//   Mst_CarModelController.cs:554-618  DeleteMultiple      -> WA_Mst_CarModel_Delete (#103)
 //   Mst_CarModelController.cs:284-305  strWhereClause_Mst_CarModel (mệnh đề lọc Search)
 //   Mst_CarModelController.cs:306-325  strWhereClause_Mst_CarModel_By_ModelCode (mệnh đề lọc GetByModelCode)
 // Nguồn API:
@@ -63,10 +64,12 @@ namespace MiniLoyalty.Controllers.Port;
 //     CheckDB(ModelCode, FlagExist "1") -> Mst_CarModel_CheckDB_CarModelNotFound;
 //     GAP FK: Prm_CarRecommendSpec/Prm_CarNewSpec chua port;
 //     xoá dòng -> Success = true, Data = null.
+//   * DeleteMultiple: body là mảng [{ ModelCode }], lặp tuần tự từng phần tử trong 1 transaction riêng biệt.
+//     Lỗi phần tử thứ k -> thoát vòng lặp ngay, "xóa một phần" là hành vi nguồn. Body rỗng -> Mst_CarModel_Delete.
 //
 // Bỏ qua có chủ đích (loại Đ):
-//   - CheckGatewayAuthentication: gate :34, :226, :498; API MstCarModelController.cs:259-264, :187-192
-//   - CheckAuthorize: gate :35, :227, :499 (hệ thống đích chưa có hệ phân quyền)
+//   - CheckGatewayAuthentication: gate :34, :226, :498, :574; API MstCarModelController.cs:259-264, :187-192
+//   - CheckAuthorize: gate :35, :227, :499, :575 (hệ thống đích chưa có hệ phân quyền)
 //   - Nguồn gọi bằng tài khoản hệ thống viết cứng (tài khoản + mật khẩu viết cứng — KHÔNG chép giá trị),
 //     đích chưa có phân quyền; KHÔNG chép thông tin đăng nhập vào mã
 //   - Ghi RequestLog/ReturnLog: Master.Loyalty.cs:1578-1586, 1676-1684, 2708-2715, 2798-2805
@@ -496,11 +499,73 @@ public class Mst_CarModelControllerPort : ControllerBase
     }
 
     /// <summary>
+    /// Port 1:1 DeleteMultiple action từ gate Mst_CarModelController.cs:554-618 (#103).
+    /// Chuỗi gọi: gate :554-618 -> lặp qua danh sách Lst_Mst_CarModel, mỗi phần tử gọi
+    /// WA_Mst_CarModel_Delete (:585-602) -> biz WAS_Mst_CarModel_Delete -> Mst_CarModel_Delete -> Mst_CarModel_DeleteX.
+    ///
+    /// Request JSON: mảng [{ ModelCode }].
+    /// 1. Kiểm tra body rỗng / null: Gate Mst_CarModelController.cs:564-571
+    ///    if (!string.IsNullOrEmpty(strJson)) { ... } else { throw new ServiceException("strJson null"); }
+    ///    Khi body null hoặc rỗng -> trả về 400 ErridnLoyalty.Mst_CarModel_Delete với Check.strJson = null.
+    /// 2. Danh sách rỗng `[]`: vòng lặp foreach không chạy, trả về Ok(Success = true, Data = null).
+    /// 3. Lặp tuần tự qua từng phần tử trong danh sách:
+    ///    Mỗi lần lặp là một lời gọi độc lập tới chuỗi nghiệp vụ Delete, sử dụng TRANSACTION RIÊNG
+    ///    (Master.Loyalty.cs:2705 _cf.db.BeginTransaction() và :2771 TDALUtils.DBUtils.CommitSafety).
+    ///    - KHÔNG có bước kiểm tra ModelCode rỗng ở tầng gate như Delete đơn (:508, 538);
+    ///      khi ModelCode rỗng, lỗi phát sinh ở tầng nghiệp vụ Mst_CarModel_CheckDB
+    ///      -> trả về 400 ErridnLoyalty.Mst_CarModel_CheckDB_CarModelNotFound.
+    ///    - Hành vi "xóa một phần" (nguồn Mst_CarModelController.cs:585-611):
+    ///      Nếu phần tử thứ k gặp lỗi, exception được ném ra và thoát khỏi vòng lặp ngay lập tức
+    ///      nhảy vào khối catch (ex) (:607-611).
+    ///      Do mỗi phần tử chạy trên một transaction riêng đã được commit, các phần tử TRƯỚC k
+    ///      ĐÃ BỊ XÓA VÀ KHÔNG BỊ ROLLBACK; các phần tử SAU k hoàn toàn không được xử lý.
+    ///      "xóa một phần" là hành vi nguồn.
+    /// 4. Thành công: gate :604-605 trả objJsonResultEntry.Data = null -> Ok(new { Success = true, Data = (object?)null }).
+    ///
+    /// Bỏ qua có chủ đích (loại Đ):
+    /// - CheckGatewayAuthentication: gate Mst_CarModelController.cs:574
+    /// - CheckAuthorize: gate Mst_CarModelController.cs:575 (hệ thống đích chưa có hệ phân quyền)
+    /// - Sys_User_CheckAuthorize: Master.Loyalty.cs:2727-2741
+    /// - Ghi RequestLog/ReturnLog: Master.Loyalty.cs:2708-2715, 2798-2805
+    /// </summary>
+    [HttpPost("deletemultiple")]
+    public async Task<IActionResult> DeleteMultiple([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] List<MstCarModelDeleteReq>? req)
+    {
+        // 1. Kiểm tra body rỗng / null: Gate Mst_CarModelController.cs:564-571
+        // if (!string.IsNullOrEmpty(strJson)) { ... } else { throw new ServiceException("strJson null"); }
+        if (req == null)
+        {
+            return PortResult.Fail("Mst_CarModel_Delete", "Check.strJson", null);
+        }
+
+        // 2. Lặp tuần tự qua từng phần tử (gate Mst_CarModelController.cs:585-602).
+        // Mỗi phần tử chạy trong 1 transaction riêng biệt (hàm DeleteXAsync).
+        // Nếu phần tử thứ k gặp lỗi -> return ngay lỗi đó (hành vi nguồn :585-611:
+        // "xóa một phần" là hành vi nguồn: các phần tử trước k đã commit thành công
+        // vào DB và KHÔNG bị rollback; các phần tử sau k không được xử lý).
+        foreach (var item in req)
+        {
+            var err = await DeleteXAsync(item?.ModelCode);
+            if (err != null)
+            {
+                return err;
+            }
+        }
+
+        // 3. Thành công: gate Mst_CarModelController.cs:604-605
+        return Ok(new
+        {
+            Success = true,
+            Data = (object?)null
+        });
+    }
+
+    /// <summary>
     /// Nghiệp vụ xóa 1 dòng xe — 1 transaction riêng biệt.
     /// Nguồn: WA_Mst_CarModel_Delete (MstCarModelController.cs:165-235) -> WAS_Mst_CarModel_Delete (Master.Loyalty.cs:2593-2671)
     /// -> Mst_CarModel_Delete (Master.Loyalty.cs:2672-2808) -> Mst_CarModel_DeleteX (Master.Loyalty.cs:2810-2866)
     /// -> Mst_CarModel_CheckDB (Master.Loyalty.cs:1843-1906).
-    /// Hạng mục DeleteMultiple sau này sẽ dùng lại hàm này cho từng phần tử.
+    /// Dùng chung cho Delete (#102) và DeleteMultiple (#103, gọi từng phần tử).
     /// </summary>
     private async Task<IActionResult?> DeleteXAsync(string? modelCode)
     {
