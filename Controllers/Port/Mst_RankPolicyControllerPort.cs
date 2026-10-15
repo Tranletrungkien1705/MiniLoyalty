@@ -10,12 +10,14 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục chính sách xếp hạng (Mst_RankPolicy) của dự án nguồn 2022.7.Loyalty (#227, #228).
+// PORT 1:1 — màn danh mục chính sách xếp hạng (Mst_RankPolicy) của dự án nguồn 2022.7.Loyalty (#227, #228, #229).
 //
 // Nguồn controller (tầng gate):
 //   Mst_RankPolicyController.cs:23-103   Search -> WA_Mst_RankPolicy_Get (#227)
 //   Mst_RankPolicyController.cs:104-213  GetAllActive -> WA_Mst_RankPolicy_Get (#228)
+//   Mst_RankPolicyController.cs:214-277  GetByRankPolicyCode -> WA_Mst_RankPolicy_Get (#229)
 //   Mst_RankPolicyController.cs:281-298  strWhereClause_Mst_RankPolicy (mệnh đề lọc Search / GetAllActive)
+//   Mst_RankPolicyController.cs:299-315  strWhereClause_Mst_RankPolicy_By_RankPolicyCode (mệnh đề lọc GetByRankPolicyCode)
 // Nguồn API:
 //   MstRankPolicyController.cs:95-163   WA_Mst_RankPolicy_Get
 // Nguồn biz:
@@ -24,8 +26,8 @@ namespace MiniLoyalty.Controllers.Port;
 //   Master.Loyalty.cs:7697-7872          Mst_RankPolicy_GetX (SQL draft :7753-7764, SQL select cuối :7795-7818)
 //
 // ĐẶC ĐIỂM VÀ QUY TẮC NGHIỆP VỤ NGUỒN:
-//   * Endpoint là POST (nguồn gate Mst_RankPolicyController.cs:23).
-//   * Tham số lọc: KeyWord, FlagActive, Ft_PageIndex = 0, Ft_PageSize = 10 (gate :23).
+//   * Endpoint là POST (nguồn gate Mst_RankPolicyController.cs:23, :104, :214).
+//   * Tham số lọc Search: KeyWord, FlagActive, Ft_PageIndex = 0, Ft_PageSize = 10 (gate :23).
 //   * KeyWord KHÔNG lọc: hàm lọc strWhereClause_Mst_RankPolicy (:281-298) CHỈ xử lý FlagActive
 //     (tách dấu phẩy -> IN), hoàn toàn không có nhánh nào lọc KeyWord.
 //   * Phân trang ở gate: RecordStart = pageIndex * pageSize, RecordCount = pageSize (:66-67).
@@ -50,13 +52,21 @@ namespace MiniLoyalty.Controllers.Port;
 //        => DataList LUÔN chứa MỌI hạng thẻ đang hoạt động (kể cả khi trang draft rỗng);
 //           1 hạng thẻ có 2 chính sách trong trang draft -> sinh 2 dòng.
 //        Hoà trùng Value: sắp phụ MyIdxSeq asc (null cuối), ghi chú: nguồn không xác định.
+//   * GetByRankPolicyCode (gate :214-277):
+//     - RankPolicyCode rỗng -> Data null, không truy vấn DB (:234, :264).
+//     - Ngược lại lọc strWhereClause_Mst_RankPolicy_By_RankPolicyCode (:306) theo RankPolicyCode = 'x'.
+//     - RecordStart = "0", RecordCount = "1" (:251-252).
+//     - Data = Lst_Mst_RankPolicy[0] hoặc null (:258-264).
+//     - CẢNH BÁO: Vì select cuối luôn chạy từ Mst_CardType (FlagActive = '1') order by mct.Value asc,
+//       phần tử [0] là hạng thẻ active có Value nhỏ nhất (dòng 'R'), KHÔNG PHẢI chính sách vừa tìm.
+//       Kể cả mã không tồn tại, [0] vẫn trả về dòng 'R' (chỉ null khi DB không có hạng thẻ active nào).
 //   * Tính PageCount tại gate (:78-86):
 //     Chỉ tính khi DataList KHÔNG rỗng (Lst_Mst_RankPolicy.Count > 0).
 //     Nếu PageSize == 0 thì pageSize gán về 10 (PageSizeConfig) rồi tính (itemCount % ps == 0) ? itemCount / ps : itemCount / ps + 1.
 //   * Bỏ qua có chủ đích (loại Đ):
 //     - drAbilityOfUser (Master.Loyalty.cs:7738) nguồn lấy nhưng bị comment không dùng (:7750) -> không port, ghi comment.
 //     - FK CardType -> Mst_CardType (20221026.CreateDatabase.sql:273) — chỉ ghi comment.
-//     - CheckGatewayAuthentication, CheckAuthorize (gate :32-33), Sys_User_CheckAuthorize (:7607-7620):
+//     - CheckGatewayAuthentication, CheckAuthorize (gate :32-33, :124-125, :223-224), Sys_User_CheckAuthorize (:7607-7620):
 //       hệ thống đích chưa có hệ phân quyền.
 //     - Ghi RequestLog/ReturnLog (:7586-7593, :7686-7693).
 // ============================================================================================
@@ -68,6 +78,12 @@ public class MstRankPolicySearchReq
     public string? FlagActive { get; set; }          // Cờ hoạt động, danh sách phân cách dấu phẩy (lọc IN) — :288-295
     public int Ft_PageIndex { get; set; } = 0;       // Trang (0-based) — :23, :44
     public int Ft_PageSize { get; set; } = 10;       // Số dòng/trang — :23, :45
+}
+
+/// <summary>Port 1:1 <c>GetByRankPolicyCode</c> — body chỉ có RankPolicyCode (Mst_RankPolicyController.cs:214-277).</summary>
+public class MstRankPolicyGetByRankPolicyCodeReq
+{
+    public string? RankPolicyCode { get; set; }       // Mã chính sách xếp hạng — :214, :234-238
 }
 
 [ApiController]
@@ -131,6 +147,39 @@ public class Mst_RankPolicyControllerPort : ControllerBase
         return Ok(new { Success = true, Data = rows.Count > 0 ? rows : null });
     }
 
+    /// <summary>
+    /// Port 1:1 <c>Mst_RankPolicyController.GetByRankPolicyCode</c> (nguồn gate Mst_RankPolicyController.cs:214-277).
+    /// Gate: nếu RankPolicyCode rỗng (!IsNullOrEmpty :234) thì KHÔNG truy vấn, objMst_RankPolicy giữ null
+    ///       ⇒ Data = null (:256, :264).
+    /// Ngược lại gọi strWhereClause_Mst_RankPolicy_By_RankPolicyCode (:299-315) lọc RankPolicyCode = 'x'
+    /// (:306). Nhánh FlagActive (:309-312) không truyền nên không lọc cờ hoạt động.
+    /// Ft_RecordStart = "0", Ft_RecordCount = "1" (:251-252).
+    /// Kết quả: objRT_Mst_RankPolicy.Lst_Mst_RankPolicy[0] nếu Count > 0, ngược lại null (:258-261).
+    ///
+    /// CẢNH BÁO HÀNH VI NGUỒN:
+    /// Mst_RankPolicy_GetX có Bước 2 select cuối chạy từ Mst_CardType (FlagActive = '1') LEFT JOIN draft
+    /// ORDER BY mct.Value asc. Phần tử [0] nguồn lấy Lst_Mst_RankPolicy[0] là hạng thẻ active có Value
+    /// nhỏ nhất (thường là 'R' với Value = 0), KHÔNG PHẢI chính sách vừa tìm. Kể cả mã RankPolicyCode
+    /// không tồn tại trong DB, bước 2 vẫn sinh ra danh sách gồm các hạng thẻ active (MyIdxSeq null),
+    /// nên [0] vẫn trả về dòng 'R' (chỉ null khi DB không có hạng thẻ active nào). Giữ nguyên 1:1 hành vi nguồn.
+    /// </summary>
+    [HttpPost("getbyrankpolicycode")]
+    public async Task<IActionResult> GetByRankPolicyCode([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] MstRankPolicyGetByRankPolicyCodeReq? req)
+    {
+        var rankPolicyCode = req?.RankPolicyCode;
+
+        // RankPolicyCode rỗng ⇒ nguồn không truy vấn DB (:234) và trả Data = null (:264).
+        if (string.IsNullOrWhiteSpace(rankPolicyCode))
+        {
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+
+        // Lấy 1 dòng draft theo RankPolicyCode (Ft_RecordStart = "0", Ft_RecordCount = "1" — :251-252).
+        var (_, rows) = await GetXAsync(null, 0, 1, rankPolicyCodeEqual: rankPolicyCode);
+
+        // Nguồn: Lst_Mst_RankPolicy[0] khi có dòng, ngược lại null (:258-261).
+        return Ok(new { Success = true, Data = rows.Count > 0 ? rows[0] : null });
+    }
 
     /// <summary>
     /// Thực hiện 2 bước truy vấn nghiệp vụ của Mst_RankPolicy_GetX (Master.Loyalty.cs:7697-7872).
@@ -138,7 +187,7 @@ public class Mst_RankPolicyControllerPort : ControllerBase
     /// Bước 2: Select cuối từ Mst_CardType (FlagActive = '1') LEFT JOIN draft page LEFT JOIN Mst_RankPolicy,
     ///         lấy Value của Mst_CardType, order by mct.Value asc (hoà Value: MyIdxSeq asc, null cuối).
     /// </summary>
-    private async Task<(int itemCount, List<object> rows)> GetXAsync(string? flagActiveCsv, long recordStart, long recordCount)
+    private async Task<(int itemCount, List<object> rows)> GetXAsync(string? flagActiveCsv, long recordStart, long recordCount, string? rankPolicyCodeEqual = null)
     {
         // drAbilityOfUser (Master.Loyalty.cs:7738) nguồn gọi nhưng bị comment không dùng (:7750) -> không port, ghi comment.
 
@@ -148,6 +197,14 @@ public class Mst_RankPolicyControllerPort : ControllerBase
         // from Mst_RankPolicy mrp where (1=1) zzB_Where_strFilter_zzE order by mrp.LogLUDTimeUTC desc
         // -----------------------------------------------------------------------------------------
         var qPolicy = _db.Set<Mst_RankPolicy>().AsNoTracking().AsQueryable();
+
+        // Lọc RankPolicyCode: `RankPolicyCode = 'x'` (gate Mst_RankPolicyController.cs:306 — strWhereClause_Mst_RankPolicy_By_RankPolicyCode).
+        // Nguồn dùng '=' trên SQL Server collation không phân biệt hoa/thường ⇒ Like KHÔNG wildcard, hạ chữ 2 phía (PortQuery.Equal).
+        if (!string.IsNullOrWhiteSpace(rankPolicyCodeEqual))
+        {
+            var rpc = PortQuery.Equal(rankPolicyCodeEqual);
+            qPolicy = qPolicy.Where(x => EF.Functions.Like((x.RankPolicyCode ?? "").ToLower(), rpc, PortQuery.Esc));
+        }
 
         // Lọc FlagActive: danh sách phân cách dấu phẩy -> IN ('a','b') (gate Mst_RankPolicyController.cs:288-295).
         // So sánh không phân biệt hoa/thường (bẫy #18/#31, PORT_RULES §3).
