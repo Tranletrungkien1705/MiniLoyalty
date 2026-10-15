@@ -10,10 +10,11 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục dòng xe (Mst_CarModel) của dự án nguồn 2022.7.Loyalty (#97).
+// PORT 1:1 — màn danh mục dòng xe (Mst_CarModel) của dự án nguồn 2022.7.Loyalty (#97, #98).
 //
 // Nguồn controller (tầng gate):
 //   Mst_CarModelController.cs:25-105   Search              -> WA_Mst_CarModel_Get
+//   Mst_CarModelController.cs:106-216  GetAllActive        -> WA_Mst_CarModel_Get
 //   Mst_CarModelController.cs:284-305  strWhereClause_Mst_CarModel (mệnh đề lọc Search)
 // Nguồn API:
 //   MstCarModelController.cs:238-307   WA_Mst_CarModel_Get
@@ -31,6 +32,9 @@ namespace MiniLoyalty.Controllers.Port;
 //   * MyIdxSeq 0-based identity (Master.Loyalty.cs:1742).
 //   * PageSize = 0 -> DataList rỗng, PageCount = 0 (gate :83-94).
 //   * DDL: khong co DDL — PK suy tu FK REFERENCES Mst_CarModel (ModelCode) (20221026.CreateDatabase.sql:91).
+//   * GetAllActive: không body, Ft_RecordStart = "0", Ft_RecordCount = "123456000" (gate :148-149).
+//     FlagActive = "1" (toán tử '=', gate :135, :301), OrgID không lọc (:134). Khối Ext/tree (:159-191) bị comment — không port.
+//     Trả Data là mảng trần listMst_CarModel (null nếu rỗng) (gate :129, :156-158, :196-203).
 //
 // Bỏ qua có chủ đích (loại Đ):
 //   - CheckGatewayAuthentication: gate :34; API MstCarModelController.cs:259-264
@@ -79,6 +83,26 @@ public class Mst_CarModelControllerPort : ControllerBase
         var pageCount = rows.Count == 0 ? 0 : (itemCount % ps == 0 ? itemCount / ps : itemCount / ps + 1);
 
         return Ok(new { Success = true, Data = new PageInfo<object>(rows, itemCount, pageCount, pageIndex, pageSize) });
+    }
+
+    /// <summary>
+    /// Port 1:1 <c>Mst_CarModelController.GetAllActive</c> (nguồn gate Mst_CarModelController.cs:106-216).
+    /// Nguồn gọi <c>strWhereClause_Mst_CarModel</c> với <c>FlagActive = "1"</c> (:132-136) ⇒ lọc
+    /// <c>FlagActive = '1'</c> (:299-302). <c>OrgID</c> gán vào object lọc (:134) nhưng hàm lọc KHÔNG dùng OrgID ⇒ KHÔNG lọc.
+    /// Khối Ext/tree (:159-191) bị comment trong nguồn — KHÔNG port.
+    /// Không body: RecordStart = "0", RecordCount = "123456000" (nguồn Ft_RecordStart/Ft_RecordCount :148-149).
+    /// Trả <c>Ok(new { Success = true, Data = ... })</c> — Data là MẢNG TRẦN, rỗng thì <c>null</c>
+    /// (nguồn :129 khởi tạo null, :156-158 chỉ gán khi có dòng, :196-203 trả thẳng listMst_CarModel).
+    /// </summary>
+    [HttpPost("getallactive")]
+    public async Task<IActionResult> GetAllActive()
+    {
+        // Nguồn: Ft_RecordStart = "0", Ft_RecordCount = "123456000" (gate :148-149).
+        // FlagActive = "1" (gate :135) ⇒ lọc toán tử '=' (:299-302); OrgID không lọc (:134).
+        var (_, rows) = await GetXAsync(null, "1", 0, 123456000);
+
+        // Nguồn :196-203: Data = listMst_CarModel (mảng trần); rỗng ⇒ null (:129, :156-158).
+        return Ok(new { Success = true, Data = rows.Count > 0 ? rows : null });
     }
 
     /// <summary>
