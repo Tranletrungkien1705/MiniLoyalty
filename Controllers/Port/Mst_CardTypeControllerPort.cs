@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -25,6 +26,7 @@ namespace MiniLoyalty.Controllers.Port;
 //   Mst_CardTypeController.cs:489-552  Delete       ->  WA_Mst_CardType_Delete
 //   Mst_CardTypeController.cs:554-618  DeleteMultiple -> WA_Mst_CardType_Delete
 //   Mst_CardTypeController.cs:622-768  Import       ->  WA_Mst_CardType_Create
+//   Mst_CardTypeController.cs:773-851  Export       ->  WA_Mst_CardType_Get
 //   Mst_CardTypeController.cs:283-308  strWhereClause_Mst_CardType (dựng mệnh đề lọc)
 // Nguồn API:  MstCardTypeController.cs:239-308  WA_Mst_CardType_Get
 //             MstCardTypeController.cs:21-91    WA_Mst_CardType_Create
@@ -105,10 +107,18 @@ public class MstCardTypeDeleteReq
     public string? CardType { get; set; }             // Mã loại thẻ cần xoá — :489, :513
 }
 
+/// <summary>Port 1:1 <c>Export</c> — body nhận OrgID, KeyWord, FlagActive (Mst_CardTypeController.cs:773, 794-799).</summary>
+public class MstCardTypeExportReq
+{
+    public string? OrgID { get; set; }               // Tổ chức — gate nhận (:773, :797) nhưng strWhereClause_Mst_CardType (:283-308) KHÔNG lọc OrgID
+    public string? KeyWord { get; set; }             // Từ khoá tìm theo tên loại thẻ (CardTypeName) — :773, :796, :290
+    public string? FlagActive { get; set; }          // Cờ hoạt động, danh sách phân cách dấu phẩy — :773, :798, :298-305
+}
+
 [ApiController]
 [Route("api/mst_cardtype")]
 [Produces("application/json")]
-public class Mst_CardTypeControllerPort(AppDbContext db, IConfiguration config) : ControllerBase
+public class Mst_CardTypeControllerPort(AppDbContext db, IConfiguration config, IWebHostEnvironment env) : ControllerBase
 {
     [HttpPost("search")]
     public async Task<IActionResult> Search([FromBody] MstCardTypeSearchReq? req)
@@ -848,6 +858,80 @@ public class Mst_CardTypeControllerPort(AppDbContext db, IConfiguration config) 
         });
     }
 
+    // ============================================================================================
+    // Export — nguồn gate Mst_CardTypeController.cs:773-851 -> API WA_Mst_CardType_Get
+    // (MstCardTypeController.cs:239-308) -> biz WAS_Mst_CardType_Get (Master.Loyalty.cs:5329-5429)
+    // -> Mst_CardType_Get (Master.Loyalty.cs:5430-5582) -> Mst_CardType_GetX (Master.Loyalty.cs:5583-5737).
+    //
+    // GIỮ ĐÚNG NGUỒN:
+    //   * Tham số nhận qua body: OrgID, KeyWord, FlagActive (:773, :794-799).
+    //   * strWhereClause_Mst_CardType (:283-308):
+    //       - KeyWord: like '%x%' trên CardTypeName (:290).
+    //       - FlagActive: danh sách IN (:298-305).
+    //       - OrgID: không lọc (:283-308 không có nhánh lọc OrgID).
+    //   * Ft_RecordStart = "0", Ft_RecordCount = "123456000" (:812-813, BaseController.cs:30-31),
+    //     Rt_Cols_Mst_CardType = "*" (:816).
+    //   * Thứ tự: Mst_CardType_GetX chia trang theo CardType asc (:5643) rồi sắp theo Value asc (:5683).
+    //   * Nếu danh sách rỗng (rows == null || rows.Count == 0):
+    //     ném ServiceException("Không có dữ liệu") (:820, :836-838) -> trả 400 ErridnLoyalty.Mst_CardType_Export.
+    //   * Từ điển cột: GetImportDicColums() (:824, :890-901) gồm đúng 4 cột:
+    //       1. CardType -> "Mã hạng thẻ (*)"
+    //       2. CardTypeName -> "Tên hạng thẻ (*)"
+    //       3. Value -> "Thứ tự (*)"
+    //       4. FlagActive -> "Trạng thái"
+    //   * Sinh đường dẫn file xuất: BaseController.GenExcelExportFilePath (:826)
+    //     -> PortExcel.GenExcelExportFilePath(webRoot, "Mst_CardType").
+    //   * Tên sheet: "Mst_CardType" (:827).
+    //   * Ghi file qua PortExcel.ExportToExcelFromList(rows, dicColNames, physicalPath, "Mst_CardType") (:827).
+    //   * Trả URL tải file với Success = true, Data = { Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath } (:828-832).
+    //
+    // Bỏ qua có chủ đích (loại Đ):
+    //   * CheckGatewayAuthentication: gate Mst_CardTypeController.cs:783; API MstCardTypeController.cs:259-266
+    //   * CheckAuthorize: gate Mst_CardTypeController.cs:784 (hệ thống đích chưa có hệ phân quyền)
+    //   * Sys_User_CheckAuthorize: Master.Loyalty.cs:5487-5501
+    //   * Ghi RequestLog/ReturnLog: Master.Loyalty.cs:5474-5481, 5572-5579
+    // ============================================================================================
+    [HttpPost("export")]
+    public async Task<IActionResult> Export([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] MstCardTypeExportReq? req)
+    {
+        req ??= new MstCardTypeExportReq();
+
+        // Nguồn: strWhereClause_Mst_CardType (:283-308) chỉ lọc theo KeyWord (like trên CardTypeName) và FlagActive (in),
+        // OrgID truyền vào (:797) nhưng KHÔNG được sử dụng trong hàm tạo WHERE clause -> không lọc OrgID.
+        // Ft_RecordStart = "0", Ft_RecordCount = "123456000", Rt_Cols_Mst_CardType = "*" (:812-816).
+        var (_, rows) = await GetXAsync(req.KeyWord, req.FlagActive, 0, 123456000, null);
+
+        // Nguồn :820, :836-838: nếu danh sách rỗng -> throw ServiceException("Không có dữ liệu")
+        if (rows == null || rows.Count == 0)
+        {
+            return PortResult.Fail("Mst_CardType_Export", "Message", "Không có dữ liệu");
+        }
+
+        // Tạo thư mục và đường dẫn file Excel xuất: BaseController.GenExcelExportFilePath (:826)
+        var webRoot = env.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = Path.Combine(env.ContentRootPath, "wwwroot");
+        }
+
+        // Lấy từ điển cột: Mst_CardTypeController.cs:824 gọi GetImportDicColums() (4 cột)
+        var dicColNames = GetImportDicColums();
+        var (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Mst_CardType");
+
+        // Ghi danh sách ra file Excel: ExcelExport.ExportToExcelFromList (:827) với sheet "Mst_CardType"
+        PortExcel.ExportToExcelFromList(rows, dicColNames, physicalPath, "Mst_CardType");
+
+        // Trả URL tải file: Data = { Url = GetRequestBaseAddress() + url } (:828-832)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+            }
+        });
+    }
+
     /// <summary>
     /// Chuyển Value như <c>Convert.ToDouble(objValue)</c> của nguồn (Master.Loyalty.cs:6002):
     /// null/thiếu -> 0; số -> giá trị; chuỗi số -> parse; chuỗi không phải số -> ném lỗi.
@@ -895,6 +979,27 @@ public class Mst_CardTypeControllerPort(AppDbContext db, IConfiguration config) 
     }
 
     #region DicColums
+    /// <summary>
+    /// Từ điển cột xuất Excel: gate Mst_CardTypeController.cs:889-901 (GetImportDicColums).
+    /// ĐẶC BIỆT LƯU Ý THEO NGUỒN: Nguồn tại Mst_CardTypeController.cs:824 sử dụng GetImportDicColums()
+    /// (dùng từ điển Import cho Export là thiết kế của nguồn).
+    /// Giữ đúng thứ tự 4 cột từ nguồn:
+    /// 1. CardType -> "Mã hạng thẻ (*)"
+    /// 2. CardTypeName -> "Tên hạng thẻ (*)"
+    /// 3. Value -> "Thứ tự (*)"
+    /// 4. FlagActive -> "Trạng thái"
+    /// </summary>
+    private static Dictionary<string, string> GetImportDicColums()
+    {
+        return new Dictionary<string, string>
+        {
+            { "CardType", "Mã hạng thẻ (*)" },
+            { "CardTypeName", "Tên hạng thẻ (*)" },
+            { "Value", "Thứ tự (*)" },
+            { "FlagActive", "Trạng thái" }
+        };
+    }
+
     private static Dictionary<string, string> GetImportDicColumsTemplate()
     {
         return new Dictionary<string, string>
