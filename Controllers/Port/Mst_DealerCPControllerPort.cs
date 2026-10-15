@@ -12,13 +12,13 @@ namespace MiniLoyalty.Controllers.Port;
 /// <summary>
 /// Port 1:1 Mst_DealerCPController.cs — Mst_DealerCP
 /// Chuỗi gọi nguồn:
-///   gate: Mst_DealerCPController.cs:26-106 (Search) + :107-230 (GetAllActive) + :231-296 (GetByDLCPCode) + :364-389 (strWhereClause_Mst_DealerCP) + :390-406 (strWhereClause_Mst_DealerCP_By_DLCPCode)
+///   gate: Mst_DealerCPController.cs:26-106 (Search) + :107-230 (GetAllActive) + :231-296 (GetByDLCPCode) + :297-360 (GetByOrgID) + :364-389 (strWhereClause_Mst_DealerCP) + :390-406 (strWhereClause_Mst_DealerCP_By_DLCPCode) + :407-419 (strWhereClause_Mst_DealerCP_By_OrgID)
 ///   API:  MstDealerCPController.cs:21-90 (WA_Mst_DealerCP_Get)
 ///   biz:  Master.Loyalty.cs:3937-4050 (WAS_Mst_DealerCP_Get) -> :4051-4206 (Mst_DealerCP_Get) -> :4209-4433 (Mst_DealerCP_GetX)
 ///
 /// Bỏ qua có chủ đích (loại Đ):
-/// - CheckGatewayAuthentication: gate Mst_DealerCPController.cs:35, 120; API MstDealerCPController.cs:42
-/// - CheckAuthorize: gate Mst_DealerCPController.cs:36, 121; dòng :241 đã bị comment out ở nguồn
+/// - CheckGatewayAuthentication: gate Mst_DealerCPController.cs:35, 120, 306; API MstDealerCPController.cs:42
+/// - CheckAuthorize: gate Mst_DealerCPController.cs:36, 121, 307; dòng :241 đã bị comment out ở nguồn
 /// - Nguồn gọi bằng tài khoản hệ thống viết cứng (tài khoản + mật khẩu viết cứng tại :264-265 — KHÔNG chép giá trị), đích chưa có phân quyền; KHÔNG chép thông tin đăng nhập vào mã
 /// - Sys_User_CheckAuthorize: Master.Loyalty.cs:4107-4124 (hệ thống đích chưa có hệ phân quyền)
 /// - Ghi RequestLog/ReturnLog: Master.Loyalty.cs:4097-4104, 4196-4203
@@ -52,7 +52,8 @@ public class Mst_DealerCPControllerPort : ControllerBase
             recordCount: 123456000,
             getDealer: true,
             getMap: true,
-            dlcpCodeEqual: null);
+            dlcpCodeEqual: null,
+            mapOrgIdEqual: null);
 
         return Ok(new
         {
@@ -100,9 +101,65 @@ public class Mst_DealerCPControllerPort : ControllerBase
             recordCount: 1,
             getDealer: true,
             getMap: false,
-            dlcpCodeEqual: req.DLCPCode);
+            dlcpCodeEqual: req.DLCPCode,
+            mapOrgIdEqual: null);
 
         // Nguồn: lấy phần tử đầu tiên Lst_Mst_DealerCP[0] nếu có (gate Mst_DealerCPController.cs:277-280)
+        return Ok(new
+        {
+            Success = true,
+            Data = rows.Count > 0 ? rows[0] : null
+        });
+    }
+
+    /// <summary>
+    /// Port 1:1 GetByOrgID action từ gate Mst_DealerCPController.cs:297-360.
+    /// Request JSON: { OrgID }.
+    /// Khi OrgID rỗng (null hoặc whitespace): nguồn kiểm tra !IsNullOrEmpty (:317),
+    /// bỏ qua truy vấn và trả về Success = true, Data = null (:346-347).
+    /// Khi OrgID có giá trị: lọc qua strWhereClause_Mst_DealerCP_By_OrgID (:407-419)
+    /// với điều kiện trên Map_DealerCP_Org.OrgID = OrgID (toán tử '=').
+    /// Điều kiện này nằm ở bảng nháp (#tbl_Mst_DealerCP_Filter_Draft trong Master.Loyalty.cs:4272-4283),
+    /// lọc các đại lý có liên kết với OrgID chỉ định.
+    /// Select cuối (:4328-4348) KHÔNG lọc lại theo OrgID, do đó với đại lý liên kết nhiều Org
+    /// (ví dụ DL02 map với cả 4020320001 và 4020320003),
+    /// dòng đầu tiên Lst_Mst_DealerCP[0] mang mo_OrgID là OrgID đầu tiên theo thứ tự kết quả (:341-344, ở đây là 4020320001),
+    /// CÓ THỂ KHÁC OrgID được hỏi (4020320003) — ĐÂY LÀ HÀNH VI CỦA NGUỒN.
+    /// Ft_RecordStart = "0", Ft_RecordCount = "1" (:334-335); getDealer = true, getMap = false (:338-339).
+    /// Trả về phần tử đầu tiên rows[0] hoặc null nếu không có dòng nào (:341-344).
+    ///
+    /// Bỏ qua có chủ đích (loại Đ):
+    /// - CheckGatewayAuthentication: gate Mst_DealerCPController.cs:306
+    /// - CheckAuthorize: gate Mst_DealerCPController.cs:307 (hệ thống đích chưa có hệ phân quyền)
+    /// - Sys_User_CheckAuthorize: Master.Loyalty.cs:4107-4124
+    /// - Ghi RequestLog/ReturnLog: Master.Loyalty.cs:4097-4104, 4196-4203
+    /// </summary>
+    [HttpPost("getbyorgid")]
+    public async Task<IActionResult> GetByOrgID([FromBody] Mst_DealerCPGetByOrgIDRequest? req)
+    {
+        // Khi OrgID rỗng: Success = true, Data = null và KHÔNG truy vấn (gate Mst_DealerCPController.cs:317, 346-347)
+        if (string.IsNullOrWhiteSpace(req?.OrgID))
+        {
+            return Ok(new
+            {
+                Success = true,
+                Data = (object?)null
+            });
+        }
+
+        // Lấy đúng 1 đại lý (recordStart = 0, recordCount = 1), toán tử '=', getDealer = true, getMap = false
+        var (_, rows, _) = await GetXAsync(
+            keyWord: null,
+            flagActiveCsv: null,
+            recordStart: 0,
+            recordCount: 1,
+            getDealer: true,
+            getMap: false,
+            dlcpCodeEqual: null,
+            mapOrgIdEqual: req.OrgID);
+
+        // Nguồn: lấy phần tử đầu tiên Lst_Mst_DealerCP[0] nếu có (gate Mst_DealerCPController.cs:341-344).
+        // mo_OrgID có thể khác OrgID được hỏi do select cuối không lọc lại theo OrgID (hành vi nguồn).
         return Ok(new
         {
             Success = true,
@@ -132,7 +189,8 @@ public class Mst_DealerCPControllerPort : ControllerBase
             recordCount: recordCount,
             getDealer: true,
             getMap: false,
-            dlcpCodeEqual: null);
+            dlcpCodeEqual: null,
+            mapOrgIdEqual: null);
 
         // Tính PageCount theo logic tầng gate Mst_DealerCPController.cs:81-89
         var pageCount = 0;
@@ -152,10 +210,11 @@ public class Mst_DealerCPControllerPort : ControllerBase
     }
 
     /// <summary>
-    /// Tách phần lọc + đếm + phân trang + select của Search, GetAllActive và GetByDLCPCode
+    /// Tách phần lọc + đếm + phân trang + select của Search, GetAllActive, GetByDLCPCode và GetByOrgID
     /// tương ứng Mst_DealerCP_GetX (Master.Loyalty.cs:4209-4433).
     /// Tham số getDealer và getMap tương ứng bGet_Mst_DealerCP (:4244) và bGet_Map_DealerCP_Org (:4245).
     /// Tham số dlcpCodeEqual lọc theo DLCPCode với toán tử '=' (strWhereClause_Mst_DealerCP_By_DLCPCode :390-406).
+    /// Tham số mapOrgIdEqual lọc theo OrgID trên Map_DealerCP_Org với toán tử '=' (strWhereClause_Mst_DealerCP_By_OrgID :407-419).
     /// </summary>
     private async Task<(int itemCount, List<Mst_DealerCPSearchResultItem> rows, List<Map_DealerCP_OrgResultItem> maps)> GetXAsync(
         string? keyWord,
@@ -164,13 +223,30 @@ public class Mst_DealerCPControllerPort : ControllerBase
         long recordCount,
         bool getDealer,
         bool getMap,
-        string? dlcpCodeEqual = null)
+        string? dlcpCodeEqual = null,
+        string? mapOrgIdEqual = null)
     {
         // 1. Khởi tạo truy vấn bảng Mst_DealerCP (#tbl_Mst_DealerCP_Filter_Draft trong Master.Loyalty.cs:4271-4283)
         // Lưu ý: nguồn `select distinct identity(...)` + left join Map_DealerCP_Org; port coi là distinct theo DLCPCode.
         var query = _db.Set<Mst_DealerCP>().AsNoTracking();
 
-        // 2. Lọc theo DLCPCode (toán tử '='): Mst_DealerCPController.cs:395-398
+        // 2. Lọc theo OrgID trên Map_DealerCP_Org: Mst_DealerCPController.cs:407-419
+        // sbSql.AddWhereClause(Tbl_Map_DealerCP_Org + TblMap_DealerCP_Org.OrgID, CUtils.StrValue(data.OrgID), "=");
+        // Nguồn áp dụng điều kiện này vào bảng nháp #tbl_Mst_DealerCP_Filter_Draft (Master.Loyalty.cs:4272-4283),
+        // nơi Mst_DealerCP left join Map_DealerCP_Org mdcpo on mdcp.DLCPCode = mdcpo.DLCPCode.
+        // Điều kiện mdcpo.OrgID = OrgID giữ lại các đại lý có ít nhất 1 dòng Map_DealerCP_Org khớp OrgID.
+        // KHÔNG lọc lại ở select cuối.
+        if (!string.IsNullOrWhiteSpace(mapOrgIdEqual))
+        {
+            query = query.Where(x => _db.Set<Map_DealerCP_Org>().Any(m =>
+                m.DLCPCode == x.DLCPCode &&
+                EF.Functions.Like(
+                    (m.OrgID ?? "").ToLower(),
+                    PortQuery.Equal(mapOrgIdEqual),
+                    PortQuery.Esc)));
+        }
+
+        // 3. Lọc theo DLCPCode (toán tử '='): Mst_DealerCPController.cs:395-398
         // sbSql.AddWhereClause(Tbl_Mst_DealerCP + TblMst_DealerCP.DLCPCode, CUtils.StrValue(data.DLCPCode), "=");
         // Nguồn dùng toán tử '=' không wildcard. Collation không phân biệt hoa/thường: dùng PortQuery.Equal và Esc.
         if (!string.IsNullOrWhiteSpace(dlcpCodeEqual))
@@ -181,7 +257,7 @@ public class Mst_DealerCPControllerPort : ControllerBase
                 PortQuery.Esc));
         }
 
-        // 3. Lọc theo KeyWord: Mst_DealerCPController.cs:369-372
+        // 4. Lọc theo KeyWord: Mst_DealerCPController.cs:369-372
         // sbSql.AddWhereClause(Tbl_Mst_DealerCP + TblMst_DealerCP.DLCPName, "%" + CUtils.StrValue(data.KeyWord) + "%", "like");
         // Nguồn lọc cột DLCPName với toán tử like '%KeyWord%'. Collation không phân biệt hoa/thường: dùng PortQuery.Contains và Esc.
         if (!string.IsNullOrWhiteSpace(keyWord))
@@ -192,7 +268,7 @@ public class Mst_DealerCPControllerPort : ControllerBase
                 PortQuery.Esc));
         }
 
-        // 4. Lọc theo FlagActive: Mst_DealerCPController.cs:378-386
+        // 5. Lọc theo FlagActive: Mst_DealerCPController.cs:378-386
         // Khối '=' (:374-377) đã bị comment out trong mã nguồn. Nguồn tách mảng dấu phẩy và dùng toán tử 'in'.
         // CẤM ==/.Contains() trên chuỗi trực tiếp mà hạ chữ hai phía và dùng danh sách ds.Contains.
         if (!string.IsNullOrWhiteSpace(flagActiveCsv))
@@ -207,7 +283,7 @@ public class Mst_DealerCPControllerPort : ControllerBase
             }
         }
 
-        // 4. Đếm MyCount: Master.Loyalty.cs:4286
+        // 6. Đếm MyCount: Master.Loyalty.cs:4286
         // "select Count(0) MyCount from #tbl_Mst_DealerCP_Filter_Draft t"
         // ItemCount = số DLCPCode distinct sau lọc (:4286).
         var itemCount = await query.CountAsync();
@@ -444,6 +520,14 @@ public class Mst_DealerCPSearchRequest
 public class Mst_DealerCPGetByDLCPCodeRequest
 {
     public string? DLCPCode { get; set; }
+}
+
+/// <summary>
+/// Request model cho action GetByOrgID — khớp tham số tại Mst_DealerCPController.cs:297
+/// </summary>
+public class Mst_DealerCPGetByOrgIDRequest
+{
+    public string? OrgID { get; set; }
 }
 
 /// <summary>
