@@ -14,7 +14,7 @@ namespace MiniLoyalty.Controllers.Port;
 /// <summary>
 /// Port 1:1 Mst_DealerCPController.cs — Mst_DealerCP
 /// Chuỗi gọi nguồn:
-///   gate: Mst_DealerCPController.cs:26-106 (Search) + :107-230 (GetAllActive) + :231-296 (GetByDLCPCode) + :297-360 (GetByOrgID) + :364-389 (strWhereClause_Mst_DealerCP) + :390-406 (strWhereClause_Mst_DealerCP_By_DLCPCode) + :407-419 (strWhereClause_Mst_DealerCP_By_OrgID) + :436-521 (CreateOld) + :700-770 (Update) + :774-837 (Delete)
+///   gate: Mst_DealerCPController.cs:26-106 (Search) + :107-230 (GetAllActive) + :231-296 (GetByDLCPCode) + :297-360 (GetByOrgID) + :364-389 (strWhereClause_Mst_DealerCP) + :390-406 (strWhereClause_Mst_DealerCP_By_DLCPCode) + :407-419 (strWhereClause_Mst_DealerCP_By_OrgID) + :436-521 (CreateOld) + :700-770 (Update) + :774-837 (Delete) + :839-903 (DeleteMultiple)
 ///   API:  MstDealerCPController.cs:21-90 (WA_Mst_DealerCP_Get) + :93-162 (WA_Mst_DealerCP_Create) + :165-234 (WA_Mst_DealerCP_Update) + :236-305 (WA_Mst_DealerCP_Delete)
 ///   biz:  Master.Loyalty.cs:3937-4050 (WAS_Mst_DealerCP_Get) -> :4051-4206 (Mst_DealerCP_Get) -> :4209-4433 (Mst_DealerCP_GetX)
 ///         Master.Loyalty.cs:2973-3055 (WAS_Mst_DealerCP_Create) -> :3056-3202 (Mst_DealerCP_Create) -> :3205-3322 (Mst_DealerCP_CreateX) -> :2870-2934 (Mst_DealerCP_CheckDB) -> :2935-2971 (Mst_DealerCP_UpdBU)
@@ -22,8 +22,8 @@ namespace MiniLoyalty.Controllers.Port;
 ///         Master.Loyalty.cs:3662-3739 (WAS_Mst_DealerCP_Delete) -> :3740-3876 (Mst_DealerCP_Delete) -> :3878-3935 (Mst_DealerCP_DeleteX) -> :2870-2934 (Mst_DealerCP_CheckDB)
 ///
 /// Bỏ qua có chủ đích (loại Đ):
-/// - CheckGatewayAuthentication: gate Mst_DealerCPController.cs:35, 120, 306, 456, 720, 783; API MstDealerCPController.cs:42, 114, 186, 257
-/// - CheckAuthorize: gate Mst_DealerCPController.cs:36, 121, 307, 457, 721, 784; dòng :241 đã bị comment out ở nguồn
+/// - CheckGatewayAuthentication: gate Mst_DealerCPController.cs:35, 120, 306, 456, 720, 783, 859; API MstDealerCPController.cs:42, 114, 186, 257
+/// - CheckAuthorize: gate Mst_DealerCPController.cs:36, 121, 307, 457, 721, 784, 860; dòng :241 đã bị comment out ở nguồn
 /// - Nguồn gọi bằng tài khoản hệ thống viết cứng (tài khoản + mật khẩu viết cứng tại :264-265 — KHÔNG chép giá trị), đích chưa có phân quyền; KHÔNG chép thông tin đăng nhập vào mã
 /// - Sys_User_CheckAuthorize: Master.Loyalty.cs:4107-4124, 3117-3130, 3475-3489, 3795-3809 (hệ thống đích chưa có hệ phân quyền)
 /// - Ghi RequestLog/ReturnLog: Master.Loyalty.cs:4097-4104, 4196-4203, 3098-3105, 3192-3199, 3456-3463, 3553-3560, 3776-3783, 3866-3873
@@ -807,28 +807,8 @@ public class Mst_DealerCPControllerPort : ControllerBase
     /// Request JSON: { DLCPCode }.
     /// 1. Kiểm tra mã rỗng: Gate Mst_DealerCPController.cs:793, 823 ném ServiceException("invalid_DLCPCode", "invalid_DLCPCode").
     ///    Khi DLCPCode null/rỗng/khoảng trắng -> trả về 400 ErridnLoyalty.invalid_DLCPCode.
-    /// 2. Bắt đầu 1 Transaction: Master.Loyalty.cs:3773 _cf.db.BeginTransaction().
-    /// 3. Chuẩn hoá mã qua StdParam: Trim, ToUpper, rỗng -> null (Master.Loyalty.cs:3904).
-    /// 4. Kiểm tra tồn tại trong DB qua Mst_DealerCP_CheckDB (Master.Loyalty.cs:3910-3915):
-    ///    strFlagExistToCheck = "1" (TConst.Flag.Yes), strFlagActiveListToCheck = "".
-    ///    Nếu không tìm thấy đại lý -> trả về 400 ErridnLoyalty.Mst_DealerCP_CheckDB_DLNotFound (:2896-2906).
-    /// 5. Giả lập ràng buộc khoá ngoại (FK):
-    ///    Ở DB SQL Server nguồn, có FK REFERENCES Mst_DealerCP(DLCPCode). Nếu còn dòng con tham chiếu,
-    ///    SQL Server chặn xóa và ném lỗi FK violation, Mst_DealerCP_Delete catch và trả lỗi mặc định
-    ///    ErridnLoyalty.Mst_DealerCP_Delete (Master.Loyalty.cs:3760, 3853).
-    ///    - Đã có ở đích: bảng Crd_Member (CrdMember.DLCodeRegis tham chiếu DLCPCode).
-    ///      Nếu có CrdMember trỏ tới -> rollback và trả 400 ErridnLoyalty.Mst_DealerCP_Delete.
-    ///    - GAP (chưa có ở đích, thêm kiểm tra khi port các bảng đó):
-    ///      + Map_QueryDealer_Member.DLCPCode
-    ///      + Prm_CarNew.DLCPCode
-    ///      + Prm_CarRecommend.DLCPCode
-    ///      + Mst_PromotionProgramSpec.DLCode
-    ///    - Bảng Map_DealerCP_Org KHÔNG có khoá ngoại (FK) -> nguồn xóa đại lý vẫn để lại dòng map
-    ///      (giữ nguyên theo nguồn, KHÔNG tự xóa map).
-    /// 6. Xóa dòng Mst_DealerCP: Master.Loyalty.cs:3926-3932 (DeleteX xóa dòng trong dtDB_Mst_DealerCP).
-    ///    KHÔNG chạy UpdBU (nguồn không gọi).
-    /// 7. Commit Transaction (Master.Loyalty.cs:3839 TDALUtils.DBUtils.CommitSafety).
-    /// 8. Thành công: gate :818 trả objJsonResultEntry.Data = null -> Ok(new { Success = true, Data = (object?)null }).
+    /// 2. Gọi DeleteXAsync để thực hiện nghiệp vụ xóa trong transaction riêng.
+    /// 3. Thành công: gate :818 trả objJsonResultEntry.Data = null -> Ok(new { Success = true, Data = (object?)null }).
     ///
     /// Bỏ qua có chủ đích (loại Đ):
     /// - CheckGatewayAuthentication: gate Mst_DealerCPController.cs:783, API MstDealerCPController.cs:257
@@ -846,18 +826,119 @@ public class Mst_DealerCPControllerPort : ControllerBase
             return PortResult.Fail("invalid_DLCPCode", "Check.DLCPCode", req?.DLCPCode);
         }
 
-        // 2. Bắt đầu 1 Transaction: Master.Loyalty.cs:3773 _cf.db.BeginTransaction()
+        // 2. Thực hiện nghiệp vụ xóa qua DeleteXAsync
+        var err = await DeleteXAsync(strDLCPCode);
+        if (err != null)
+        {
+            return err;
+        }
+
+        // 3. Thành công trả về Data = null: gate Mst_DealerCPController.cs:818
+        return Ok(new
+        {
+            Success = true,
+            Data = (object?)null
+        });
+    }
+
+    /// <summary>
+    /// Port 1:1 DeleteMultiple action từ gate Mst_DealerCPController.cs:839-903.
+    /// Chuỗi gọi: gate :839-903 -> lặp qua danh sách Lst_Mst_DealerCP, mỗi phần tử gọi
+    /// WA_Mst_DealerCP_Delete (:870-887) -> biz WAS_Mst_DealerCP_Delete -> Mst_DealerCP_Delete -> Mst_DealerCP_DeleteX.
+    ///
+    /// Request JSON: mảng [{ DLCPCode }].
+    /// 1. Kiểm tra body rỗng / null: Gate Mst_DealerCPController.cs:849-856
+    ///    if (!string.IsNullOrEmpty(strJson)) { ... } else { throw new ServiceException("strJson null"); }
+    ///    Khi body null hoặc rỗng -> trả về 400 ErridnLoyalty.Mst_DealerCP_Delete với Check.strJson = null.
+    /// 2. Danh sách rỗng `[]`: vòng lặp foreach không chạy, trả về Ok(Success = true, Data = null).
+    /// 3. Lặp tuần tự qua từng phần tử trong danh sách:
+    ///    Mỗi lần lặp là một lời gọi độc lập tới chuỗi nghiệp vụ Delete, sử dụng TRANSACTION RIÊNG
+    ///    (Master.Loyalty.cs:3773 _cf.db.BeginTransaction() và :3839 CommitSafety).
+    ///    - KHÔNG có bước kiểm tra DLCPCode rỗng ở tầng gate như Delete đơn (:793, 823);
+    ///      khi DLCPCode rỗng, lỗi phát sinh ở tầng nghiệp vụ Mst_DealerCP_CheckDB
+    ///      -> trả về 400 ErridnLoyalty.Mst_DealerCP_CheckDB_DLNotFound.
+    ///    - Hành vi "xóa một phần" (nguồn Mst_DealerCPController.cs:870-896):
+    ///      Nếu phần tử thứ k gặp lỗi, exception được ném ra và thoát khỏi vòng lặp ngay lập tức
+    ///      nhảy vào khối catch (ex) (:892-896).
+    ///      Do mỗi phần tử chạy trên một transaction riêng đã được commit, các phần tử TRƯỚC k
+    ///      ĐÃ BỊ XÓA VÀ KHÔNG BỊ ROLLBACK; các phần tử SAU k hoàn toàn không được xử lý.
+    ///      Đây là hành vi nguyên bản của hệ thống nguồn.
+    /// 4. Thành công: gate :889-890 trả objJsonResultEntry.Data = null -> Ok(new { Success = true, Data = (object?)null }).
+    ///
+    /// Bỏ qua có chủ đích (loại Đ):
+    /// - CheckGatewayAuthentication: gate Mst_DealerCPController.cs:859
+    /// - CheckAuthorize: gate Mst_DealerCPController.cs:860 (hệ thống đích chưa có hệ phân quyền)
+    /// - Sys_User_CheckAuthorize: Master.Loyalty.cs:3795-3809
+    /// - Ghi RequestLog/ReturnLog: Master.Loyalty.cs:3776-3783, 3866-3873
+    /// - Nguồn gọi bằng tài khoản hệ thống viết cứng, không chép thông tin đăng nhập vào mã
+    /// </summary>
+    [HttpPost("deletemultiple")]
+    public async Task<IActionResult> DeleteMultiple([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] List<Mst_DealerCPDeleteRequest>? req)
+    {
+        // 1. Kiểm tra body rỗng / null: Gate Mst_DealerCPController.cs:849-856
+        // if (!string.IsNullOrEmpty(strJson)) { ... } else { throw new ServiceException("strJson null"); }
+        if (req == null)
+        {
+            return PortResult.Fail("Mst_DealerCP_Delete", "Check.strJson", null);
+        }
+
+        // 2. Lặp tuần tự qua từng phần tử (gate Mst_DealerCPController.cs:870-887).
+        // Mỗi phần tử chạy trong 1 transaction riêng biệt (hàm DeleteXAsync).
+        // Nếu phần tử thứ k gặp lỗi -> return ngay lỗi đó (hành vi nguồn :870-896 "xóa một phần":
+        // các phần tử trước k đã commit thành công vào DB và KHÔNG bị rollback;
+        // các phần tử sau k không được xử lý).
+        foreach (var item in req)
+        {
+            var err = await DeleteXAsync(item?.DLCPCode);
+            if (err != null)
+            {
+                return err;
+            }
+        }
+
+        // 3. Thành công: gate Mst_DealerCPController.cs:889-890
+        return Ok(new
+        {
+            Success = true,
+            Data = (object?)null
+        });
+    }
+
+    /// <summary>
+    /// Nghiệp vụ xóa 1 đại lý, tương ứng chuỗi gọi:
+    /// API WA_Mst_DealerCP_Delete (MstDealerCPController.cs:236-305) -> biz WAS_Mst_DealerCP_Delete (Master.Loyalty.cs:3662-3739)
+    /// -> Mst_DealerCP_Delete (:3740-3876) -> Mst_DealerCP_DeleteX (:3878-3935) -> Mst_DealerCP_CheckDB (:2870-2934).
+    ///
+    /// Mỗi lần gọi mở 1 Transaction riêng (Master.Loyalty.cs:3773 _cf.db.BeginTransaction() và :3839 CommitSafety).
+    /// Chuẩn hoá mã qua StdParam: Trim, ToUpper, rỗng -> null (Master.Loyalty.cs:3904).
+    /// - Khi mã rỗng hoặc không tìm thấy đại lý trong DB: trả về 400 ErridnLoyalty.Mst_DealerCP_CheckDB_DLNotFound (Mst_DealerCP_CheckDB :2896-2906).
+    /// - Khi vi phạm khoá ngoại Crd_Member.DLCodeRegis: trả về 400 ErridnLoyalty.Mst_DealerCP_Delete (Master.Loyalty.cs:3760, 3853).
+    /// - Xóa dòng đại lý và Commit.
+    /// Trả về null nếu thành công; trả về IActionResult (PortResult.Fail) nếu có lỗi.
+    /// </summary>
+    private async Task<IActionResult?> DeleteXAsync(string? code)
+    {
+        // 1. Bắt đầu 1 Transaction riêng cho mỗi phần tử (Master.Loyalty.cs:3773 _cf.db.BeginTransaction())
         await using var tx = await _db.Database.BeginTransactionAsync();
         try
         {
+            // 2. Chuẩn hoá mã qua StdParam: Trim, ToUpper, rỗng -> null (Master.Loyalty.cs:3904)
+            string? strDLCPCode = StdParam(code);
+
             // 3. Kiểm tra đại lý tồn tại trong DB qua Mst_DealerCP_CheckDB (Master.Loyalty.cs:3910-3915):
             // strFlagExistToCheck = "1", strFlagActiveListToCheck = ""
+            if (string.IsNullOrEmpty(strDLCPCode))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_DealerCP_CheckDB_DLNotFound", "Check.DLCPCode", strDLCPCode);
+            }
+
             var dealer = await _db.Set<Mst_DealerCP>().FirstOrDefaultAsync(x =>
                 EF.Functions.Like((x.DLCPCode ?? "").ToLower(), PortQuery.Equal(strDLCPCode), PortQuery.Esc));
 
             if (dealer == null)
             {
-                // Không tìm thấy đại lý (:2896-2906) -> ErridnLoyalty.Mst_DealerCP_CheckDB_DLNotFound
+                // Không tìm thấy đại lý (Master.Loyalty.cs:2896-2906) -> ErridnLoyalty.Mst_DealerCP_CheckDB_DLNotFound
                 await tx.RollbackAsync();
                 return PortResult.Fail("Mst_DealerCP_CheckDB_DLNotFound", "Check.DLCPCode", strDLCPCode);
             }
@@ -889,12 +970,7 @@ public class Mst_DealerCPControllerPort : ControllerBase
             // Commit Transaction (Master.Loyalty.cs:3839 TDALUtils.DBUtils.CommitSafety)
             await tx.CommitAsync();
 
-            // Thành công trả về Data = null: gate Mst_DealerCPController.cs:818
-            return Ok(new
-            {
-                Success = true,
-                Data = (object?)null
-            });
+            return null;
         }
         catch (Exception)
         {
