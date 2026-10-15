@@ -545,13 +545,13 @@ public class Mst_CardTypeControllerPort(AppDbContext db, IConfiguration config, 
     //       2. Crd_Card.CardTypeUse (20221108.z11.Crd_Member.Crd_Card.sql:446)
     //       3. Crd_Member.CardTypeInit (20221108.z11.Crd_Member.Crd_Card.sql:463)
     //       4. Crd_Member.CardTypeUse (20221108.z11.Crd_Member.Crd_Card.sql:472)
+    //       5. Mst_RankPolicy.CardType (20221026.CreateDatabase.sql:273 — bổ sung sau khi port bảng ở #227)
     //     Nếu có bản ghi con -> rollback + PortResult.Fail("Mst_CardType_Delete", "Check.CardType", strCardType, "FK", "<Bang.Cot>").
     //   * Xoá dòng Mst_CardType (:6692-6695) và CommitSafety (:6606).
     //   * Thành công: gate :532-533 SetSuccess + Data = null.
     //
     // GAP:
     //   * Các bảng FK còn lại trong DDL nguồn chưa có ở đích -> thêm kiểm tra khi port các bảng đó:
-    //     - Mst_RankPolicy.CardType (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
     //     - Mst_BirthPolicyDtl.CardType (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
     //     - Mst_PromotionProgramSpec.CardType (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
     //     - Mst_PolicyMoneyToPointServiceDtl.CardType (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
@@ -719,8 +719,16 @@ public class Mst_CardTypeControllerPort(AppDbContext db, IConfiguration config, 
                 return PortResult.Fail("Mst_CardType_Delete", "Check.CardType", strCardType, "FK", "Crd_Member.CardTypeUse");
             }
 
+            // 4.5. Mst_RankPolicy.CardType (FK_MstCardTp_MstRankPolicy — 20221026.CreateDatabase.sql:273; bảng port ở #227)
+            var hasRankPolicy = await db.Set<Mst_RankPolicy>().AnyAsync(x =>
+                EF.Functions.Like((x.CardType ?? "").ToLower(), PortQuery.Equal(strCardType), PortQuery.Esc));
+            if (hasRankPolicy)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_CardType_Delete", "Check.CardType", strCardType, "FK", "Mst_RankPolicy.CardType");
+            }
+
             // GAP: Các bảng FK còn lại trong DDL nguồn chưa có ở đích -> thêm kiểm tra khi port các bảng đó:
-            // - Mst_RankPolicy.CardType (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
             // - Mst_BirthPolicyDtl.CardType (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
             // - Mst_PromotionProgramSpec.CardType (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
             // - Mst_PolicyMoneyToPointServiceDtl.CardType (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
