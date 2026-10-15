@@ -13,20 +13,22 @@ namespace MiniLoyalty.Controllers.Port;
 /// <summary>
 /// Port 1:1 Mst_DealerCPController.cs — Mst_DealerCP
 /// Chuỗi gọi nguồn:
-///   gate: Mst_DealerCPController.cs:26-106 (Search) + :107-230 (GetAllActive) + :231-296 (GetByDLCPCode) + :297-360 (GetByOrgID) + :364-389 (strWhereClause_Mst_DealerCP) + :390-406 (strWhereClause_Mst_DealerCP_By_DLCPCode) + :407-419 (strWhereClause_Mst_DealerCP_By_OrgID) + :436-521 (CreateOld)
-///   API:  MstDealerCPController.cs:21-90 (WA_Mst_DealerCP_Get) + :93-162 (WA_Mst_DealerCP_Create)
+///   gate: Mst_DealerCPController.cs:26-106 (Search) + :107-230 (GetAllActive) + :231-296 (GetByDLCPCode) + :297-360 (GetByOrgID) + :364-389 (strWhereClause_Mst_DealerCP) + :390-406 (strWhereClause_Mst_DealerCP_By_DLCPCode) + :407-419 (strWhereClause_Mst_DealerCP_By_OrgID) + :436-521 (CreateOld) + :700-770 (Update)
+///   API:  MstDealerCPController.cs:21-90 (WA_Mst_DealerCP_Get) + :93-162 (WA_Mst_DealerCP_Create) + :165-234 (WA_Mst_DealerCP_Update)
 ///   biz:  Master.Loyalty.cs:3937-4050 (WAS_Mst_DealerCP_Get) -> :4051-4206 (Mst_DealerCP_Get) -> :4209-4433 (Mst_DealerCP_GetX)
 ///         Master.Loyalty.cs:2973-3055 (WAS_Mst_DealerCP_Create) -> :3056-3202 (Mst_DealerCP_Create) -> :3205-3322 (Mst_DealerCP_CreateX) -> :2870-2934 (Mst_DealerCP_CheckDB) -> :2935-2971 (Mst_DealerCP_UpdBU)
+///         Master.Loyalty.cs:3323-3406 (WAS_Mst_DealerCP_Update) -> :3407-3563 (Mst_DealerCP_Update) -> :3565-3660 (Mst_DealerCP_UpdateX) -> :2870-2934 (Mst_DealerCP_CheckDB)
 ///
 /// Bỏ qua có chủ đích (loại Đ):
-/// - CheckGatewayAuthentication: gate Mst_DealerCPController.cs:35, 120, 306, 456; API MstDealerCPController.cs:42, 114
-/// - CheckAuthorize: gate Mst_DealerCPController.cs:36, 121, 307, 457; dòng :241 đã bị comment out ở nguồn
+/// - CheckGatewayAuthentication: gate Mst_DealerCPController.cs:35, 120, 306, 456, 720; API MstDealerCPController.cs:42, 114, 186
+/// - CheckAuthorize: gate Mst_DealerCPController.cs:36, 121, 307, 457, 721; dòng :241 đã bị comment out ở nguồn
 /// - Nguồn gọi bằng tài khoản hệ thống viết cứng (tài khoản + mật khẩu viết cứng tại :264-265 — KHÔNG chép giá trị), đích chưa có phân quyền; KHÔNG chép thông tin đăng nhập vào mã
-/// - Sys_User_CheckAuthorize: Master.Loyalty.cs:4107-4124, 3117-3130 (hệ thống đích chưa có hệ phân quyền)
-/// - Ghi RequestLog/ReturnLog: Master.Loyalty.cs:4097-4104, 4196-4203, 3098-3105, 3192-3199
-/// - LogLUBy gán cố định "port" do hệ thống đích chưa có session người dùng (Master.Loyalty.cs:3305)
+/// - Sys_User_CheckAuthorize: Master.Loyalty.cs:4107-4124, 3117-3130, 3475-3489 (hệ thống đích chưa có hệ phân quyền)
+/// - Ghi RequestLog/ReturnLog: Master.Loyalty.cs:4097-4104, 4196-4203, 3098-3105, 3192-3199, 3456-3463, 3553-3560
+/// - LogLUBy gán cố định "port" do hệ thống đích chưa có session người dùng (Master.Loyalty.cs:3305, 3650)
 /// - Biz_NetworkID lấy từ cấu hình IConfiguration, mặc định "1001" nếu thiếu (Common.cs:39, 124; Master.Loyalty.cs:3293)
 /// - Bỏ qua Sequence WA_Seq_Common_Get (gate dòng 468-488 nguồn đã comment out, DLCPCode lấy từ client)
+/// - Không gọi Mst_DealerCP_UpdBU trong Update do nguồn không cập nhật DLCPCodeParent hay cấu trúc BU (Master.Loyalty.cs:3565-3660)
 /// </summary>
 [ApiController]
 [Route("api/mst_dealercp")]
@@ -236,12 +238,13 @@ public class Mst_DealerCPControllerPort : ControllerBase
         try
         {
             // 2. Chuẩn hoá dữ liệu input (Master.Loyalty.cs:3238-3242):
-            // StdParam = trim; StdStr = trim (rỗng -> null)
-            string? strDLCPCode = req.DLCPCode?.Trim();
-            string? strDLCPCodeParent = string.IsNullOrWhiteSpace(req.DLCPCodeParent) ? null : req.DLCPCodeParent.Trim();
-            string? strDLCPName = string.IsNullOrWhiteSpace(req.DLCPName) ? null : req.DLCPName.Trim();
-            string? strDLCPPhoneNo = string.IsNullOrWhiteSpace(req.DLCPPhoneNo) ? null : req.DLCPPhoneNo.Trim();
-            string? strRemark = string.IsNullOrWhiteSpace(req.Remark) ? null : req.Remark.Trim();
+            // StdParam = Trim().ToUpper() rỗng -> null (05.Refs.Biz\Biz\Loyalty.TVO\Loyalty.TVO.Utils\Utils.cs:29);
+            // StdStr = Trim().Normalize() rỗng -> null (05.Refs.Biz\Biz\Loyalty.TVO\Loyalty.TVO.Utils\Utils.cs:29 (cùng tệp, bản TVAN có StdStr = Trim().Normalize(); StdFlag ở :89))
+            string? strDLCPCode = StdParam(req.DLCPCode);
+            string? strDLCPCodeParent = StdParam(req.DLCPCodeParent);
+            string? strDLCPName = StdStr(req.DLCPName);
+            string? strDLCPPhoneNo = StdStr(req.DLCPPhoneNo);
+            string? strRemark = StdStr(req.Remark);
 
             // 3. Kiểm tra mã đại lý: Master.Loyalty.cs:3248-3258
             // if (strDLCPCode == null || strDLCPCode.Length < 1) -> ErridnLoyalty.Mst_DealerCP_Create_InvalidDLCPCode
@@ -684,6 +687,153 @@ public class Mst_DealerCPControllerPort : ControllerBase
 
         await _db.SaveChangesAsync();
     }
+
+    /// <summary>
+    /// Port 1:1 Update action từ gate Mst_DealerCPController.cs:700-770.
+    /// Chuỗi gọi: gate :700-770 -> API WA_Mst_DealerCP_Update (:165-234) -> biz WAS_Mst_DealerCP_Update (Master.Loyalty.cs:3323-3406)
+    /// -> Mst_DealerCP_Update (:3407-3563) -> Mst_DealerCP_UpdateX (:3565-3660) -> Mst_DealerCP_CheckDB (:2870-2934).
+    /// </summary>
+    [HttpPost("update")]
+    public async Task<IActionResult> Update([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] Mst_DealerCPUpdateRequest? req)
+    {
+        // 1. Kiểm tra body rỗng / null: Gate Mst_DealerCPController.cs:710-716
+        // if (!string.IsNullOrEmpty(strJson)) { ... } else { throw new Exception("strJson null"); }
+        if (req == null)
+        {
+            return PortResult.Fail("Mst_DealerCP_Update", "Check.strJson", null);
+        }
+
+        // Bắt đầu 1 Transaction: Master.Loyalty.cs:3453 _cf.db.BeginTransaction()
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // 2. Chuẩn hoá dữ liệu input (Master.Loyalty.cs:3608-3613):
+            // StdParam: mã DLCPCode qua Trim().ToUpper(), rỗng -> null (05.Refs.Biz\Biz\Loyalty.TVO\Loyalty.TVO.Utils\Utils.cs:29)
+            // StdStr: DLCPName, DLCPPhoneNo, Remark qua Trim().Normalize(), rỗng -> null (05.Refs.Biz\Biz\Loyalty.TVO\Loyalty.TVO.Utils\Utils.cs:29 (cùng tệp, bản TVAN có StdStr = Trim().Normalize(); StdFlag ở :89))
+            // StdFlag: FlagActive, FlagBirthPoints qua "1" nếu "1", mọi giá trị khác -> "0"
+            string? strDLCPCode = StdParam(req.DLCPCode);
+            string? strDLCPName = StdStr(req.DLCPName);
+            string? strDLCPPhoneNo = StdStr(req.DLCPPhoneNo);
+            string strFlagActive = StdFlag(req.FlagActive);
+            string strFlagBirthPoints = StdFlag(req.FlagBirthPoints);
+            string? strRemark = StdStr(req.Remark);
+
+            // CẢNH BÁO / HÀNH VI NGUỒN (Master.Loyalty.cs:3611-3612):
+            // Gate luôn đưa FlagActive và FlagBirthPoints vào Ft_Cols_Upd (Mst_DealerCPController.cs:737-738),
+            // và UpdateX dùng StdFlag(objFlagActive) / StdFlag(objFlagBirthPoints).
+            // StdFlag coi null / thiếu / không phải "1" đều thành "0".
+            // Vì vậy, nếu request JSON không truyền FlagActive hoặc FlagBirthPoints, giá trị trong DB sẽ bị cập nhật về "0".
+
+            // 3. Chuỗi Ft_Cols_Upd do gate gửi lên: Mst_DealerCPController.cs:730-738
+            var strFt_Cols_Upd = "";
+            var tblMstDealerCP = "Mst_DealerCP.";
+            strFt_Cols_Upd += string.Format("{0}{1},", tblMstDealerCP, "DLCPCode");
+            strFt_Cols_Upd += string.Format("{0}{1},", tblMstDealerCP, "DLCPName");
+            strFt_Cols_Upd += string.Format("{0}{1},", tblMstDealerCP, "DLCPCodeParent");
+            strFt_Cols_Upd += string.Format("{0}{1},", tblMstDealerCP, "DLCPPhoneNo");
+            strFt_Cols_Upd += string.Format("{0}{1},", tblMstDealerCP, "Remark");
+            strFt_Cols_Upd += string.Format("{0}{1},", tblMstDealerCP, "FlagActive");
+            strFt_Cols_Upd += string.Format("{0}{1},", tblMstDealerCP, "FlagBirthPoints");
+
+            // Chuẩn hoá Ft_Cols_Upd theo Master.Loyalty.cs:3605: StdParam(objFt_Cols_Upd)
+            strFt_Cols_Upd = StdParam(strFt_Cols_Upd) ?? "";
+
+            // So khớp các cột được phép cập nhật: Master.Loyalty.cs:3615-3619
+            // Viết rõ trong code, KHÔNG rút gọn thành "luôn cập nhật 5 cột" để sau này đổi gate thì đổi 1 chỗ
+            bool bUpd_DLCPName = strFt_Cols_Upd.Contains("Mst_DealerCP.DLCPName".ToUpperInvariant());
+            bool bUpd_DLCPPhoneNo = strFt_Cols_Upd.Contains("Mst_DealerCP.DLCPPhoneNo".ToUpperInvariant());
+            bool bUpd_FlagActive = strFt_Cols_Upd.Contains("Mst_DealerCP.FlagActive".ToUpperInvariant());
+            bool bUpd_FlagBirthPoints = strFt_Cols_Upd.Contains("Mst_DealerCP.FlagBirthPoints".ToUpperInvariant());
+            bool bUpd_Remark = strFt_Cols_Upd.Contains("Mst_DealerCP.Remark".ToUpperInvariant());
+
+            // 4. Kiểm tra tồn tại đại lý trong DB: Master.Loyalty.cs:3625-3631 -> Mst_DealerCP_CheckDB (:2870-2934)
+            // strFlagExistToCheck = "1" (TConst.Flag.Yes). So mã qua PortQuery.Equal + Like (không phân biệt hoa/thường)
+            if (string.IsNullOrEmpty(strDLCPCode))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_DealerCP_CheckDB_DLNotFound", "Check.DLCPCode", strDLCPCode);
+            }
+
+            var dealer = await _db.Set<Mst_DealerCP>().FirstOrDefaultAsync(x =>
+                EF.Functions.Like((x.DLCPCode ?? "").ToLower(), PortQuery.Equal(strDLCPCode), PortQuery.Esc));
+
+            if (dealer == null)
+            {
+                // Không tìm thấy đại lý (:2896-2906) -> ErridnLoyalty.Mst_DealerCP_CheckDB_DLNotFound
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_DealerCP_CheckDB_DLNotFound", "Check.DLCPCode", strDLCPCode);
+            }
+
+            // 5. Cập nhật các cột có cờ hiệu lực: Master.Loyalty.cs:3643-3650
+            // Lưu ý: DLCPCodeParent dù có trong Ft_Cols_Upd của gate nhưng UpdateX KHÔNG có cờ cập nhật, nên KHÔNG đổi DLCPCodeParent.
+            // KHÔNG chạy Mst_DealerCP_UpdBU vì cấu trúc BU không thay đổi.
+            if (bUpd_DLCPName) dealer.DLCPName = strDLCPName;
+            if (bUpd_DLCPPhoneNo) dealer.DLCPPhoneNo = strDLCPPhoneNo;
+            if (bUpd_FlagActive) dealer.FlagActive = strFlagActive;
+            if (bUpd_FlagBirthPoints) dealer.FlagBirthPoints = strFlagBirthPoints;
+            if (bUpd_Remark) dealer.Remark = strRemark;
+
+            // Cột nhật ký hệ thống: Master.Loyalty.cs:3649-3650
+            dealer.LogLUDTimeUTC = DateTime.UtcNow;
+            dealer.LogLUBy = "port"; // Đích chưa có session người dùng (bỏ qua loại Đ)
+
+            await _db.SaveChangesAsync();
+
+            // Commit Transaction (Master.Loyalty.cs:3526 TDALUtils.DBUtils.CommitSafety)
+            await tx.CommitAsync();
+
+            // Thành công trả về Data = null: gate Mst_DealerCPController.cs:756-757
+            return Ok(new
+            {
+                Success = true,
+                Data = (object?)null
+            });
+        }
+        catch (Exception)
+        {
+            await tx.RollbackAsync();
+            throw;
+        }
+    }
+
+    #region Helper chuẩn hoá input (05.Refs.Biz\Biz\Loyalty.TVO\Loyalty.TVO.Utils\Utils.cs)
+    /// <summary>
+    /// Chuẩn hoá tham số mã: Trim, ToUpper, rỗng -> null.
+    /// Dùng cho mã (DLCPCode, DLCPCodeParent...).
+    /// Nguồn tham chiếu: 05.Refs.Biz\Biz\Loyalty.TVO\Loyalty.TVO.Utils\Utils.cs:29
+    /// </summary>
+    private static string? StdParam(object? val)
+    {
+        if (val == null) return null;
+        var s = val.ToString()?.Trim();
+        return string.IsNullOrEmpty(s) ? null : s.ToUpperInvariant();
+    }
+
+    /// <summary>
+    /// Chuẩn hoá chuỗi: Trim, Normalize, rỗng -> null.
+    /// Dùng cho tên, ghi chú (DLCPName, DLCPPhoneNo, Remark...).
+    /// Nguồn tham chiếu: 05.Refs.Biz\Biz\Loyalty.TVO\Loyalty.TVO.Utils\Utils.cs:89
+    /// </summary>
+    private static string? StdStr(object? val)
+    {
+        if (val == null) return null;
+        var s = val.ToString()?.Trim();
+        if (string.IsNullOrEmpty(s)) return null;
+        return s.Normalize();
+    }
+
+    /// <summary>
+    /// Chuẩn hoá cờ: "1" nếu đúng "1", mọi giá trị khác (kể cả null/thiếu/rỗng) -> "0".
+    /// Dùng cho cờ (FlagActive, FlagBirthPoints...).
+    /// Nguồn tham chiếu: 05.Refs.Biz\Biz\Loyalty.TVO\Loyalty.TVO.Utils\Utils.cs
+    /// </summary>
+    private static string StdFlag(object? val)
+    {
+        if (val == null) return "0";
+        var s = val.ToString()?.Trim();
+        return s == "1" ? "1" : "0";
+    }
+    #endregion
 }
 
 /// <summary>
@@ -697,6 +847,21 @@ public class Mst_DealerCPCreateOldRequest
     public string? DLCPCodeParent { get; set; }
     public string? DLCPName { get; set; }
     public string? DLCPPhoneNo { get; set; }
+    public string? Remark { get; set; }
+}
+
+/// <summary>
+/// Request model cho action Update — khớp tham số tại gate Mst_DealerCPController.cs:700, 712, 730-738
+/// và biz Master.Loyalty.cs:3574-3580.
+/// </summary>
+public class Mst_DealerCPUpdateRequest
+{
+    public string? DLCPCode { get; set; }
+    public string? DLCPCodeParent { get; set; }
+    public string? DLCPName { get; set; }
+    public string? DLCPPhoneNo { get; set; }
+    public object? FlagActive { get; set; }
+    public object? FlagBirthPoints { get; set; }
     public string? Remark { get; set; }
 }
 
