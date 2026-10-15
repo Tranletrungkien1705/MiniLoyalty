@@ -10,13 +10,14 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục quận/huyện (Mst_District) của dự án nguồn 2022.7.Loyalty (#139, #140, #141).
+// PORT 1:1 — màn danh mục quận/huyện (Mst_District) của dự án nguồn 2022.7.Loyalty (#139, #140, #141, #142).
 //
 // Nguồn controller (tầng gate):
 //   Mst_DistrictController.cs:31-111   Search              -> WA_Mst_District_Get
 //   Mst_DistrictController.cs:113-177  GetDetail           -> WA_Mst_District_Get
 //   Mst_DistrictController.cs:179-250  GetByProvinceCode   -> WA_Mst_District_Get
-//   Mst_DistrictController.cs:818-833  strWhereClause_Mst_District (mệnh đề lọc Search)
+//   Mst_DistrictController.cs:252-315  GetAllActive        -> WA_Mst_District_Get
+//   Mst_DistrictController.cs:818-833  strWhereClause_Mst_District (mệnh đề lọc Search, GetAllActive)
 //   Mst_DistrictController.cs:835-863  strWhereClause_Mst_District_Detail (mệnh đề lọc GetDetail, GetByProvinceCode)
 // Nguồn API:
 //   MstDistrictController.cs:20-91     WA_Mst_District_Get
@@ -32,9 +33,10 @@ namespace MiniLoyalty.Controllers.Port;
 //   * GetByProvinceCode: nếu ProvinceCode rỗng -> Data = { Lst_Mst_District = null } (:198, :234-237).
 //   * GetByProvinceCode: nguồn gán FlagActive = "1" nếu rỗng (:201-203), nhưng strWhereClause_Mst_District_Detail (:848-851) bị comment nên KHÔNG lọc cờ hoạt động (huyện '0' vẫn lấy được).
 //   * GetByProvinceCode: Ft_RecordStart = "0", Ft_RecordCount = "123456000" (:221-222) -> trả Lst_Mst_District = rows.Count > 0 ? rows : null (:228-237).
+//   * GetAllActive: không body, Ft_RecordStart = "0", Ft_RecordCount = "123456000" (:287-288); gọi strWhereClause_Mst_District với FlagActive = "1" (:272-275) -> lọc FlagActive = '1' CÓ TÁC DỤNG (khác GetByProvinceCode); trả Data = lst_Mst_District (danh sách trần, null nếu rỗng — :298-299, KHÁC Mst_Province bọc { Lst_Mst_Province }).
 //   * Lọc KeyWord: like '%x%' trên DistrictName (:823-826).
 //   * Lọc FlagActive: toán tử = (:827-830) — KHÁC Province dùng IN ('a','b').
-//   * OrgID: gate nhận (:31, :61, :125, :149) nhưng strWhereClause_Mst_District (:818-833) và strWhereClause_Mst_District_Detail (:835-863) KHÔNG lọc OrgID.
+//   * OrgID: gate nhận (:31, :61, :125, :149, :264, :285) nhưng strWhereClause_Mst_District (:818-833) và strWhereClause_Mst_District_Detail (:835-863) KHÔNG lọc OrgID.
 //   * Chia trang theo md.DistrictCode asc (:1890), select cuối sắp theo t.MyIdxSeq asc (:1929).
 //   * Select cuối: t.MyIdxSeq, md.* (:1923-1929) — KHÔNG join Mst_Province.
 //   * MyIdxSeq 0-based identity (:1884).
@@ -160,6 +162,30 @@ public class Mst_DistrictControllerPort(AppDbContext db) : ControllerBase
 
         // Nguồn Mst_DistrictController.cs:228-237: Data = new { Lst_Mst_District = rows.Count > 0 ? rows : null }
         return Ok(new { Success = true, Data = new { Lst_Mst_District = rows.Count > 0 ? rows : null } });
+    }
+
+    // ============================================================================================
+    // GetAllActive — nguồn Mst_DistrictController.cs:252-312 (#142).
+    // Mệnh đề lọc: strWhereClause_Mst_District (Mst_DistrictController.cs:818-833).
+    // Gate:
+    //   - Không nhận body: gọi trực tiếp [HttpPost("getallactive")].
+    //   - Gọi strWhereClause_Mst_District với { FlagActive = "1" } (:272-275).
+    //   - Trong strWhereClause_Mst_District (:827-830), FlagActive được lọc với toán tử '=' -> CÓ TÁC DỤNG (khác GetByProvinceCode).
+    //   - Ft_RecordStart = "0", Ft_RecordCount = "123456000" (:287-288) -> lấy toàn bộ huyện có cờ hoạt động '1'.
+    //   - Trả Data = lst_Mst_District (danh sách trần, null nếu rỗng — :298-299, KHÁC Mst_Province bọc { Lst_Mst_Province }).
+    // ============================================================================================
+    [HttpPost("getallactive")]
+    public async Task<IActionResult> GetAllActive()
+    {
+        // Nguồn Mst_DistrictController.cs:272-275: strWhereClause_Mst_District với FlagActive = "1".
+        // Ft_RecordStart = "0", Ft_RecordCount = "123456000" (gate :287-288).
+        var (_, rows) = await GetXAsync(null, "1", 0, 123456000);
+
+        // Nguồn Mst_DistrictController.cs:294-299:
+        // if (objRT_Mst_District.Lst_Mst_District != null && objRT_Mst_District.Lst_Mst_District.Count > 0)
+        //     lst_Mst_District = objRT_Mst_District.Lst_Mst_District;
+        // objJsonResultEntry.Data = lst_Mst_District; (danh sách trần, null nếu rỗng; KHÁC Mst_Province bọc { Lst_Mst_Province })
+        return Ok(new { Success = true, Data = rows.Count > 0 ? rows : null });
     }
 
     /// <summary>
