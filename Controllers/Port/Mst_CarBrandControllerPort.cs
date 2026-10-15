@@ -15,12 +15,18 @@ namespace MiniLoyalty.Controllers.Port;
 // Nguồn controller (tầng gate):
 //   Mst_CarBrandController.cs:25-105   Search              -> WA_Mst_CarBrand_Get
 //   Mst_CarBrandController.cs:283-308  strWhereClause_Mst_CarBrand (mệnh đề lọc Search)
+//   Mst_CarBrandController.cs:332-419  Create              -> WA_Mst_CarBrand_Create (#80)
 // Nguồn API:
 //   MstCarBrandController.cs:238-307   WA_Mst_CarBrand_Get
+//   MstCarBrandController.cs:20-90     WA_Mst_CarBrand_Create
 // Nguồn biz:
 //   Master.Loyalty.cs:93-193   WAS_Mst_CarBrand_Get
 //   Master.Loyalty.cs:194-346  Mst_CarBrand_Get
 //   Master.Loyalty.cs:347-501  Mst_CarBrand_GetX (SQL :400-447)
+//   Master.Loyalty.cs:502-584  WAS_Mst_CarBrand_Create
+//   Master.Loyalty.cs:585-731  Mst_CarBrand_Create
+//   Master.Loyalty.cs:732-828  Mst_CarBrand_CreateX
+//   Master.Loyalty.cs:28-91    Mst_CarBrand_CheckDB
 //
 // GIỮ ĐÚNG NGUỒN:
 //   * Endpoint là POST (nguồn [AcceptVerbs("POST")]).
@@ -29,14 +35,16 @@ namespace MiniLoyalty.Controllers.Port;
 //   * Chia trang theo mcb.BrandCode asc (:407), select cuối sắp theo t.MyIdxSeq asc (:441-447).
 //   * MyIdxSeq 0-based identity (:401).
 //   * PageSize = 0 -> DataList rỗng, PageCount = 0 (gate :83-94).
+//   * Create: BrandCode, NetworkID, BrandName qua StdParam (BrandName viết hoa ToUpper :764);
+//     Remark qua StdStr. Kiểm tra BrandCode rỗng/trùng; KHÔNG kiểm tra BrandName/NetworkID.
 //
 // Bỏ qua có chủ đích (loại Đ):
-//   - CheckGatewayAuthentication: gate :34; API MstCarBrandController.cs:259-264
-//   - CheckAuthorize: gate :35 (hệ thống đích chưa có hệ phân quyền)
+//   - CheckGatewayAuthentication: gate :34, :352; API MstCarBrandController.cs:259-264, :42
+//   - CheckAuthorize: gate :35, :353 (hệ thống đích chưa có hệ phân quyền)
 //   - Nguồn gọi bằng tài khoản hệ thống viết cứng (tài khoản + mật khẩu viết cứng — KHÔNG chép giá trị),
 //     đích chưa có phân quyền; KHÔNG chép thông tin đăng nhập vào mã
-//   - Ghi RequestLog/ReturnLog: Master.Loyalty.cs:238-245, 336-343
-//   - Sys_User_CheckAuthorize: Master.Loyalty.cs:251-264
+//   - Ghi RequestLog/ReturnLog: Master.Loyalty.cs:238-245, 336-343, 628-635, 721-728
+//   - Sys_User_CheckAuthorize: Master.Loyalty.cs:251-264, 647-660
 // ============================================================================================
 
 /// <summary>Port 1:1 <c>Mst_CarBrandSearch</c> — tham số lọc + phân trang của màn (Mst_CarBrandController.cs:25, 52-56).</summary>
@@ -52,6 +60,19 @@ public class MstCarBrandSearchReq
 public class MstCarBrandGetByBrandCodeReq
 {
     public string? BrandCode { get; set; }            // Mã hãng xe cần lấy — :238-241
+}
+
+/// <summary>
+/// Port 1:1 <c>Create</c> — body JSON 4 trường của model nguồn (Mst_CarBrandController.cs:332-419).
+/// Nguồn deserialize thẳng vào TModelLoyaltys.Mst_CarBrand (mọi cột là object) rồi truyền
+/// BrandCode, NetworkID, BrandName, Remark xuống biz (Master.Loyalty.cs:551-554).
+/// </summary>
+public class MstCarBrandCreateReq
+{
+    public string? BrandCode { get; set; }            // Mã hãng xe — :551
+    public string? NetworkID { get; set; }            // NetworkID lấy từ JSON, KHÔNG từ cấu hình — :552
+    public string? BrandName { get; set; }            // Tên hãng xe (bị viết hoa do dùng StdParam) — :553, :764
+    public string? Remark { get; set; }               // Ghi chú — :554
 }
 
 [ApiController]
@@ -196,4 +217,133 @@ public class Mst_CarBrandControllerPort : ControllerBase
 
         return (itemCount, rows);
     }
+
+    // ============================================================================================
+    // Create — nguồn Mst_CarBrandController.cs:332-419 (gate) -> MstCarBrandController.cs:20-90 (API)
+    //   -> Master.Loyalty.cs:502-584 (WAS_Mst_CarBrand_Create) -> :585-731 (Mst_CarBrand_Create)
+    //   -> :732-828 (Mst_CarBrand_CreateX) -> :28-91 (Mst_CarBrand_CheckDB).
+    //
+    // GIỮ ĐÚNG NGUỒN:
+    //   * Body JSON 4 trường: BrandCode, NetworkID, BrandName, Remark (:551-554).
+    //     NetworkID lấy TỪ JSON, KHÔNG từ cấu hình.
+    //   * Chuẩn hoá (:763-766): BrandCode = StdParam (Trim+ToUpper, rỗng->null);
+    //     BrandName = StdParam (Trim+ToUpper, rỗng->null — tên hãng xe bị VIẾT HOA, hành vi nguồn :764);
+    //     NetworkID = StdParam (Trim+ToUpper, rỗng->null);
+    //     Remark = StdStr (Trim+Normalize, rỗng->null).
+    //   * Kiểm tra THEO THỨ TỰ (:775-794):
+    //       1) BrandCode null/rỗng -> ErridnLoyalty.Mst_CarBrand_Create_InvalidBrandCode (:775-785)
+    //       2) CheckDB(BrandCode, FlagExist "0") -> ErridnLoyalty.Mst_CarBrand_CheckDB_BrandExist nếu đã tồn tại (:787-793 -> :65-75).
+    //       KHÔNG kiểm tra tên hãng (BrandName), KHÔNG kiểm tra NetworkID (:773-796).
+    //   * Lưu (:804-820): BrandCode, BrandName, NetworkID, Remark, FlagActive = "1",
+    //     LogLUDTimeUTC = UtcNow, LogLUBy = "port".
+    //   * Thành công: gate :403-404 SetSuccess + Data = null.
+    //
+    // Bỏ qua có chủ đích (loại Đ):
+    //   * CheckGatewayAuthentication/CheckAuthorize (gate :352-353), Sys_User_CheckAuthorize (:647-660):
+    //     hệ thống đích chưa có hệ phân quyền.
+    //   * Ghi RequestLog/ReturnLog (:628-635, :721-728).
+    //   * LogLUBy gán cố định "port" do đích chưa có session người dùng (:811).
+    // ============================================================================================
+    [HttpPost("create")]
+    public async Task<IActionResult> Create([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] MstCarBrandCreateReq? req)
+    {
+        // 1. Body rỗng/null: gate Mst_CarBrandController.cs:342-348 ném ServiceException("strJson null") -> mã mặc định Mst_CarBrand_Create.
+        if (req == null)
+        {
+            return PortResult.Fail("Mst_CarBrand_Create", "Check.strJson", null);
+        }
+
+        // 2. Mở 1 transaction cho toàn bộ nghiệp vụ (Master.Loyalty.cs:625 _cf.db.BeginTransaction()).
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // 3. Chuẩn hoá dữ liệu input (Master.Loyalty.cs:763-766):
+            //    StdParam = Trim().ToUpper(), rỗng -> null (05.Refs.Biz\Biz\Loyalty.TVO\Loyalty.TVO.Utils\Utils.cs:29).
+            //    StdStr   = Trim().Normalize(), rỗng -> null (cùng tệp Utils.cs:29).
+            //    CẢNH BÁO: BrandName dùng StdParam (:764) nên tên hãng xe bị VIẾT HOA (ToUpper) theo đúng hành vi nguồn!
+            string? strBrandCode = StdParam(req.BrandCode);
+            string? strBrandName = StdParam(req.BrandName);
+            string? strNetworkID = StdParam(req.NetworkID);
+            string? strRemark = StdStr(req.Remark);
+
+            // 4. Kiểm tra dữ liệu:
+            // 4.1. BrandCode null/rỗng -> ErridnLoyalty.Mst_CarBrand_Create_InvalidBrandCode (:775-785).
+            if (string.IsNullOrEmpty(strBrandCode))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_CarBrand_Create_InvalidBrandCode", "Check.strBrandCode", strBrandCode);
+            }
+
+            // 4.2. Mst_CarBrand_CheckDB(BrandCode, Flag "0") (Master.Loyalty.cs:787-793 -> :28-90):
+            //      strFlagExistToCheck = "0" (TConst.Flag.No). Nếu đã tồn tại dòng -> ErridnLoyalty.Mst_CarBrand_CheckDB_BrandExist (:65-75).
+            //      Nguồn dùng `=` trên SQL Server collation không phân biệt hoa/thường -> Like PortQuery.Equal, hạ chữ 2 phía.
+            var exists = await _db.Set<Mst_CarBrand>().AnyAsync(x =>
+                EF.Functions.Like((x.BrandCode ?? "").ToLower(), PortQuery.Equal(strBrandCode), PortQuery.Esc));
+            if (exists)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_CarBrand_CheckDB_BrandExist", "Check.BrandCode", strBrandCode);
+            }
+
+            // 4.3. KHÔNG kiểm tra tên hãng (BrandName), KHÔNG kiểm tra NetworkID (hành vi nguồn Master.Loyalty.cs:773-796).
+
+            // 5. Lưu dòng mới (Master.Loyalty.cs:804-820):
+            var dtimeSys = DateTime.UtcNow; // Master.Loyalty.cs:606 dtimeSys = DateTime.UtcNow
+            var entity = new Mst_CarBrand
+            {
+                BrandCode = strBrandCode,       // :805 BrandCode
+                BrandName = strBrandName,       // :806 BrandName (viết hoa theo hành vi nguồn :764)
+                NetworkID = strNetworkID,       // :807 NetworkID
+                Remark = strRemark,             // :808 Remark
+                FlagActive = "1",               // :809 FlagActive = TConst.Flag.Active ("1")
+                LogLUDTimeUTC = dtimeSys,       // :810 LogLUDTimeUTC
+                LogLUBy = "port"                // :811 LogLUBy ("port" - đích chưa có session user, loại Đ)
+            };
+
+            await _db.Set<Mst_CarBrand>().AddAsync(entity);
+            await _db.SaveChangesAsync();
+
+            // 6. Commit transaction (Master.Loyalty.cs:694 TDALUtils.DBUtils.CommitSafety).
+            await tx.CommitAsync();
+
+            // 7. Thành công: gate Mst_CarBrandController.cs:403-404 SetSuccess + Data = null.
+            return Ok(new
+            {
+                Success = true,
+                Data = (object?)null
+            });
+        }
+        catch (Exception)
+        {
+            await tx.RollbackAsync();
+            throw;
+        }
+    }
+
+    #region Helper chuẩn hoá input (05.Refs.Biz\Biz\Loyalty.TVO\Loyalty.TVO.Utils\Utils.cs)
+    /// <summary>
+    /// Chuẩn hoá tham số mã: Trim, ToUpper, rỗng -> null.
+    /// Dùng cho mã và tên hãng xe (BrandCode, NetworkID, BrandName...).
+    /// Nguồn tham chiếu: 05.Refs.Biz\Biz\Loyalty.TVO\Loyalty.TVO.Utils\Utils.cs:29
+    /// </summary>
+    private static string? StdParam(object? val)
+    {
+        if (val == null) return null;
+        var s = val.ToString()?.Trim();
+        return string.IsNullOrEmpty(s) ? null : s.ToUpperInvariant();
+    }
+
+    /// <summary>
+    /// Chuẩn hoá chuỗi: Trim, Normalize, rỗng -> null.
+    /// Dùng cho ghi chú (Remark...).
+    /// Nguồn tham chiếu: 05.Refs.Biz\Biz\Loyalty.TVO\Loyalty.TVO.Utils\Utils.cs:29
+    /// </summary>
+    private static string? StdStr(object? val)
+    {
+        if (val == null) return null;
+        var s = val.ToString()?.Trim();
+        if (string.IsNullOrEmpty(s)) return null;
+        return s.Normalize();
+    }
+    #endregion
 }
