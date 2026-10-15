@@ -16,6 +16,7 @@ namespace MiniLoyalty.Controllers.Port;
 //   Mst_CardTypeController.cs:329-414  Create       ->  WA_Mst_CardType_Create
 //   Mst_CardTypeController.cs:418-485  Update       ->  WA_Mst_CardType_Update
 //   Mst_CardTypeController.cs:489-552  Delete       ->  WA_Mst_CardType_Delete
+//   Mst_CardTypeController.cs:554-618  DeleteMultiple -> WA_Mst_CardType_Delete
 //   Mst_CardTypeController.cs:283-308  strWhereClause_Mst_CardType (dựng mệnh đề lọc)
 // Nguồn API:  MstCardTypeController.cs:239-308  WA_Mst_CardType_Get
 //             MstCardTypeController.cs:21-91    WA_Mst_CardType_Create
@@ -33,6 +34,8 @@ namespace MiniLoyalty.Controllers.Port;
 //   * Chia trang theo CardType asc (:5643) rồi sắp trang theo Value asc (:5683).
 //   * Delete: kiểm tra rỗng -> invalid_CartType; CheckDB -> Mst_CardType_CheckDB_CardTypeNotFound;
 //     giả lập 4 FK đích -> Mst_CardType_Delete; xoá dòng -> Success = true, Data = null.
+//   * DeleteMultiple: body là mảng [{ CardType }], lặp tuần tự từng phần tử trong 1 transaction riêng biệt.
+//     Lỗi phần tử thứ k -> thoát vòng lặp ngay, "xóa một phần" là hành vi nguồn.
 // ============================================================================================
 
 /// <summary>Port 1:1 <c>Mst_CardTypeSearch</c> — tham số lọc + phân trang của màn.</summary>
@@ -510,55 +513,148 @@ public class Mst_CardTypeControllerPort(AppDbContext db) : ControllerBase
             return PortResult.Fail("invalid_CartType", "Check.CardType", req?.CardType);
         }
 
-        // 2. Mở 1 transaction cho toàn bộ nghiệp vụ (Master.Loyalty.cs:6540 _cf.db.BeginTransaction()).
+        // 2. Thực hiện nghiệp vụ xóa qua DeleteXAsync (Master.Loyalty.cs:6507-6643)
+        var err = await DeleteXAsync(req?.CardType);
+        if (err != null)
+        {
+            return err;
+        }
+
+        // 3. Thành công: gate Mst_CardTypeController.cs:532-533 SetSuccess + Data = null
+        return Ok(new { Success = true, Data = (object?)null });
+    }
+
+    /// <summary>
+    /// Port 1:1 DeleteMultiple action từ gate Mst_CardTypeController.cs:554-618.
+    /// Chuỗi gọi: gate :554-618 -> lặp qua danh sách Lst_Mst_CardType, mỗi phần tử gọi
+    /// WA_Mst_CardType_Delete (:585-602) -> biz WAS_Mst_CardType_Delete -> Mst_CardType_Delete -> Mst_CardType_DeleteX.
+    ///
+    /// Request JSON: mảng [{ CardType }].
+    /// 1. Kiểm tra body rỗng / null: Gate Mst_CardTypeController.cs:564-571
+    ///    if (!string.IsNullOrEmpty(strJson)) { ... } else { throw new ServiceException("strJson null"); }
+    ///    Khi body null hoặc rỗng -> trả về 400 ErridnLoyalty.Mst_CardType_Delete với Check.strJson = null.
+    /// 2. Danh sách rỗng `[]`: vòng lặp foreach không chạy, trả về Ok(Success = true, Data = null).
+    /// 3. Lặp tuần tự qua từng phần tử trong danh sách:
+    ///    Mỗi lần lặp là một lời gọi độc lập tới chuỗi nghiệp vụ Delete, sử dụng TRANSACTION RIÊNG
+    ///    (Master.Loyalty.cs:6540 _cf.db.BeginTransaction() và :6606 CommitSafety).
+    ///    - KHÔNG có bước kiểm tra CardType rỗng ở tầng gate như Delete đơn (:508, 538);
+    ///      khi CardType rỗng, lỗi phát sinh ở tầng nghiệp vụ Mst_CardType_CheckDB
+    ///      -> trả về 400 ErridnLoyalty.Mst_CardType_CheckDB_CardTypeNotFound.
+    ///    - Hành vi "xóa một phần" (nguồn Mst_CardTypeController.cs:585-611):
+    ///      Nếu phần tử thứ k gặp lỗi, exception được ném ra và thoát khỏi vòng lặp ngay lập tức
+    ///      nhảy vào khối catch (ex) (:607-611).
+    ///      Do mỗi phần tử chạy trên một transaction riêng đã được commit, các phần tử TRƯỚC k
+    ///      ĐÃ BỊ XÓA VÀ KHÔNG BỊ ROLLBACK; các phần tử SAU k hoàn toàn không được xử lý.
+    ///      "xóa một phần" là hành vi nguồn.
+    /// 4. Thành công: gate :604-605 trả objJsonResultEntry.Data = null -> Ok(new { Success = true, Data = (object?)null }).
+    ///
+    /// Bỏ qua có chủ đích (loại Đ):
+    /// - CheckGatewayAuthentication: gate Mst_CardTypeController.cs:574
+    /// - CheckAuthorize: gate Mst_CardTypeController.cs:575 (hệ thống đích chưa có hệ phân quyền)
+    /// - Sys_User_CheckAuthorize: Master.Loyalty.cs:6562-6576
+    /// - Ghi RequestLog/ReturnLog: Master.Loyalty.cs:6543-6550, 6633-6640
+    /// </summary>
+    [HttpPost("deletemultiple")]
+    public async Task<IActionResult> DeleteMultiple([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] List<MstCardTypeDeleteReq>? req)
+    {
+        // 1. Kiểm tra body rỗng / null: Gate Mst_CardTypeController.cs:564-571
+        // if (!string.IsNullOrEmpty(strJson)) { ... } else { throw new ServiceException("strJson null"); }
+        if (req == null)
+        {
+            return PortResult.Fail("Mst_CardType_Delete", "Check.strJson", null);
+        }
+
+        // 2. Lặp tuần tự qua từng phần tử (gate Mst_CardTypeController.cs:585-602).
+        // Mỗi phần tử chạy trong 1 transaction riêng biệt (hàm DeleteXAsync).
+        // Nếu phần tử thứ k gặp lỗi -> return ngay lỗi đó (hành vi nguồn :585-611:
+        // "xóa một phần" là hành vi nguồn: các phần tử trước k đã commit thành công
+        // vào DB và KHÔNG bị rollback; các phần tử sau k không được xử lý).
+        foreach (var item in req)
+        {
+            var err = await DeleteXAsync(item?.CardType);
+            if (err != null)
+            {
+                return err;
+            }
+        }
+
+        // 3. Thành công: gate Mst_CardTypeController.cs:604-605
+        return Ok(new
+        {
+            Success = true,
+            Data = (object?)null
+        });
+    }
+
+    /// <summary>
+    /// Nghiệp vụ xóa 1 loại thẻ, tương ứng chuỗi gọi:
+    /// API WA_Mst_CardType_Delete (MstCardTypeController.cs:166-236) -> biz WAS_Mst_CardType_Delete (Master.Loyalty.cs:6428-6506)
+    /// -> Mst_CardType_Delete (:6507-6643) -> Mst_CardType_DeleteX (:6645-6701) -> Mst_CardType_CheckDB (:5264-5325).
+    ///
+    /// Mỗi lần gọi mở 1 Transaction riêng (Master.Loyalty.cs:6540 _cf.db.BeginTransaction() và :6606 CommitSafety).
+    /// Chuẩn hoá mã qua StdParam: Trim, ToUpper, rỗng -> null (Master.Loyalty.cs:6671).
+    /// - Khi mã rỗng hoặc không tìm thấy loại thẻ trong DB: trả về 400 ErridnLoyalty.Mst_CardType_CheckDB_CardTypeNotFound (Mst_CardType_CheckDB :5264-5325).
+    /// - Khi vi phạm khoá ngoại Crd_Card/Crd_Member: trả về 400 ErridnLoyalty.Mst_CardType_Delete (Master.Loyalty.cs:6527).
+    /// - Xóa dòng loại thẻ và Commit.
+    /// Trả về null nếu thành công; trả về IActionResult (PortResult.Fail) nếu có lỗi.
+    /// </summary>
+    private async Task<IActionResult?> DeleteXAsync(string? code)
+    {
+        // 1. Mở 1 transaction cho mỗi phần tử (Master.Loyalty.cs:6540 _cf.db.BeginTransaction()).
         await using var tx = await db.Database.BeginTransactionAsync();
         try
         {
-            // 3. Chuẩn hoá mã qua StdParam: Trim, ToUpper, rỗng -> null (Master.Loyalty.cs:6671)
-            string? strCardType = StdParam(req.CardType);
+            // 2. Chuẩn hoá mã qua StdParam: Trim, ToUpper, rỗng -> null (Master.Loyalty.cs:6671)
+            string? strCardType = StdParam(code);
 
-            // 4. CheckDB(CardType, FlagExist "1") (Master.Loyalty.cs:6677-6682 -> Mst_CardType_CheckDB :5264-5325):
-            //    FlagExist "1" + KHÔNG có dòng -> Mst_CardType_CheckDB_CardTypeNotFound.
+            // 3. CheckDB(CardType, FlagExist "1") (Master.Loyalty.cs:6677-6682 -> Mst_CardType_CheckDB :5264-5325):
+            //    FlagExist "1" + KHÔNG có dòng (hoặc strCardType rỗng) -> Mst_CardType_CheckDB_CardTypeNotFound.
+            if (string.IsNullOrEmpty(strCardType))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_CardType_CheckDB_CardTypeNotFound", "Check.CardType", strCardType);
+            }
+
             var entity = await db.Set<Mst_CardType>().FirstOrDefaultAsync(x =>
-                EF.Functions.Like((x.CardType ?? "").ToLower(), PortQuery.Equal(strCardType ?? ""), PortQuery.Esc));
+                EF.Functions.Like((x.CardType ?? "").ToLower(), PortQuery.Equal(strCardType), PortQuery.Esc));
             if (entity == null)
             {
                 await tx.RollbackAsync();
                 return PortResult.Fail("Mst_CardType_CheckDB_CardTypeNotFound", "Check.CardType", strCardType);
             }
 
-            // 5. Giả lập 4 ràng buộc khoá ngoại (FK) đã có ở đích (SQL Server chặn xoá nếu còn bản ghi con):
+            // 4. Giả lập 4 ràng buộc khoá ngoại (FK) đã có ở đích (SQL Server chặn xoá nếu còn bản ghi con):
             //    Dùng Like + PortQuery.Equal trên CardTypeInit/CardTypeUse của CrdCards và CrdMembers.
-            // 5.1. Crd_Card.CardTypeInit (20221108.z11.Crd_Member.Crd_Card.sql:437)
+            // 4.1. Crd_Card.CardTypeInit (20221108.z11.Crd_Member.Crd_Card.sql:437)
             var hasCardInit = await db.CrdCards.AnyAsync(x =>
-                EF.Functions.Like((x.CardTypeInit ?? "").ToLower(), PortQuery.Equal(strCardType!), PortQuery.Esc));
+                EF.Functions.Like((x.CardTypeInit ?? "").ToLower(), PortQuery.Equal(strCardType), PortQuery.Esc));
             if (hasCardInit)
             {
                 await tx.RollbackAsync();
                 return PortResult.Fail("Mst_CardType_Delete", "Check.CardType", strCardType, "FK", "Crd_Card.CardTypeInit");
             }
 
-            // 5.2. Crd_Card.CardTypeUse (20221108.z11.Crd_Member.Crd_Card.sql:446)
+            // 4.2. Crd_Card.CardTypeUse (20221108.z11.Crd_Member.Crd_Card.sql:446)
             var hasCardUse = await db.CrdCards.AnyAsync(x =>
-                EF.Functions.Like((x.CardTypeUse ?? "").ToLower(), PortQuery.Equal(strCardType!), PortQuery.Esc));
+                EF.Functions.Like((x.CardTypeUse ?? "").ToLower(), PortQuery.Equal(strCardType), PortQuery.Esc));
             if (hasCardUse)
             {
                 await tx.RollbackAsync();
                 return PortResult.Fail("Mst_CardType_Delete", "Check.CardType", strCardType, "FK", "Crd_Card.CardTypeUse");
             }
 
-            // 5.3. Crd_Member.CardTypeInit (20221108.z11.Crd_Member.Crd_Card.sql:463)
+            // 4.3. Crd_Member.CardTypeInit (20221108.z11.Crd_Member.Crd_Card.sql:463)
             var hasMemberInit = await db.CrdMembers.AnyAsync(x =>
-                EF.Functions.Like((x.CardTypeInit ?? "").ToLower(), PortQuery.Equal(strCardType!), PortQuery.Esc));
+                EF.Functions.Like((x.CardTypeInit ?? "").ToLower(), PortQuery.Equal(strCardType), PortQuery.Esc));
             if (hasMemberInit)
             {
                 await tx.RollbackAsync();
                 return PortResult.Fail("Mst_CardType_Delete", "Check.CardType", strCardType, "FK", "Crd_Member.CardTypeInit");
             }
 
-            // 5.4. Crd_Member.CardTypeUse (20221108.z11.Crd_Member.Crd_Card.sql:472)
+            // 4.4. Crd_Member.CardTypeUse (20221108.z11.Crd_Member.Crd_Card.sql:472)
             var hasMemberUse = await db.CrdMembers.AnyAsync(x =>
-                EF.Functions.Like((x.CardTypeUse ?? "").ToLower(), PortQuery.Equal(strCardType!), PortQuery.Esc));
+                EF.Functions.Like((x.CardTypeUse ?? "").ToLower(), PortQuery.Equal(strCardType), PortQuery.Esc));
             if (hasMemberUse)
             {
                 await tx.RollbackAsync();
@@ -571,15 +667,14 @@ public class Mst_CardTypeControllerPort(AppDbContext db) : ControllerBase
             // - Mst_PromotionProgramSpec.CardType (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
             // - Mst_PolicyMoneyToPointServiceDtl.CardType (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
 
-            // 6. Xoá dòng Mst_CardType (Master.Loyalty.cs:6692-6695 DeleteX)
+            // 5. Xoá dòng Mst_CardType (Master.Loyalty.cs:6692-6695 DeleteX)
             db.Set<Mst_CardType>().Remove(entity);
             await db.SaveChangesAsync();
 
-            // 7. Commit (Master.Loyalty.cs:6606 TDALUtils.DBUtils.CommitSafety)
+            // 6. Commit (Master.Loyalty.cs:6606 TDALUtils.DBUtils.CommitSafety)
             await tx.CommitAsync();
 
-            // 8. Thành công: gate Mst_CardTypeController.cs:532-533 SetSuccess + Data = null
-            return Ok(new { Success = true, Data = (object?)null });
+            return null;
         }
         catch (Exception)
         {
