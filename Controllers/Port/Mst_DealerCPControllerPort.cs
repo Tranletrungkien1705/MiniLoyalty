@@ -12,16 +12,15 @@ namespace MiniLoyalty.Controllers.Port;
 /// <summary>
 /// Port 1:1 Mst_DealerCPController.cs — Mst_DealerCP
 /// Chuỗi gọi nguồn:
-///   gate: Mst_DealerCPController.cs:26-106 (Search) + :364-389 (strWhereClause_Mst_DealerCP)
+///   gate: Mst_DealerCPController.cs:26-106 (Search) + :107-230 (GetAllActive) + :364-389 (strWhereClause_Mst_DealerCP)
 ///   API:  MstDealerCPController.cs:21-90 (WA_Mst_DealerCP_Get)
 ///   biz:  Master.Loyalty.cs:3937-4050 (WAS_Mst_DealerCP_Get) -> :4051-4206 (Mst_DealerCP_Get) -> :4209-4433 (Mst_DealerCP_GetX)
 ///
 /// Bỏ qua có chủ đích (loại Đ):
-/// - CheckGatewayAuthentication: gate Mst_DealerCPController.cs:35, API MstDealerCPController.cs:42
-/// - CheckAuthorize: gate Mst_DealerCPController.cs:36
+/// - CheckGatewayAuthentication: gate Mst_DealerCPController.cs:35, 120; API MstDealerCPController.cs:42
+/// - CheckAuthorize: gate Mst_DealerCPController.cs:36, 121
 /// - Sys_User_CheckAuthorize: Master.Loyalty.cs:4107-4124 (hệ thống đích chưa có hệ phân quyền)
 /// - Ghi RequestLog/ReturnLog: Master.Loyalty.cs:4097-4104, 4196-4203
-/// - Khối Rt_Cols_Map_DealerCP_Org (:4353-4371): gate KHÔNG yêu cầu (chi gửi Rt_Cols_Mst_DealerCP = "*", dòng 73) -> không làm.
 /// </summary>
 [ApiController]
 [Route("api/mst_dealercp")]
@@ -32,6 +31,36 @@ public class Mst_DealerCPControllerPort : ControllerBase
     public Mst_DealerCPControllerPort(AppDbContext db)
     {
         _db = db;
+    }
+
+    /// <summary>
+    /// Port 1:1 GetAllActive action từ gate Mst_DealerCPController.cs:107-230.
+    /// Tầng gate truyền OrgID = orgUserUI.OrgId (:135), FlagActive = "1" (:136),
+    /// nhưng hàm strWhereClause_Mst_DealerCP (:364-389) KHÔNG sử dụng OrgID trong mệnh đề WHERE,
+    /// do đó chỉ lọc FlagActive = "1" và KHÔNG lọc OrgID.
+    /// Rt_Cols_Mst_DealerCP = "*" (:153) và Rt_Cols_Map_DealerCP_Org = "*" (:154).
+    /// Ft_RecordStart = "0", Ft_RecordCount = "123456000" (BaseController.cs:30-31).
+    /// </summary>
+    [HttpPost("getallactive")]
+    public async Task<IActionResult> GetAllActive()
+    {
+        var (_, rows, maps) = await GetXAsync(
+            keyWord: null,
+            flagActiveCsv: "1",
+            recordStart: 0,
+            recordCount: 123456000,
+            getDealer: true,
+            getMap: true);
+
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Lst_Mst_DealerCP = rows.Count > 0 ? rows : null,
+                Lst_Map_DealerCP_Org = maps.Count > 0 ? maps : null
+            }
+        });
     }
 
     /// <summary>
@@ -49,27 +78,65 @@ public class Mst_DealerCPControllerPort : ControllerBase
         long recordStart = (long)pageIndex * pageSize;
         long recordCount = pageSize;
 
+        var (itemCount, rows, _) = await GetXAsync(
+            keyWord: req.KeyWord,
+            flagActiveCsv: req.FlagActive,
+            recordStart: recordStart,
+            recordCount: recordCount,
+            getDealer: true,
+            getMap: false);
+
+        // Tính PageCount theo logic tầng gate Mst_DealerCPController.cs:81-89
+        var pageCount = 0;
+        if (rows.Count > 0)
+        {
+            var ps = pageSize == 0 ? 10 : pageSize;
+            pageCount = (itemCount % ps == 0) ? (itemCount / ps) : (itemCount / ps + 1);
+        }
+
+        var pageInfo = new PageInfo<Mst_DealerCPSearchResultItem>(rows, itemCount, pageCount, pageIndex, pageSize);
+
+        return Ok(new
+        {
+            Success = true,
+            Data = pageInfo
+        });
+    }
+
+    /// <summary>
+    /// Tách phần lọc + đếm + phân trang + select của Search và GetAllActive
+    /// tương ứng Mst_DealerCP_GetX (Master.Loyalty.cs:4209-4433).
+    /// Tham số getDealer và getMap tương ứng bGet_Mst_DealerCP (:4244) và bGet_Map_DealerCP_Org (:4245).
+    /// </summary>
+    private async Task<(int itemCount, List<Mst_DealerCPSearchResultItem> rows, List<Map_DealerCP_OrgResultItem> maps)> GetXAsync(
+        string? keyWord,
+        string? flagActiveCsv,
+        long recordStart,
+        long recordCount,
+        bool getDealer,
+        bool getMap)
+    {
         // 1. Khởi tạo truy vấn bảng Mst_DealerCP (#tbl_Mst_DealerCP_Filter_Draft trong Master.Loyalty.cs:4271-4283)
-        // Lưu ý: nguồn `select distinct identity(...)` + left join Map_DealerCP_Org; port coi là distinct theo DLCPCode — cần xác nhận hành vi DISTINCT+IDENTITY trên SQL Server.
+        // Lưu ý: nguồn `select distinct identity(...)` + left join Map_DealerCP_Org; port coi là distinct theo DLCPCode.
         var query = _db.Set<Mst_DealerCP>().AsNoTracking();
 
         // 2. Lọc theo KeyWord: Mst_DealerCPController.cs:369-372
         // sbSql.AddWhereClause(Tbl_Mst_DealerCP + TblMst_DealerCP.DLCPName, "%" + CUtils.StrValue(data.KeyWord) + "%", "like");
         // Nguồn lọc cột DLCPName với toán tử like '%KeyWord%'. Collation không phân biệt hoa/thường: dùng PortQuery.Contains và Esc.
-        if (!string.IsNullOrWhiteSpace(req.KeyWord))
+        if (!string.IsNullOrWhiteSpace(keyWord))
         {
             query = query.Where(x => EF.Functions.Like(
                 (x.DLCPName ?? "").ToLower(),
-                PortQuery.Contains(req.KeyWord),
+                PortQuery.Contains(keyWord),
                 PortQuery.Esc));
         }
 
         // 3. Lọc theo FlagActive: Mst_DealerCPController.cs:378-386
         // Khối '=' (:374-377) đã bị comment out trong mã nguồn. Nguồn tách mảng dấu phẩy và dùng toán tử 'in'.
         // CẤM ==/.Contains() trên chuỗi trực tiếp mà hạ chữ hai phía và dùng danh sách ds.Contains.
-        if (!string.IsNullOrWhiteSpace(req.FlagActive))
+        if (!string.IsNullOrWhiteSpace(flagActiveCsv))
         {
-            var ds = req.FlagActive.Split(',', StringSplitOptions.RemoveEmptyEntries)
+            var ds = flagActiveCsv.Split(',', StringSplitOptions.RemoveEmptyEntries)
                 .Select(s => s.Trim().ToLowerInvariant())
                 .Where(s => !string.IsNullOrEmpty(s))
                 .ToList();
@@ -84,12 +151,13 @@ public class Mst_DealerCPControllerPort : ControllerBase
         // ItemCount = số DLCPCode distinct sau lọc (:4286).
         var itemCount = await query.CountAsync();
 
+        var rows = new List<Mst_DealerCPSearchResultItem>();
+        var maps = new List<Map_DealerCP_OrgResultItem>();
+
         // 5. Phân trang trên tập draft: Master.Loyalty.cs:4289-4297
         // (t.MyIdxSeq >= @nFilterRecordStart) and (t.MyIdxSeq <= @nFilterRecordEnd)
-        // Khi pageSize = 0 (recordCount <= 0) -> trả về 0 dòng.
-        var rows = new List<Mst_DealerCPSearchResultItem>();
-
-        if (recordCount > 0 && recordStart >= 0)
+        // Khi recordCount <= 0 hoặc recordStart < 0 -> trả về danh sách rỗng.
+        if (recordCount > 0 && recordStart >= 0 && (getDealer || getMap))
         {
             var take = recordCount > int.MaxValue ? int.MaxValue : (int)recordCount;
             var skip = recordStart > int.MaxValue ? int.MaxValue : (int)recordStart;
@@ -107,99 +175,72 @@ public class Mst_DealerCPControllerPort : ControllerBase
                 .Select((d, idx) => new { Dealer = d, MyIdxSeq = startSeq + idx })
                 .ToList();
 
-            // 6. Câu select cuối (:4328-4348) cho các DLCPCode trong trang:
-            // inner join Mst_DealerCP mdcp on t.DLCPCode = mdcp.DLCPCode
-            // left join Mst_DealerCP f on t.DLCPCodeParent = f.DLCPCode -> mdcp_DLCPNameParent
-            // left join Map_DealerCP_Org mdcpo on t.DLCPCode = mdcpo.DLCPCode
-            // left join Mst_Org mo on mdcpo.OrgID = mo.OrgID -> mo_OrgID
-            // left join Mst_NNT mnnt on mo.OrgID = mnnt.OrgID -> mnnt_MST, mnnt_NNTFullName, mnnt_ContactEmail
-            // Mỗi dòng kết quả = 1 cặp (đại lý, map) — đại lý có 2 map ra 2 dòng; đại lý không có map ra 1 dòng với enrich null.
-            // Bỏ dòng trùng hoàn toàn (select distinct). Sắp theo MyIdxSeq asc.
-
             var pagedCodes = pagedWithSeq.Select(x => x.Dealer.DLCPCode).ToList();
 
-            // Tra cứu đại lý cha (f)
-            var parentCodes = pagedWithSeq
-                .Select(x => x.Dealer.DLCPCodeParent)
-                .Where(c => !string.IsNullOrEmpty(c))
-                .Distinct()
-                .ToList();
-            var parentDict = await _db.Set<Mst_DealerCP>()
-                .AsNoTracking()
-                .Where(p => parentCodes.Contains(p.DLCPCode))
-                .ToDictionaryAsync(p => p.DLCPCode);
-
-            // Tra cứu Map_DealerCP_Org (mdcpo)
-            var maps = await _db.Set<Map_DealerCP_Org>()
-                .AsNoTracking()
-                .Where(m => pagedCodes.Contains(m.DLCPCode))
-                .ToListAsync();
-
-            // Tra cứu Mst_Org (mo)
-            var orgIds = maps
-                .Select(m => m.OrgID)
-                .Where(o => !string.IsNullOrEmpty(o))
-                .Distinct()
-                .ToList();
-            var orgDict = await _db.Set<Mst_Org>()
-                .AsNoTracking()
-                .Where(o => orgIds.Contains(o.OrgID))
-                .ToDictionaryAsync(o => o.OrgID);
-
-            // Tra cứu Mst_NNT (mnnt)
-            var nnts = await _db.Set<Mst_NNT>()
-                .AsNoTracking()
-                .Where(n => n.OrgID != null && orgIds.Contains(n.OrgID))
-                .ToListAsync();
-            var nntLookup = nnts.ToLookup(n => n.OrgID!);
-
-            foreach (var item in pagedWithSeq)
+            if (pagedCodes.Count > 0)
             {
-                var dealer = item.Dealer;
-                var parentName = (dealer.DLCPCodeParent != null && parentDict.TryGetValue(dealer.DLCPCodeParent, out var parent))
-                    ? parent.DLCPName
-                    : null;
+                // Tra cứu Map_DealerCP_Org (mdcpo) dùng chung cho cả khối Mst_DealerCP và khối Map_DealerCP_Org
+                var dealerOrgMaps = await _db.Set<Map_DealerCP_Org>()
+                    .AsNoTracking()
+                    .Where(m => pagedCodes.Contains(m.DLCPCode))
+                    .ToListAsync();
 
-                var dealerMaps = maps.Where(m => m.DLCPCode == dealer.DLCPCode).OrderBy(m => m.OrgID).ToList();
-                if (dealerMaps.Count == 0)
+                // 6. Câu select Mst_DealerCP (:4328-4348) khi bGet_Mst_DealerCP = true:
+                // inner join Mst_DealerCP mdcp on t.DLCPCode = mdcp.DLCPCode
+                // left join Mst_DealerCP f on t.DLCPCodeParent = f.DLCPCode -> mdcp_DLCPNameParent
+                // left join Map_DealerCP_Org mdcpo on t.DLCPCode = mdcpo.DLCPCode
+                // left join Mst_Org mo on mdcpo.OrgID = mo.OrgID -> mo_OrgID
+                // left join Mst_NNT mnnt on mo.OrgID = mnnt.OrgID -> mnnt_MST, mnnt_NNTFullName, mnnt_ContactEmail
+                // Mỗi dòng kết quả = 1 cặp (đại lý, map) — đại lý có 2 map ra 2 dòng; đại lý không có map ra 1 dòng với enrich null.
+                // Bỏ dòng trùng hoàn toàn (select distinct). Sắp theo MyIdxSeq asc (:4347).
+                if (getDealer)
                 {
-                    // Đại lý không gắn với Org nào -> 1 dòng, các cột liên kết Org/NNT để null
-                    rows.Add(new Mst_DealerCPSearchResultItem(
-                        item.MyIdxSeq,
-                        dealer.DLCPCode,
-                        dealer.NetworkID,
-                        dealer.DLCPCodeParent,
-                        dealer.DLCPBUCode,
-                        dealer.DLCPBUPattern,
-                        dealer.DLCPLevel,
-                        dealer.DLCPName,
-                        dealer.DLCPPhoneNo,
-                        dealer.FlagRoot,
-                        dealer.FlagActive,
-                        dealer.FlagBirthPoints,
-                        dealer.Remark,
-                        dealer.LogLUDTimeUTC,
-                        dealer.LogLUBy,
-                        null,
-                        parentName,
-                        null,
-                        null,
-                        null
-                    ));
-                }
-                else
-                {
-                    // Đại lý có map Org -> mỗi cặp đại lý - map sinh 1 dòng
-                    foreach (var map in dealerMaps)
+                    // Tra cứu đại lý cha (f)
+                    var parentCodes = pagedWithSeq
+                        .Select(x => x.Dealer.DLCPCodeParent)
+                        .Where(c => !string.IsNullOrEmpty(c))
+                        .Distinct()
+                        .ToList();
+                    var parentDict = parentCodes.Count > 0
+                        ? await _db.Set<Mst_DealerCP>()
+                            .AsNoTracking()
+                            .Where(p => parentCodes.Contains(p.DLCPCode))
+                            .ToDictionaryAsync(p => p.DLCPCode)
+                        : new Dictionary<string, Mst_DealerCP>();
+
+                    // Tra cứu Mst_Org (mo)
+                    var orgIds = dealerOrgMaps
+                        .Select(m => m.OrgID)
+                        .Where(o => !string.IsNullOrEmpty(o))
+                        .Distinct()
+                        .ToList();
+                    var orgDict = orgIds.Count > 0
+                        ? await _db.Set<Mst_Org>()
+                            .AsNoTracking()
+                            .Where(o => orgIds.Contains(o.OrgID))
+                            .ToDictionaryAsync(o => o.OrgID)
+                        : new Dictionary<string, Mst_Org>();
+
+                    // Tra cứu Mst_NNT (mnnt)
+                    var nnts = orgIds.Count > 0
+                        ? await _db.Set<Mst_NNT>()
+                            .AsNoTracking()
+                            .Where(n => n.OrgID != null && orgIds.Contains(n.OrgID))
+                            .ToListAsync()
+                        : new List<Mst_NNT>();
+                    var nntLookup = nnts.ToLookup(n => n.OrgID!);
+
+                    foreach (var item in pagedWithSeq)
                     {
-                        var mo = (map.OrgID != null && orgDict.TryGetValue(map.OrgID, out var o)) ? o : null;
-                        var moOrgId = mo?.OrgID;
-                        var matchingNnts = (moOrgId != null && nntLookup.Contains(moOrgId))
-                            ? nntLookup[moOrgId].ToList()
-                            : new List<Mst_NNT>();
+                        var dealer = item.Dealer;
+                        var parentName = (dealer.DLCPCodeParent != null && parentDict.TryGetValue(dealer.DLCPCodeParent, out var parent))
+                            ? parent.DLCPName
+                            : null;
 
-                        if (matchingNnts.Count == 0)
+                        var itemMaps = dealerOrgMaps.Where(m => m.DLCPCode == dealer.DLCPCode).OrderBy(m => m.OrgID).ToList();
+                        if (itemMaps.Count == 0)
                         {
+                            // Đại lý không gắn với Org nào -> 1 dòng, các cột liên kết Org/NNT để null
                             rows.Add(new Mst_DealerCPSearchResultItem(
                                 item.MyIdxSeq,
                                 dealer.DLCPCode,
@@ -216,7 +257,7 @@ public class Mst_DealerCPControllerPort : ControllerBase
                                 dealer.Remark,
                                 dealer.LogLUDTimeUTC,
                                 dealer.LogLUBy,
-                                moOrgId,
+                                null,
                                 parentName,
                                 null,
                                 null,
@@ -225,55 +266,103 @@ public class Mst_DealerCPControllerPort : ControllerBase
                         }
                         else
                         {
-                            foreach (var nnt in matchingNnts)
+                            // Đại lý có map Org -> mỗi cặp đại lý - map sinh 1 dòng
+                            foreach (var map in itemMaps)
                             {
-                                rows.Add(new Mst_DealerCPSearchResultItem(
-                                    item.MyIdxSeq,
-                                    dealer.DLCPCode,
-                                    dealer.NetworkID,
-                                    dealer.DLCPCodeParent,
-                                    dealer.DLCPBUCode,
-                                    dealer.DLCPBUPattern,
-                                    dealer.DLCPLevel,
-                                    dealer.DLCPName,
-                                    dealer.DLCPPhoneNo,
-                                    dealer.FlagRoot,
-                                    dealer.FlagActive,
-                                    dealer.FlagBirthPoints,
-                                    dealer.Remark,
-                                    dealer.LogLUDTimeUTC,
-                                    dealer.LogLUBy,
-                                    moOrgId,
-                                    parentName,
-                                    nnt.MST,
-                                    nnt.NNTFullName,
-                                    nnt.ContactEmail
-                                ));
+                                var mo = (map.OrgID != null && orgDict.TryGetValue(map.OrgID, out var o)) ? o : null;
+                                var moOrgId = mo?.OrgID;
+                                var matchingNnts = (moOrgId != null && nntLookup.Contains(moOrgId))
+                                    ? nntLookup[moOrgId].ToList()
+                                    : new List<Mst_NNT>();
+
+                                if (matchingNnts.Count == 0)
+                                {
+                                    rows.Add(new Mst_DealerCPSearchResultItem(
+                                        item.MyIdxSeq,
+                                        dealer.DLCPCode,
+                                        dealer.NetworkID,
+                                        dealer.DLCPCodeParent,
+                                        dealer.DLCPBUCode,
+                                        dealer.DLCPBUPattern,
+                                        dealer.DLCPLevel,
+                                        dealer.DLCPName,
+                                        dealer.DLCPPhoneNo,
+                                        dealer.FlagRoot,
+                                        dealer.FlagActive,
+                                        dealer.FlagBirthPoints,
+                                        dealer.Remark,
+                                        dealer.LogLUDTimeUTC,
+                                        dealer.LogLUBy,
+                                        moOrgId,
+                                        parentName,
+                                        null,
+                                        null,
+                                        null
+                                    ));
+                                }
+                                else
+                                {
+                                    foreach (var nnt in matchingNnts)
+                                    {
+                                        rows.Add(new Mst_DealerCPSearchResultItem(
+                                            item.MyIdxSeq,
+                                            dealer.DLCPCode,
+                                            dealer.NetworkID,
+                                            dealer.DLCPCodeParent,
+                                            dealer.DLCPBUCode,
+                                            dealer.DLCPBUPattern,
+                                            dealer.DLCPLevel,
+                                            dealer.DLCPName,
+                                            dealer.DLCPPhoneNo,
+                                            dealer.FlagRoot,
+                                            dealer.FlagActive,
+                                            dealer.FlagBirthPoints,
+                                            dealer.Remark,
+                                            dealer.LogLUDTimeUTC,
+                                            dealer.LogLUBy,
+                                            moOrgId,
+                                            parentName,
+                                            nnt.MST,
+                                            nnt.NNTFullName,
+                                            nnt.ContactEmail
+                                        ));
+                                    }
+                                }
                             }
                         }
                     }
+
+                    // Bỏ dòng trùng hoàn toàn (select distinct nguồn) và sắp theo MyIdxSeq asc (:4347)
+                    rows = rows.Distinct().OrderBy(r => r.MyIdxSeq).ToList();
+                }
+
+                // 7. Câu select Map_DealerCP_Org (:4354-4370) khi bGet_Map_DealerCP_Org = true:
+                // inner join giữa #tbl_Mst_DealerCP_Filter t và Map_DealerCP_Org mdcpo on t.DLCPCode = mdcpo.DLCPCode
+                // select distinct t.MyIdxSeq, mdcpo.* order by t.MyIdxSeq asc (:4360-4366)
+                if (getMap)
+                {
+                    var seqDict = pagedWithSeq.ToDictionary(x => x.Dealer.DLCPCode, x => x.MyIdxSeq);
+
+                    maps = dealerOrgMaps
+                        .Where(m => seqDict.ContainsKey(m.DLCPCode))
+                        .Select(m => new Map_DealerCP_OrgResultItem(
+                            seqDict[m.DLCPCode],
+                            m.DLCPCode,
+                            m.OrgID,
+                            m.NetworkID,
+                            m.FlagActive,
+                            m.LogLUDTimeUTC,
+                            m.LogLUBy
+                        ))
+                        .Distinct()
+                        .OrderBy(m => m.MyIdxSeq)
+                        .ThenBy(m => m.OrgID)
+                        .ToList();
                 }
             }
-
-            // Bỏ dòng trùng hoàn toàn (select distinct nguồn) và sắp theo MyIdxSeq asc (:4347)
-            rows = rows.Distinct().OrderBy(r => r.MyIdxSeq).ToList();
         }
 
-        // Tính PageCount theo logic tầng gate Mst_DealerCPController.cs:81-89
-        var pageCount = 0;
-        if (rows.Count > 0)
-        {
-            var ps = pageSize == 0 ? 10 : pageSize;
-            pageCount = (itemCount % ps == 0) ? (itemCount / ps) : (itemCount / ps + 1);
-        }
-
-        var pageInfo = new PageInfo<Mst_DealerCPSearchResultItem>(rows, itemCount, pageCount, pageIndex, pageSize);
-
-        return Ok(new
-        {
-            Success = true,
-            Data = pageInfo
-        });
+        return (itemCount, rows, maps);
     }
 }
 
@@ -353,4 +442,32 @@ public record Mst_DealerCPSearchResultItem(
 
     /// <summary>Email liên hệ người nộp thuế từ bảng Mst_NNT (Master.Loyalty.cs:4335 mnnt.ContactEmail mnnt_ContactEmail)</summary>
     string? mnnt_ContactEmail
+);
+
+/// <summary>
+/// Model từng dòng dữ liệu bảng Map_DealerCP_Org trả về trong Mst_DealerCP_GetX:
+/// MyIdxSeq + 6 cột Map_DealerCP_Org (Master.Loyalty.cs:4359-4366, Map_DealerCP_Org.cs:11-16).
+/// Dùng record để tự động hỗ trợ so sánh giá trị và khử trùng lặp (select distinct).
+/// </summary>
+public record Map_DealerCP_OrgResultItem(
+    /// <summary>Số thứ tự 0-based của đại lý tương ứng (Master.Loyalty.cs:4273, 4361)</summary>
+    long MyIdxSeq,
+
+    /// <summary>Mã đại lý - Map_DealerCP_Org.cs:11</summary>
+    string DLCPCode,
+
+    /// <summary>Mã tổ chức liên kết - Map_DealerCP_Org.cs:12</summary>
+    string OrgID,
+
+    /// <summary>Mã mạng lưới - Map_DealerCP_Org.cs:13</summary>
+    string? NetworkID,
+
+    /// <summary>Trạng thái kích hoạt - Map_DealerCP_Org.cs:14</summary>
+    string? FlagActive,
+
+    /// <summary>Thời gian cập nhật UTC - Map_DealerCP_Org.cs:15</summary>
+    DateTime? LogLUDTimeUTC,
+
+    /// <summary>Người dùng thực hiện cập nhật - Map_DealerCP_Org.cs:16</summary>
+    string? LogLUBy
 );
