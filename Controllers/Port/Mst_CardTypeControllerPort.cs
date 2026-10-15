@@ -546,6 +546,7 @@ public class Mst_CardTypeControllerPort(AppDbContext db, IConfiguration config, 
     //       3. Crd_Member.CardTypeInit (20221108.z11.Crd_Member.Crd_Card.sql:463)
     //       4. Crd_Member.CardTypeUse (20221108.z11.Crd_Member.Crd_Card.sql:472)
     //       5. Mst_RankPolicy.CardType (20221026.CreateDatabase.sql:273 — bổ sung sau khi port bảng ở #227)
+    //       6. Mst_PolicyMoneyToPointServiceDtl.CardType (20221026.CreateDatabase.sql:647 — bổ sung sau khi port bảng ở #194)
     //     Nếu có bản ghi con -> rollback + PortResult.Fail("Mst_CardType_Delete", "Check.CardType", strCardType, "FK", "<Bang.Cot>").
     //   * Xoá dòng Mst_CardType (:6692-6695) và CommitSafety (:6606).
     //   * Thành công: gate :532-533 SetSuccess + Data = null.
@@ -554,7 +555,6 @@ public class Mst_CardTypeControllerPort(AppDbContext db, IConfiguration config, 
     //   * Các bảng FK còn lại trong DDL nguồn chưa có ở đích -> thêm kiểm tra khi port các bảng đó:
     //     - Mst_BirthPolicyDtl.CardType (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
     //     - Mst_PromotionProgramSpec.CardType (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
-    //     - Mst_PolicyMoneyToPointServiceDtl.CardType (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
     //
     // Bỏ qua có chủ đích (loại Đ):
     //   * CheckGatewayAuthentication/CheckAuthorize (gate :498-499), Sys_User_CheckAuthorize (:6562-6576):
@@ -728,10 +728,18 @@ public class Mst_CardTypeControllerPort(AppDbContext db, IConfiguration config, 
                 return PortResult.Fail("Mst_CardType_Delete", "Check.CardType", strCardType, "FK", "Mst_RankPolicy.CardType");
             }
 
+            // 4.6. Mst_PolicyMoneyToPointServiceDtl.CardType (FK_MstCarType_MstPolicyMoneyToPointSVDtl — 20221026.CreateDatabase.sql:647; bảng port ở #194)
+            var hasPolicyMoneyDtl = await db.Set<Mst_PolicyMoneyToPointServiceDtl>().AnyAsync(x =>
+                EF.Functions.Like((x.CardType ?? "").ToLower(), PortQuery.Equal(strCardType), PortQuery.Esc));
+            if (hasPolicyMoneyDtl)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_CardType_Delete", "Check.CardType", strCardType, "FK", "Mst_PolicyMoneyToPointServiceDtl.CardType");
+            }
+
             // GAP: Các bảng FK còn lại trong DDL nguồn chưa có ở đích -> thêm kiểm tra khi port các bảng đó:
             // - Mst_BirthPolicyDtl.CardType (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
             // - Mst_PromotionProgramSpec.CardType (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
-            // - Mst_PolicyMoneyToPointServiceDtl.CardType (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
 
             // 5. Xoá dòng Mst_CardType (Master.Loyalty.cs:6692-6695 DeleteX)
             db.Set<Mst_CardType>().Remove(entity);
