@@ -53,6 +53,22 @@ public class MstCardTypeCreateReq
     public System.Text.Json.JsonElement? Value { get; set; }  // Giá trị/ngưỡng — :5790 (Convert.ToDouble)
 }
 
+/// <summary>
+/// Port 1:1 <c>Update</c> — body JSON của model nguồn (Mst_CardTypeController.cs:418-485).
+/// Nguồn deserialize thẳng vào TModelLoyaltys.Mst_CardType (mọi cột là object) rồi truyền
+/// CardType/NetworkID/CardTypeName/Value/FlagActive xuống biz (Master.Loyalty.cs:6148-6152).
+/// Value để <c>JsonElement?</c> để chuyển đổi như <c>Convert.ToDouble(objValue)</c> của nguồn
+/// (chuỗi không phải số -> lỗi; thiếu -> null -> 0).
+/// </summary>
+public class MstCardTypeUpdateReq
+{
+    public string? CardType { get; set; }             // Mã loại thẻ — :6148
+    public string? NetworkID { get; set; }            // NetworkID — :6149
+    public string? CardTypeName { get; set; }         // Tên loại thẻ — :6150
+    public System.Text.Json.JsonElement? Value { get; set; }  // Giá trị/ngưỡng — :6151 (Convert.ToDouble)
+    public string? FlagActive { get; set; }           // Cờ hoạt động — :6152 (StdFlag)
+}
+
 [ApiController]
 [Route("api/mst_cardtype")]
 [Produces("application/json")]
@@ -318,6 +334,119 @@ public class Mst_CardTypeControllerPort(AppDbContext db) : ControllerBase
         }
     }
 
+    // ============================================================================================
+    // Update — nguồn Mst_CardTypeController.cs:418-485 (gate) -> MstCardTypeController.cs:93-163 (API)
+    //   -> Master.Loyalty.cs:6100 (WAS_Mst_CardType_Update) -> :6185-6337 (Mst_CardType_Update)
+    //   -> :6339-6427 (Mst_CardType_UpdateX) -> :5264-5325 (Mst_CardType_CheckDB).
+    //
+    // GIỮ ĐÚNG NGUỒN:
+    //   * Gate dựng Ft_Cols_Upd NGUYÊN VĂN (:450-453):
+    //       "Mst_CardType.CardType,Mst_CardType.CardTypeName,Mst_CardType.Value,Mst_CardType.FlagActive,"
+    //     Biz chuẩn hoá bằng StdParam (Trim+ToUpper) rồi Contains("MST_CARDTYPE.<CỘT>") (:6377-6388).
+    //   * Chuẩn hoá (:6380-6384): CardType = StdParam (Trim+ToUpper, rỗng->null);
+    //     NetworkID = StdParam; CardTypeName = StdStr (Trim+Normalize, rỗng->null);
+    //     Value = Convert.ToDouble(objValue) (thiếu -> 0; chuỗi không phải số -> lỗi);
+    //     FlagActive = StdFlag ("1" -> "1", MỌI giá trị khác kể cả thiếu -> "0").
+    //   * CheckDB(CardType, FlagExist "1") (:6395-6401): không có dòng -> Mst_CardType_CheckDB_CardTypeNotFound.
+    //   * KHÔNG kiểm Value <= 0, KHÔNG kiểm trùng Value (khác Create #90) — nguồn :6377-6427 không có.
+    //   * Lưu (:6413-6417): chỉ ghi cột có cờ bUpd_* + LogLUDTimeUTC + LogLUBy.
+    //   * CardTypeName là NOT NULL trong DDL (:85) -> tên rỗng -> SQL lỗi -> mã mặc định Mst_CardType_Update (:6211).
+    //
+    // Bỏ qua có chủ đích (loại Đ):
+    //   * CheckGatewayAuthentication/CheckAuthorize (gate :438-439), Sys_User_CheckAuthorize (:6250-6263):
+    //     hệ thống đích chưa có hệ phân quyền.
+    //   * Ghi RequestLog/ReturnLog (:6231-6238, :6327-6334).
+    //   * LogLUBy gán cố định "port" do đích chưa có session người dùng (:6417).
+    // ============================================================================================
+    [HttpPost("update")]
+    public async Task<IActionResult> Update([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] MstCardTypeUpdateReq? req)
+    {
+        // 1. Body rỗng/null: gate :428-435 ném Exception("strJson null") -> mã mặc định Mst_CardType_Update.
+        if (req == null)
+        {
+            return PortResult.Fail("Mst_CardType_Update", "Check.strJson", null);
+        }
+
+        // 2. Mở 1 transaction cho toàn bộ nghiệp vụ (Master.Loyalty.cs:6228 _cf.db.BeginTransaction()).
+        await using var tx = await db.Database.BeginTransactionAsync();
+        try
+        {
+            // 3. Ft_Cols_Upd: gate dựng nguyên văn (:450-453) rồi biz StdParam (ToUpper) + Contains (:6377-6388).
+            //    Viết đúng chuỗi gate, KHÔNG rút gọn.
+            var strFt_Cols_Upd = "Mst_CardType.CardType,Mst_CardType.CardTypeName,Mst_CardType.Value,Mst_CardType.FlagActive,";
+            strFt_Cols_Upd = StdParam(strFt_Cols_Upd) ?? "";
+            bool bUpd_CardTypeName = strFt_Cols_Upd.Contains("Mst_CardType.CardTypeName".ToUpperInvariant());
+            bool bUpd_Value = strFt_Cols_Upd.Contains("Mst_CardType.Value".ToUpperInvariant());
+            bool bUpd_FlagActive = strFt_Cols_Upd.Contains("Mst_CardType.FlagActive".ToUpperInvariant());
+
+            // 4. Chuẩn hoá input (Master.Loyalty.cs:6380-6384).
+            //    StdParam = Trim().ToUpper(), rỗng -> null (05.Refs.Biz\Biz\Loyalty.TVO\Loyalty.TVO.Utils\Utils.cs:29).
+            //    StdStr   = Trim().Normalize(), rỗng -> null (cùng tệp Utils.cs:29).
+            string? strCardType = StdParam(req.CardType);
+            string? strCardTypeName = StdStr(req.CardTypeName);
+            string strFlagActive = StdFlag(req.FlagActive);   // :6384 StdFlag
+
+            // Value = Convert.ToDouble(objValue) (:6383): thiếu -> 0; chuỗi không phải số -> lỗi -> mã mặc định.
+            double dblValue;
+            try
+            {
+                dblValue = ConvertToDouble(req.Value);
+            }
+            catch (Exception)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_CardType_Update", "Check.objValue", req.Value?.ToString());
+            }
+
+            // 5. CheckDB(CardType, FlagExist "1") (:6395-6401 -> Mst_CardType_CheckDB :5264-5325):
+            //    FlagExist "1" + KHÔNG có dòng -> Mst_CardType_CheckDB_CardTypeNotFound.
+            var entity = await db.Set<Mst_CardType>().FirstOrDefaultAsync(x =>
+                EF.Functions.Like((x.CardType ?? "").ToLower(), PortQuery.Equal(strCardType ?? ""), PortQuery.Esc));
+            if (entity == null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_CardType_CheckDB_CardTypeNotFound", "Check.CardType", strCardType);
+            }
+
+            // 6. CÓ Ý KHÔNG kiểm Value <= 0 và KHÔNG kiểm trùng Value — nguồn :6377-6427 không có (khác Create #90).
+
+            // 7. Ghi cột có cờ bUpd_* + LogLUDTimeUTC + LogLUBy (:6413-6417).
+            //    CardTypeName NOT NULL trong DDL (:85): tên rỗng (sau StdStr) mà bUpd_CardTypeName
+            //    -> SQL Server báo lỗi khi SaveData -> mã mặc định Mst_CardType_Update (:6211).
+            if (bUpd_CardTypeName)
+            {
+                if (string.IsNullOrEmpty(strCardTypeName))
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Mst_CardType_Update", "Check.NotNull", "CardTypeName");
+                }
+                entity.CardTypeName = strCardTypeName;   // :6413 CardTypeName
+            }
+            if (bUpd_Value)
+            {
+                entity.Value = dblValue;                 // :6414 Value
+            }
+            if (bUpd_FlagActive)
+            {
+                entity.FlagActive = strFlagActive;       // :6415 FlagActive
+            }
+            entity.LogLUDTimeUTC = DateTime.UtcNow;      // :6416 LogLUDTimeUTC = dtimeSys (UtcNow)
+            entity.LogLUBy = "port";                     // :6417 LogLUBy (đích chưa có session user — loại Đ)
+            await db.SaveChangesAsync();
+
+            // 8. Commit (Master.Loyalty.cs:6300 CommitSafety).
+            await tx.CommitAsync();
+
+            // 9. Thành công: gate :471-472 SetSuccess + Data = null.
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+        catch (Exception)
+        {
+            await tx.RollbackAsync();
+            throw;
+        }
+    }
+
     /// <summary>
     /// Chuyển Value như <c>Convert.ToDouble(objValue)</c> của nguồn (Master.Loyalty.cs:6002):
     /// null/thiếu -> 0; số -> giá trị; chuỗi số -> parse; chuỗi không phải số -> ném lỗi.
@@ -368,6 +497,18 @@ public class Mst_CardTypeControllerPort(AppDbContext db) : ControllerBase
         var s = val.ToString()?.Trim();
         if (string.IsNullOrEmpty(s)) return null;
         return s.Normalize();
+    }
+
+    /// <summary>
+    /// Chuẩn hoá cờ: "1" nếu đúng "1", mọi giá trị khác (kể cả null/thiếu/rỗng) -> "0".
+    /// Dùng cho cờ (FlagActive...).
+    /// Nguồn tham chiếu: 05.Refs.Biz\Biz\Loyalty.TVO\Loyalty.TVO.Utils\Utils.cs
+    /// </summary>
+    private static string StdFlag(object? val)
+    {
+        if (val == null) return "0";
+        var s = val.ToString()?.Trim();
+        return s == "1" ? "1" : "0";
     }
     #endregion
 }
