@@ -1,9 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using MiniLoyalty.Data;
 using MiniLoyalty.Models.Port;
 
@@ -19,6 +22,7 @@ namespace MiniLoyalty.Controllers.Port;
 //   Mst_CarBrandController.cs:421-488  Update              -> WA_Mst_CarBrand_Update (#81)
 //   Mst_CarBrandController.cs:492-555  Delete              -> WA_Mst_CarBrand_Delete (#82)
 //   Mst_CarBrandController.cs:557-621  DeleteMultiple      -> WA_Mst_CarBrand_Delete (#83)
+//   Mst_CarBrandController.cs:625-769  Import              -> WA_Mst_CarBrand_Create (#84)
 // Nguồn API:
 //   MstCarBrandController.cs:238-307   WA_Mst_CarBrand_Get
 //   MstCarBrandController.cs:20-90     WA_Mst_CarBrand_Create
@@ -57,10 +61,21 @@ namespace MiniLoyalty.Controllers.Port;
 //     xoá dòng -> Success = true, Data = null.
 //   * DeleteMultiple: body là mảng [{ BrandCode }], lặp tuần tự từng phần tử trong 1 transaction riêng biệt.
 //     Lỗi phần tử thứ k -> thoát vòng lặp ngay, "xóa một phần" là hành vi nguồn.
+//   * Import: nhận file .xlsx ([Consumes("multipart/form-data")]); file thiếu hoặc đuôi khác .xlsx -> Fail("Mst_CarBrand_Import", "Message", "File excel import không hợp lệ");
+//     Đọc qua PortExcel.ReadSheet: không có dòng -> "File excel import không có dữ liệu"; columnCount != 2 -> "File excel import không hợp lệ";
+//     Kiểm tra TẤT CẢ dòng trước khi tạo: BrandCode rỗng -> "Mã hiệu xe không được trống", BrandName rỗng -> "Tên hiệu xe không được trống";
+//     Duyệt từng dòng: gọi CreateXAsync độc lập (mỗi dòng 1 transaction riêng, "import một phần");
+//     Lỗi dòng k dừng ngay và trả lỗi dòng đó (các dòng trước k đã lưu);
+//     Thành công Data = null (:749-750).
+//
+// GAP:
+//   - NetworkID: nguồn lấy NetworkID = orgUserUI.NetworkId từ user đăng nhập (Mst_CarBrandController.cs:731);
+//     hệ thống đích chưa có session user -> lấy từ cấu hình IConfiguration["Biz_NetworkID"] ?? "1001" (như #94).
+//   - Định dạng file Excel: giả định từ Data/PortExcel.cs (dòng 1 tiêu đề, dữ liệu từ A2).
 //
 // Bỏ qua có chủ đích (loại Đ):
-//   - CheckGatewayAuthentication: gate :34, :352, :441, :501, :577; API MstCarBrandController.cs:259-264, :42, :114-119, :187-192
-//   - CheckAuthorize: gate :35, :353, :442, :502, :578 (hệ thống đích chưa có hệ phân quyền)
+//   - CheckGatewayAuthentication: gate :34, :352, :441, :501, :577, :636; API MstCarBrandController.cs:259-264, :42, :114-119, :187-192
+//   - CheckAuthorize: gate :35, :353, :442, :502, :578, :637 (hệ thống đích chưa có hệ phân quyền)
 //   - Nguồn gọi bằng tài khoản hệ thống viết cứng (tài khoản + mật khẩu viết cứng — KHÔNG chép giá trị),
 //     đích chưa có phân quyền; KHÔNG chép thông tin đăng nhập vào mã
 //   - Ghi RequestLog/ReturnLog: Master.Loyalty.cs:238-245, 336-343, 628-635, 721-728, 960-967, 1056-1063, 1272-1279, 1362-1369
@@ -123,10 +138,12 @@ public class MstCarBrandDeleteReq
 public class Mst_CarBrandControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly IConfiguration _config;
 
-    public Mst_CarBrandControllerPort(AppDbContext db)
+    public Mst_CarBrandControllerPort(AppDbContext db, IConfiguration config)
     {
         _db = db;
+        _config = config;
     }
 
     [HttpPost("search")]
@@ -295,30 +312,63 @@ public class Mst_CarBrandControllerPort : ControllerBase
             return PortResult.Fail("Mst_CarBrand_Create", "Check.strJson", null);
         }
 
-        // 2. Mở 1 transaction cho toàn bộ nghiệp vụ (Master.Loyalty.cs:625 _cf.db.BeginTransaction()).
+        // 2. Thực hiện nghiệp vụ tạo qua CreateXAsync (1 transaction / lần)
+        var err = await CreateXAsync(req.BrandCode, req.NetworkID, req.BrandName, req.Remark);
+        if (err != null)
+        {
+            return err;
+        }
+
+        // 7. Thành công: gate Mst_CarBrandController.cs:403-404 SetSuccess + Data = null.
+        return Ok(new
+        {
+            Success = true,
+            Data = (object?)null
+        });
+    }
+
+    /// <summary>
+    /// Nghiệp vụ tạo 1 hãng xe — 1 transaction riêng biệt. Dùng chung cho Create (#80) và Import (#84, gọi từng dòng).
+    /// Nguồn: WA_Mst_CarBrand_Create (MstCarBrandController.cs:20-90) -> WAS_Mst_CarBrand_Create (Master.Loyalty.cs:502-584)
+    /// -> Mst_CarBrand_Create (Master.Loyalty.cs:585-731) -> Mst_CarBrand_CreateX (Master.Loyalty.cs:732-828)
+    /// -> Mst_CarBrand_CheckDB (Master.Loyalty.cs:28-91).
+    ///
+    /// Thứ tự xử lý:
+    ///   1. Chuẩn hoá dữ liệu input (Master.Loyalty.cs:763-766):
+    ///      StdParam = Trim().ToUpper(), rỗng -> null (05.Refs.Biz\Biz\Loyalty.TVO\Loyalty.TVO.Utils\Utils.cs:29).
+    ///      StdStr   = Trim().Normalize(), rỗng -> null (cùng tệp Utils.cs:29).
+    ///      CẢNH BÁO: BrandName dùng StdParam (:764) nên tên hãng xe bị VIẾT HOA (ToUpper) theo đúng hành vi nguồn!
+    ///   2. Kiểm tra dữ liệu:
+    ///      2.1. BrandCode null/rỗng -> ErridnLoyalty.Mst_CarBrand_Create_InvalidBrandCode (:775-785).
+    ///      2.2. Mst_CarBrand_CheckDB(BrandCode, Flag "0") (Master.Loyalty.cs:787-793 -> :28-90):
+    ///           strFlagExistToCheck = "0" (TConst.Flag.No). Nếu đã tồn tại dòng -> ErridnLoyalty.Mst_CarBrand_CheckDB_BrandExist (:65-75).
+    ///      2.3. KHÔNG kiểm tra tên hãng (BrandName), KHÔNG kiểm tra NetworkID (hành vi nguồn Master.Loyalty.cs:773-796).
+    ///   3. Lưu dòng mới (Master.Loyalty.cs:804-820):
+    ///      BrandCode, BrandName, NetworkID, Remark, FlagActive = "1", LogLUDTimeUTC = UtcNow, LogLUBy = "port".
+    ///      Commit transaction (Master.Loyalty.cs:694 TDALUtils.DBUtils.CommitSafety).
+    /// Trả null nếu thành công; trả IActionResult (PortResult.Fail) nếu thất bại.
+    /// </summary>
+    private async Task<IActionResult?> CreateXAsync(string? brandCode, string? networkId, string? brandName, string? remark)
+    {
+        // Mở 1 transaction cho mỗi lần tạo (Master.Loyalty.cs:625 _cf.db.BeginTransaction()).
         await using var tx = await _db.Database.BeginTransactionAsync();
         try
         {
-            // 3. Chuẩn hoá dữ liệu input (Master.Loyalty.cs:763-766):
-            //    StdParam = Trim().ToUpper(), rỗng -> null (05.Refs.Biz\Biz\Loyalty.TVO\Loyalty.TVO.Utils\Utils.cs:29).
-            //    StdStr   = Trim().Normalize(), rỗng -> null (cùng tệp Utils.cs:29).
-            //    CẢNH BÁO: BrandName dùng StdParam (:764) nên tên hãng xe bị VIẾT HOA (ToUpper) theo đúng hành vi nguồn!
-            string? strBrandCode = StdParam(req.BrandCode);
-            string? strBrandName = StdParam(req.BrandName);
-            string? strNetworkID = StdParam(req.NetworkID);
-            string? strRemark = StdStr(req.Remark);
+            // Chuẩn hoá dữ liệu input (Master.Loyalty.cs:763-766):
+            string? strBrandCode = StdParam(brandCode);
+            string? strBrandName = StdParam(brandName);
+            string? strNetworkID = StdParam(networkId);
+            string? strRemark = StdStr(remark);
 
-            // 4. Kiểm tra dữ liệu:
-            // 4.1. BrandCode null/rỗng -> ErridnLoyalty.Mst_CarBrand_Create_InvalidBrandCode (:775-785).
+            // Kiểm tra dữ liệu:
+            // BrandCode null/rỗng -> ErridnLoyalty.Mst_CarBrand_Create_InvalidBrandCode (:775-785).
             if (string.IsNullOrEmpty(strBrandCode))
             {
                 await tx.RollbackAsync();
                 return PortResult.Fail("Mst_CarBrand_Create_InvalidBrandCode", "Check.strBrandCode", strBrandCode);
             }
 
-            // 4.2. Mst_CarBrand_CheckDB(BrandCode, Flag "0") (Master.Loyalty.cs:787-793 -> :28-90):
-            //      strFlagExistToCheck = "0" (TConst.Flag.No). Nếu đã tồn tại dòng -> ErridnLoyalty.Mst_CarBrand_CheckDB_BrandExist (:65-75).
-            //      Nguồn dùng `=` trên SQL Server collation không phân biệt hoa/thường -> Like PortQuery.Equal, hạ chữ 2 phía.
+            // Mst_CarBrand_CheckDB(BrandCode, Flag "0") (Master.Loyalty.cs:787-793 -> :28-90):
             var exists = await _db.Set<Mst_CarBrand>().AnyAsync(x =>
                 EF.Functions.Like((x.BrandCode ?? "").ToLower(), PortQuery.Equal(strBrandCode), PortQuery.Esc));
             if (exists)
@@ -327,33 +377,25 @@ public class Mst_CarBrandControllerPort : ControllerBase
                 return PortResult.Fail("Mst_CarBrand_CheckDB_BrandExist", "Check.BrandCode", strBrandCode);
             }
 
-            // 4.3. KHÔNG kiểm tra tên hãng (BrandName), KHÔNG kiểm tra NetworkID (hành vi nguồn Master.Loyalty.cs:773-796).
-
-            // 5. Lưu dòng mới (Master.Loyalty.cs:804-820):
-            var dtimeSys = DateTime.UtcNow; // Master.Loyalty.cs:606 dtimeSys = DateTime.UtcNow
+            // Lưu dòng mới (Master.Loyalty.cs:804-820):
+            var dtimeSys = DateTime.UtcNow;
             var entity = new Mst_CarBrand
             {
-                BrandCode = strBrandCode,       // :805 BrandCode
-                BrandName = strBrandName,       // :806 BrandName (viết hoa theo hành vi nguồn :764)
-                NetworkID = strNetworkID,       // :807 NetworkID
-                Remark = strRemark,             // :808 Remark
-                FlagActive = "1",               // :809 FlagActive = TConst.Flag.Active ("1")
-                LogLUDTimeUTC = dtimeSys,       // :810 LogLUDTimeUTC
-                LogLUBy = "port"                // :811 LogLUBy ("port" - đích chưa có session user, loại Đ)
+                BrandCode = strBrandCode,
+                BrandName = strBrandName,
+                NetworkID = strNetworkID,
+                Remark = strRemark,
+                FlagActive = "1",
+                LogLUDTimeUTC = dtimeSys,
+                LogLUBy = "port"
             };
 
             await _db.Set<Mst_CarBrand>().AddAsync(entity);
             await _db.SaveChangesAsync();
 
-            // 6. Commit transaction (Master.Loyalty.cs:694 TDALUtils.DBUtils.CommitSafety).
+            // Commit transaction (Master.Loyalty.cs:694 TDALUtils.DBUtils.CommitSafety).
             await tx.CommitAsync();
-
-            // 7. Thành công: gate Mst_CarBrandController.cs:403-404 SetSuccess + Data = null.
-            return Ok(new
-            {
-                Success = true,
-                Data = (object?)null
-            });
+            return null;
         }
         catch (Exception)
         {
@@ -639,6 +681,133 @@ public class Mst_CarBrandControllerPort : ControllerBase
             await tx.RollbackAsync();
             throw;
         }
+    }
+
+    // ============================================================================================
+    // Import — nguồn gate Mst_CarBrandController.cs:625-769 -> API WA_Mst_CarBrand_Create
+    // (MstCarBrandController.cs:20-90) -> biz WAS_Mst_CarBrand_Create (Master.Loyalty.cs:502-584)
+    // -> Mst_CarBrand_Create (Master.Loyalty.cs:585-731) -> Mst_CarBrand_CreateX (Master.Loyalty.cs:732-828).
+    //
+    // GIẢ ĐỊNH (kế thừa từ Data/PortExcel.cs):
+    //   - Định dạng file Excel: dòng 1 = tiêu đề (đúng mẫu GetImportDicColumsTemplate), dữ liệu bắt đầu từ ô A2 (firstDataRow = 2).
+    //   - Cột ánh xạ theo vị trí: cột 1 = BrandCode, cột 2 = BrandName (GetImportDicColumsTemplate có 2 cột:
+    //     BrandCode -> "Mã hiệu xe (*)", BrandName -> "Tên hiệu xe (*)").
+    //
+    // Quy trình và thứ tự kiểm tra:
+    //   1. Kiểm tra file upload: gate Mst_CarBrandController.cs:648-654
+    //      - Thiếu file hoặc file rỗng hoặc đuôi file != ".xlsx" -> Fail("Mst_CarBrand_Import", "Message", "File excel import không hợp lệ")
+    //   2. Đọc file bằng PortExcel.ReadSheet(stream, new[] { "BrandCode", "BrandName" }):
+    //      - Bảng không có dòng dữ liệu (table == null || table.Rows.Count == 0) -> Fail("Mst_CarBrand_Import", "Message", "File excel import không có dữ liệu") (:665, :754-755)
+    //      - Số cột tiêu đề != GetImportDicColumsTemplate().Count (2 cột) -> Fail("Mst_CarBrand_Import", "Message", "File excel import không hợp lệ") (:668-672)
+    //   3. Kiểm tra TẤT CẢ các dòng TRƯỚC khi tạo (#region["Check null"] :676-701):
+    //      - BrandCode rỗng / khoảng trắng -> Fail("Mst_CarBrand_Import", "Message", "Mã hiệu xe không được trống") (:678-682)
+    //      - BrandName rỗng / khoảng trắng -> Fail("Mst_CarBrand_Import", "Message", "Tên hiệu xe không được trống") (:683-687)
+    //      Khối kiểm trùng trong file (:704-721) BỊ COMMENT ở nguồn -> KHÔNG port.
+    //      Nếu có bất kỳ dòng nào vi phạm ở bước này, dừng ngay và KHÔNG có dòng nào được tạo vào CSDL.
+    //   4. Lưu từng dòng (hành vi "import một phần"):
+    //      - NetworkID lấy từ cấu hình: IConfiguration["Biz_NetworkID"] ?? "1001"
+    //        (GAP: nguồn lấy NetworkID = orgUserUI.NetworkId từ user đăng nhập :731).
+    //      - Duyệt từng dòng theo thứ tự, gọi CreateXAsync(brandCode, networkId, brandName, null) riêng cho mỗi dòng
+    //        (mỗi dòng 1 transaction biz riêng biệt: gate :728-746).
+    //      - Nếu dòng thứ k gặp lỗi (vd trùng mã Mst_CarBrand_CheckDB_BrandExist),
+    //        vòng lặp dừng ngay lập tức, trả về đúng lỗi của CreateXAsync cho dòng k.
+    //      - CÁC DÒNG TRƯỚC k ĐÃ ĐƯỢC COMMIT VÀO DB (không rollback các dòng đã tạo trước đó — "import một phần" là hành vi nguồn).
+    //      - Các dòng sau k không được duyệt.
+    //   5. Thành công: trả Ok({ Success = true, Data = null }) (:749-750).
+    //
+    // Bỏ qua có chủ đích (loại Đ):
+    //   - CheckGatewayAuthentication, CheckAuthorize (:636-637)
+    //   - Nguồn lưu file tạm xuống đĩa (FileUtils.SaveTempFile :657) -> ở đây đọc trực tiếp từ stream qua ClosedXML
+    //   - Session người dùng orgUserUI (:635, :731, :737-741).
+    // ============================================================================================
+    [HttpPost("import")]
+    [Consumes("multipart/form-data")]
+    public async Task<IActionResult> Import(IFormFile? file)
+    {
+        // 1. Kiểm tra file upload: gate Mst_CarBrandController.cs:648-654
+        if (file == null || file.Length == 0)
+        {
+            return PortResult.Fail("Mst_CarBrand_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+        if (ext != ".xlsx")
+        {
+            return PortResult.Fail("Mst_CarBrand_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        // 2. Đọc bảng tính bằng PortExcel.ReadSheet (giả định định dạng file Excel từ PortExcel)
+        int columnCount;
+        List<Dictionary<string, string?>> rows;
+        try
+        {
+            using var stream = file.OpenReadStream();
+            (columnCount, rows) = PortExcel.ReadSheet(stream, new[] { "BrandCode", "BrandName" });
+        }
+        catch
+        {
+            return PortResult.Fail("Mst_CarBrand_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        // Kiểm tra có dữ liệu hay không: gate :666, :754-755 (table == null || table.Rows.Count == 0)
+        if (rows.Count == 0)
+        {
+            return PortResult.Fail("Mst_CarBrand_Import", "Message", "File excel import không có dữ liệu");
+        }
+
+        // Kiểm tra số cột dòng tiêu đề so với GetImportDicColumsTemplate().Count (2 cột): gate :668-672
+        if (columnCount != GetImportDicColumsTemplate().Count)
+        {
+            return PortResult.Fail("Mst_CarBrand_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        // 3. Kiểm tra TẤT CẢ các dòng TRƯỚC khi tạo (Check null: gate Mst_CarBrandController.cs:676-701)
+        foreach (var r in rows)
+        {
+            var brandCode = r.GetValueOrDefault("BrandCode");
+            if (string.IsNullOrWhiteSpace(brandCode))
+            {
+                return PortResult.Fail("Mst_CarBrand_Import", "Message", "Mã hiệu xe không được trống");
+            }
+
+            var brandName = r.GetValueOrDefault("BrandName");
+            if (string.IsNullOrWhiteSpace(brandName))
+            {
+                return PortResult.Fail("Mst_CarBrand_Import", "Message", "Tên hiệu xe không được trống");
+            }
+        }
+
+        // 4. Lưu từng dòng tuần tự: mỗi dòng 1 transaction riêng (hành vi "import một phần": gate :728-746)
+        // GAP: nguồn lấy NetworkID = orgUserUI.NetworkId (:731) từ user đăng nhập; đích chưa có user -> dùng IConfiguration["Biz_NetworkID"] ?? "1001"
+        var networkId = _config["Biz_NetworkID"] ?? "1001";
+        foreach (var r in rows)
+        {
+            var brandCode = r.GetValueOrDefault("BrandCode");
+            var brandName = r.GetValueOrDefault("BrandName");
+
+            var err = await CreateXAsync(brandCode, networkId, brandName, null);
+            if (err != null)
+            {
+                // Lỗi ở dòng k -> thoát ngay, trả đúng lỗi của Create, các dòng trước k đã tạo thành công
+                return err;
+            }
+        }
+
+        // Thành công: gate :749-750
+        return Ok(new
+        {
+            Success = true,
+            Data = (object?)null
+        });
+    }
+
+    private static Dictionary<string, string> GetImportDicColumsTemplate()
+    {
+        return new Dictionary<string, string>
+        {
+            { "BrandCode", "Mã hiệu xe (*)" },
+            { "BrandName", "Tên hiệu xe (*)" }
+        };
     }
 
     #region Helper chuẩn hoá input (05.Refs.Biz\Biz\Loyalty.TVO\Loyalty.TVO.Utils\Utils.cs)
