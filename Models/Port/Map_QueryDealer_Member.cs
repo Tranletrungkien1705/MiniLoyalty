@@ -70,6 +70,7 @@ public class Map_QueryDealer_MemberConfig : IEntityTypeConfiguration<Map_QueryDe
 /// - (DL01, HV0000002, 2026-10-02, 2026-10-10 09:00)
 /// - (DL03, HV0000003, 2026-10-03, 2026-10-10 08:00)
 /// - (DL01, HV9999999 [không có hội viên], 2026-10-04, 2026-10-10 11:00)
+/// - (VS045, HV0000004, 2026-10-05, 2026-10-10 07:00, DLCodeRegis 'VS045' -> đại lý tự tra cứu, #67 bị loại bởi <>)
 /// </summary>
 public class Map_QueryDealer_MemberSeeder : IPortSeeder
 {
@@ -122,6 +123,17 @@ public class Map_QueryDealer_MemberSeeder : IPortSeeder
                 Remark = "Demo query dealer member 4 (khong co hoi vien)",
                 FlagActive = "1",
                 LogLUDTimeUTC = new DateTime(2026, 10, 10, 11, 0, 0, DateTimeKind.Utc),
+                LogLUBy = "seed"
+            },
+            new Map_QueryDealer_Member
+            {
+                DLCPCode = "VS045",
+                MemberNo = "HV0000004", // HV0000004 có DLCodeRegis 'VS045' -> đại lý tự tra cứu hội viên của mình (#67 bị loại bởi <>)
+                NetworkID = "1001",
+                QueryDate = new DateTime(2026, 10, 5, 0, 0, 0, DateTimeKind.Utc),
+                Remark = "Demo query dealer member 5 (dai ly tu tra cuu)",
+                FlagActive = "1",
+                LogLUDTimeUTC = new DateTime(2026, 10, 10, 7, 0, 0, DateTimeKind.Utc),
                 LogLUBy = "seed"
             }
         );
