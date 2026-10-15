@@ -48,6 +48,12 @@ public class MstCarBrandSearchReq
     public int Ft_PageSize { get; set; } = 10;       // Số dòng/trang — :25, :47
 }
 
+/// <summary>Port 1:1 <c>GetByBrandCode</c> — body chỉ có BrandCode (Mst_CarBrandController.cs:216-279).</summary>
+public class MstCarBrandGetByBrandCodeReq
+{
+    public string? BrandCode { get; set; }            // Mã hãng xe cần lấy — :238-241
+}
+
 [ApiController]
 [Route("api/mst_carbrand")]
 [Produces("application/json")]
@@ -99,11 +105,36 @@ public class Mst_CarBrandControllerPort : ControllerBase
         return Ok(new { Success = true, Data = rows.Count > 0 ? rows : null });
     }
 
+    // ============================================================================================
+    // GetByBrandCode — nguồn Mst_CarBrandController.cs:216-279.
+    // Gate: nếu BrandCode rỗng thì KHÔNG truy vấn (:236), objMst_CarBrand giữ null (:235) ⇒ Data = null (:266).
+    // Ngược lại gán BrandCode (:238-241) rồi gọi strWhereClause_Mst_CarBrand_By_BrandCode (:309-328)
+    // (lọc `BrandCode = 'x'` — KHÔNG truyền FlagActive nên hàng FlagActive '0' VẪN lấy được).
+    // Ft_RecordStart = "0", Ft_RecordCount = "1" (:253-254) ⇒ lấy đúng 1 dòng, trả Lst_Mst_CarBrand[0] (:260-263).
+    // ============================================================================================
+    [HttpPost("getbybrandcode")]
+    public async Task<IActionResult> GetByBrandCode([FromBody] MstCarBrandGetByBrandCodeReq? req)
+    {
+        var brandCode = req?.BrandCode;
+
+        // BrandCode rỗng ⇒ nguồn không truy vấn (:236) và trả Data = null (:266).
+        if (string.IsNullOrWhiteSpace(brandCode))
+        {
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+
+        // Lấy 1 dòng theo BrandCode (Ft_RecordStart = "0", Ft_RecordCount = "1" — :253-254).
+        var (_, rows) = await GetXAsync(null, null, 0, 1, brandCodeEqual: brandCode);
+
+        // Nguồn trả Lst_Mst_CarBrand[0] khi có dòng, ngược lại null (:260-263).
+        return Ok(new { Success = true, Data = rows.Count > 0 ? rows[0] : null });
+    }
+
     /// <summary>
     /// Lọc + đếm + chia trang theo BrandCode asc — dùng cho Search.
     /// Trả (itemCount, rows): itemCount = tổng số dòng sau lọc (MyCount, SQL :411); rows = trang đã cắt kèm MyIdxSeq 0-based (:443).
     /// </summary>
-    private async Task<(int itemCount, List<object> rows)> GetXAsync(string? keyWord, string? flagActiveCsv, long recordStart, long recordCount)
+    private async Task<(int itemCount, List<object> rows)> GetXAsync(string? keyWord, string? flagActiveCsv, long recordStart, long recordCount, string? brandCodeEqual = null)
     {
         var q = _db.Set<Mst_CarBrand>().AsNoTracking().AsQueryable();
 
@@ -113,6 +144,16 @@ public class Mst_CarBrandControllerPort : ControllerBase
         {
             var kw = PortQuery.Contains(keyWord);
             q = q.Where(x => EF.Functions.Like((x.BrandName ?? "").ToLower(), kw, PortQuery.Esc));
+        }
+
+        // BrandCode -> `BrandCode = 'x'` (Mst_CarBrandController.cs:316 — strWhereClause_Mst_CarBrand_By_BrandCode).
+        // Nguồn dùng `=` trên SQL Server collation KHÔNG phân biệt hoa/thường ⇒ Like KHÔNG wildcard, hạ chữ 2 phía.
+        // LƯU Ý: nhánh OrgID trong hàm lọc nguồn (:318-321) trỏ tới cột OrgID KHÔNG tồn tại ở Mst_CarBrand — mã chết,
+        //         KHÔNG port. Nhánh FlagActive (:322-...) KHÔNG được truyền ở GetByBrandCode nên KHÔNG chạy.
+        if (!string.IsNullOrWhiteSpace(brandCodeEqual))
+        {
+            var bc = PortQuery.Equal(brandCodeEqual);
+            q = q.Where(x => EF.Functions.Like((x.BrandCode ?? "").ToLower(), bc, PortQuery.Esc));
         }
 
         // FlagActive -> in ('a','b') (Mst_CarBrandController.cs:297-305): tách dấu phẩy, bỏ khoảng trắng, hạ chữ.
