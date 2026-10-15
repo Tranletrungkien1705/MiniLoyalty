@@ -11,11 +11,12 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 từ dự án nguồn 2022.7.Loyalty — Mst_PromotionProgramController/Search (#205).
+// PORT 1:1 từ dự án nguồn 2022.7.Loyalty — Mst_PromotionProgramController/Search (#205), GetAllActive (#206).
 //
 // Nguồn tra cứu (chỉ đọc):
 //   - Gate controller: 13.ClientGate/V10/idn.Loyalty.WebAPI/Controllers/Mst_PromotionProgramController.cs
 //     * Search: :32-113 (KHÔNG có giá trị mặc định cho Ft_PageIndex và Ft_PageSize -> mặc định kiểu int là 0)
+//     * GetAllActive: :114-223 (gọi strWhereClause với FlagActive="1" nhưng hàm lọc chỉ xử lý KeyWord => FlagActive BỊ BỎ QUA, Ft_RecordStart="0", Ft_RecordCount="123456000")
 //     * strWhereClause_Mst_PromotionProgram: :718-730 (chỉ lọc KeyWord -> PrProgramCode like '%kw%', OrgID KHÔNG dùng)
 //   - Service: WA_Mst_PromotionProgram_Get (11.BackEnd/V10/idn.Loyalty.Biz.Web/Controllers/MstPromotionProgramController.cs:22-90)
 //   - Biz LIVE:
@@ -91,6 +92,31 @@ public class Mst_PromotionProgramControllerPort : ControllerBase
         var pageCount = rows.Count == 0 ? 0 : (itemCount % ps == 0 ? itemCount / ps : itemCount / ps + 1);
 
         return Ok(new { Success = true, Data = new PageInfo<object>(rows, itemCount, pageCount, pageIndex, pageSize) });
+    }
+
+    /// <summary>
+    /// Port 1:1 <c>Mst_PromotionProgramController.GetAllActive</c> (nguồn gate Mst_PromotionProgramController.cs:114-223).
+    ///
+    /// CẢNH BÁO BẪY NGUỒN (FlagActive bị bỏ qua):
+    /// Nguồn gate (:140-144) gọi <c>strWhereClause_Mst_PromotionProgram</c> với <c>FlagActive = "1"</c> và <c>OrgID</c>.
+    /// Tuy nhiên hàm <c>strWhereClause_Mst_PromotionProgram</c> (:718-730) CHỈ xử lý <c>data.KeyWord</c> (tìm theo PrProgramCode).
+    /// Hoàn toàn không có nhánh nào lọc FlagActive hoặc OrgID => <c>FlagActive = "1"</c> BỊ BỎ QUA, KHÔNG LỌC.
+    /// Do đó GetAllActive trả về TẤT CẢ chương trình khuyến mại trong hệ thống, kể cả inactive (FlagActive = '0').
+    ///
+    /// Không nhận body: Ft_RecordStart = "0", Ft_RecordCount = "123456000" (gate :156-157).
+    /// Khối Ext/tree (:166-198) bị comment ở nguồn => không port.
+    /// Dùng lại GetXAsync của Search (#205): MyIdxSeq + 11 cột + ListDealer (cùng GetX, cùng ability coi như Root).
+    /// Trả về mảng trần: <c>Ok(new { Success = true, Data = rows.Count > 0 ? rows : null })</c> (gate :201, :207).
+    /// </summary>
+    [HttpPost("getallactive")]
+    public async Task<IActionResult> GetAllActive()
+    {
+        // Nguồn: Ft_RecordStart = "0", Ft_RecordCount = "123456000" (gate Mst_PromotionProgramController.cs:156-157).
+        // FlagActive = "1" bị bỏ qua do strWhereClause (:718-730) chỉ lọc KeyWord -> truyền keyWord = null để không lọc.
+        var (_, rows) = await GetXAsync(null, 0, 123456000);
+
+        // Nguồn :203-210: Data = listMst_PromotionProgram (mảng trần, null nếu rỗng theo :137, :163, :201).
+        return Ok(new { Success = true, Data = rows.Count > 0 ? rows : null });
     }
 
     /// <summary>
