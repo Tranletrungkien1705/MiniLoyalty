@@ -10,12 +10,13 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục tỉnh/thành (Mst_Province) của dự án nguồn 2022.7.Loyalty (#213, #214).
+// PORT 1:1 — màn danh mục tỉnh/thành (Mst_Province) của dự án nguồn 2022.7.Loyalty (#213, #214, #215).
 //
 // Nguồn controller (tầng gate):
 //   Mst_ProvinceController.cs:31-111   Search              -> WA_Mst_Province_Get
 //   Mst_ProvinceController.cs:113-176  GetByProvinceCode   -> WA_Mst_Province_Get
-//   Mst_ProvinceController.cs:735-759  strWhereClause_Mst_Province (mệnh đề lọc Search)
+//   Mst_ProvinceController.cs:178-241  GetAllActive        -> WA_Mst_Province_Get
+//   Mst_ProvinceController.cs:735-759  strWhereClause_Mst_Province (mệnh đề lọc Search, GetAllActive)
 //   Mst_ProvinceController.cs:761-776  strWhereClause_Mst_Province_By_ProvinceCode (mệnh đề lọc By ProvinceCode)
 // Nguồn API:
 //   MstProvinceController.cs:20-91     WA_Mst_Province_Get
@@ -101,8 +102,24 @@ public class Mst_ProvinceControllerPort(AppDbContext db) : ControllerBase
         return Ok(new { Success = true, Data = rows.Count > 0 ? rows[0] : null });
     }
 
+    // ============================================================================================
+    // GetAllActive — nguồn Mst_ProvinceController.cs:178-241.
+    // Lọc FlagActive = "1" qua strWhereClause_Mst_Province (toán tử IN :748-756).
+    // OrgID chỉ gán vào request (:211), KHÔNG đưa vào where clause (:735-759).
+    // Ft_RecordStart = "0", Ft_RecordCount = "123456000" (:213-214, BaseController.cs:30-31).
+    // HÌNH DÁNG DATA KHÁC CÁC DANH MỤC KHÁC (như CardType):
+    // Nguồn bọc trong object { Lst_Mst_Province = lst_Mst_Province } (:225-227),
+    // nếu không có bản ghi nào thì lst_Mst_Province giữ null (:197, :220-222) => Data.Lst_Mst_Province = null.
+    // ============================================================================================
+    [HttpPost("getallactive")]
+    public async Task<IActionResult> GetAllActive()
+    {
+        var (_, rows) = await GetXAsync(null, "1", 0, 123456000, null);
+        return Ok(new { Success = true, Data = new { Lst_Mst_Province = rows.Count > 0 ? rows : null } });
+    }
+
     /// <summary>
-    /// Lọc + đếm + chia trang theo ProvinceCode asc — dùng chung cho Search và GetByProvinceCode.
+    /// Lọc + đếm + chia trang theo ProvinceCode asc — dùng chung cho Search, GetByProvinceCode và GetAllActive.
     /// Trả (itemCount, rows): itemCount = tổng số dòng sau lọc (MyCount, SQL :453); rows = trang đã cắt kèm MyIdxSeq 0-based (:443).
     /// </summary>
     private async Task<(int itemCount, List<object> rows)> GetXAsync(string? keyWord, string? flagActiveCsv, long recordStart, long recordCount, string? provinceCodeEqual)
