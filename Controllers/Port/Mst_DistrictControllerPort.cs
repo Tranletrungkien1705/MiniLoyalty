@@ -14,7 +14,7 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục quận/huyện (Mst_District) của dự án nguồn 2022.7.Loyalty (#139, #140, #141, #142, #143, #144, #145, #146, #147).
+// PORT 1:1 — màn danh mục quận/huyện (Mst_District) của dự án nguồn 2022.7.Loyalty (#139, #140, #141, #142, #143, #144, #145, #146, #147, #148).
 //
 // Nguồn controller (tầng gate):
 //   Mst_DistrictController.cs:31-111   Search              -> WA_Mst_District_Get
@@ -26,6 +26,7 @@ namespace MiniLoyalty.Controllers.Port;
 //   Mst_DistrictController.cs:449-513  Delete              -> WA_Mst_District_Delete (#145)
 //   Mst_DistrictController.cs:517-673  Import              -> WA_Mst_District_Create (#146)
 //   Mst_DistrictController.cs:678-756  Export              -> WA_Mst_District_Get (#147)
+//   Mst_DistrictController.cs:759-791  ExportTemplate      -> không gọi service (#148)
 //   Mst_DistrictController.cs:818-833  strWhereClause_Mst_District (mệnh đề lọc Search, GetAllActive, Export)
 //   Mst_DistrictController.cs:835-863  strWhereClause_Mst_District_Detail (mệnh đề lọc GetDetail, GetByProvinceCode)
 // Nguồn API:
@@ -77,6 +78,9 @@ namespace MiniLoyalty.Controllers.Port;
 //     DistrictCode ("Mã quận/huyện (*)"), ProvinceCode ("Mã tỉnh/thành (*)"), DistrictName ("Tên quận/huyện"), FlagActive ("Trạng thái");
 //     Sinh đường dẫn file qua PortExcel.GenExcelExportFilePath(webRoot, "Mst_District") (:731), sheet "Mst_District" (:732);
 //     Ghi file qua PortExcel.ExportToExcelFromList; trả về Success = true, Data = { Url = baseAddress + virtualPath } (:733-737).
+//   * ExportTemplate (#148): nguồn gate Mst_DistrictController.cs:759-791: không kiểm quyền, không đọc DB,
+//     danh sách rỗng List<Mst_District>, từ điển cột GetImportDicColumsTemplate() gồm 3 cột (DistrictCode, ProvinceCode, DistrictName),
+//     xuất ra sheet "Mst_District", trả về Success = true, Data = { Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath } (HTTP 200).
 //   * Lọc KeyWord: like '%x%' trên DistrictName (:823-826).
 //   * Lọc FlagActive: toán tử = (:827-830) — KHÁC Province dùng IN ('a','b').
 //   * OrgID: gate nhận (:31, :61, :125, :149, :264, :285) nhưng strWhereClause_Mst_District (:818-833) và strWhereClause_Mst_District_Detail (:835-863) KHÔNG lọc OrgID.
@@ -866,6 +870,52 @@ public class Mst_DistrictControllerPort(AppDbContext db, IConfiguration config, 
         PortExcel.ExportToExcelFromList(rows, dicColNames, physicalPath, "Mst_District");
 
         // Trả URL tải file: Data = { Url = GetRequestBaseAddress() + url } (:733-737)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+            }
+        });
+    }
+
+    // ============================================================================================
+    // ExportTemplate — nguồn gate Mst_DistrictController.cs:759-791 (#148).
+    // Action này KHÔNG kiểm quyền ở nguồn (không có CheckGatewayAuthentication và không có CheckAuthorize).
+    // Không gọi tầng service, không truy vấn cơ sở dữ liệu.
+    // Khởi tạo danh sách rỗng kiểu Mst_District (:767).
+    // Lấy từ điển 3 cột mẫu import từ GetImportDicColumsTemplate (:769):
+    //   1. DistrictCode ("Mã quận/huyện (*)")
+    //   2. ProvinceCode ("Mã tỉnh/thành (*)")
+    //   3. DistrictName ("Tên quận/huyện")
+    // Sinh đường dẫn file mẫu qua PortExcel.GenExcelExportFilePath(webRoot, "Mst_District") (:771).
+    // Xuất file Excel qua PortExcel.ExportToExcelFromList(list, dicColNames, physicalPath, "Mst_District") (:772).
+    // Trả về Success = true, Data = { Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath } (:773-777).
+    // Không có nhánh báo lỗi khi danh sách rỗng (khác với Export).
+    // ============================================================================================
+    [HttpPost("exporttemplate")]
+    public IActionResult ExportTemplate()
+    {
+        // Khởi tạo danh sách rỗng kiểu Mst_District (gate Mst_DistrictController.cs:767)
+        var list = new List<Mst_District>();
+
+        // Lấy từ điển 3 cột mẫu import (gate Mst_DistrictController.cs:769, GetImportDicColumsTemplate)
+        var dicColNames = GetImportDicColumsTemplate();
+
+        // Xác định thư mục webRoot và sinh đường dẫn file (gate Mst_DistrictController.cs:771)
+        var webRoot = env.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = Path.Combine(env.ContentRootPath, "wwwroot");
+        }
+
+        var (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Mst_District");
+
+        // Ghi danh sách rỗng ra file Excel với tên sheet Mst_District (gate Mst_DistrictController.cs:772)
+        PortExcel.ExportToExcelFromList(list, dicColNames, physicalPath, "Mst_District");
+
+        // Trả URL tải file với Success = true (gate Mst_DistrictController.cs:773-777)
         return Ok(new
         {
             Success = true,
