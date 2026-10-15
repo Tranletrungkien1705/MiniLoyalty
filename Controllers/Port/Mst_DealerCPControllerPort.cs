@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using MiniLoyalty.Data;
 using MiniLoyalty.Models.Port;
 
@@ -12,26 +13,32 @@ namespace MiniLoyalty.Controllers.Port;
 /// <summary>
 /// Port 1:1 Mst_DealerCPController.cs — Mst_DealerCP
 /// Chuỗi gọi nguồn:
-///   gate: Mst_DealerCPController.cs:26-106 (Search) + :107-230 (GetAllActive) + :231-296 (GetByDLCPCode) + :297-360 (GetByOrgID) + :364-389 (strWhereClause_Mst_DealerCP) + :390-406 (strWhereClause_Mst_DealerCP_By_DLCPCode) + :407-419 (strWhereClause_Mst_DealerCP_By_OrgID)
-///   API:  MstDealerCPController.cs:21-90 (WA_Mst_DealerCP_Get)
+///   gate: Mst_DealerCPController.cs:26-106 (Search) + :107-230 (GetAllActive) + :231-296 (GetByDLCPCode) + :297-360 (GetByOrgID) + :364-389 (strWhereClause_Mst_DealerCP) + :390-406 (strWhereClause_Mst_DealerCP_By_DLCPCode) + :407-419 (strWhereClause_Mst_DealerCP_By_OrgID) + :436-521 (CreateOld)
+///   API:  MstDealerCPController.cs:21-90 (WA_Mst_DealerCP_Get) + :93-162 (WA_Mst_DealerCP_Create)
 ///   biz:  Master.Loyalty.cs:3937-4050 (WAS_Mst_DealerCP_Get) -> :4051-4206 (Mst_DealerCP_Get) -> :4209-4433 (Mst_DealerCP_GetX)
+///         Master.Loyalty.cs:2973-3055 (WAS_Mst_DealerCP_Create) -> :3056-3202 (Mst_DealerCP_Create) -> :3205-3322 (Mst_DealerCP_CreateX) -> :2870-2934 (Mst_DealerCP_CheckDB) -> :2935-2971 (Mst_DealerCP_UpdBU)
 ///
 /// Bỏ qua có chủ đích (loại Đ):
-/// - CheckGatewayAuthentication: gate Mst_DealerCPController.cs:35, 120, 306; API MstDealerCPController.cs:42
-/// - CheckAuthorize: gate Mst_DealerCPController.cs:36, 121, 307; dòng :241 đã bị comment out ở nguồn
+/// - CheckGatewayAuthentication: gate Mst_DealerCPController.cs:35, 120, 306, 456; API MstDealerCPController.cs:42, 114
+/// - CheckAuthorize: gate Mst_DealerCPController.cs:36, 121, 307, 457; dòng :241 đã bị comment out ở nguồn
 /// - Nguồn gọi bằng tài khoản hệ thống viết cứng (tài khoản + mật khẩu viết cứng tại :264-265 — KHÔNG chép giá trị), đích chưa có phân quyền; KHÔNG chép thông tin đăng nhập vào mã
-/// - Sys_User_CheckAuthorize: Master.Loyalty.cs:4107-4124 (hệ thống đích chưa có hệ phân quyền)
-/// - Ghi RequestLog/ReturnLog: Master.Loyalty.cs:4097-4104, 4196-4203
+/// - Sys_User_CheckAuthorize: Master.Loyalty.cs:4107-4124, 3117-3130 (hệ thống đích chưa có hệ phân quyền)
+/// - Ghi RequestLog/ReturnLog: Master.Loyalty.cs:4097-4104, 4196-4203, 3098-3105, 3192-3199
+/// - LogLUBy gán cố định "port" do hệ thống đích chưa có session người dùng (Master.Loyalty.cs:3305)
+/// - Biz_NetworkID lấy từ cấu hình IConfiguration, mặc định "1001" nếu thiếu (Common.cs:39, 124; Master.Loyalty.cs:3293)
+/// - Bỏ qua Sequence WA_Seq_Common_Get (gate dòng 468-488 nguồn đã comment out, DLCPCode lấy từ client)
 /// </summary>
 [ApiController]
 [Route("api/mst_dealercp")]
 public class Mst_DealerCPControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly IConfiguration _config;
 
-    public Mst_DealerCPControllerPort(AppDbContext db)
+    public Mst_DealerCPControllerPort(AppDbContext db, IConfiguration config)
     {
         _db = db;
+        _config = config;
     }
 
     /// <summary>
@@ -207,6 +214,121 @@ public class Mst_DealerCPControllerPort : ControllerBase
             Success = true,
             Data = pageInfo
         });
+    }
+
+    /// <summary>
+    /// Port 1:1 CreateOld action từ gate Mst_DealerCPController.cs:436-521.
+    /// Chuỗi gọi: gate :436-521 -> API WA_Mst_DealerCP_Create (:93-162) -> biz WAS_Mst_DealerCP_Create (Master.Loyalty.cs:2973-3055)
+    /// -> Mst_DealerCP_Create (:3056-3202) -> Mst_DealerCP_CreateX (:3205-3322) -> Mst_DealerCP_CheckDB (:2870-2934) -> Mst_DealerCP_UpdBU (:2935-2971).
+    /// </summary>
+    [HttpPost("createold")]
+    public async Task<IActionResult> CreateOld([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] Mst_DealerCPCreateOldRequest? req)
+    {
+        // 1. Kiểm tra body rỗng / null: Gate Mst_DealerCPController.cs:446-453
+        // if (!string.IsNullOrEmpty(strJson)) { ... } else { throw new ServiceException("strJson null"); }
+        if (req == null)
+        {
+            return PortResult.Fail("Mst_DealerCP_Create", "Check.strJson", null);
+        }
+
+        // Bắt đầu Transaction toàn bộ quá trình tạo và tính lại BU (Master.Loyalty.cs:3095 _cf.db.BeginTransaction())
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // 2. Chuẩn hoá dữ liệu input (Master.Loyalty.cs:3238-3242):
+            // StdParam = trim; StdStr = trim (rỗng -> null)
+            string? strDLCPCode = req.DLCPCode?.Trim();
+            string? strDLCPCodeParent = string.IsNullOrWhiteSpace(req.DLCPCodeParent) ? null : req.DLCPCodeParent.Trim();
+            string? strDLCPName = string.IsNullOrWhiteSpace(req.DLCPName) ? null : req.DLCPName.Trim();
+            string? strDLCPPhoneNo = string.IsNullOrWhiteSpace(req.DLCPPhoneNo) ? null : req.DLCPPhoneNo.Trim();
+            string? strRemark = string.IsNullOrWhiteSpace(req.Remark) ? null : req.Remark.Trim();
+
+            // 3. Kiểm tra mã đại lý: Master.Loyalty.cs:3248-3258
+            // if (strDLCPCode == null || strDLCPCode.Length < 1) -> ErridnLoyalty.Mst_DealerCP_Create_InvalidDLCPCode
+            if (string.IsNullOrEmpty(strDLCPCode))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_DealerCP_Create_InvalidDLCPCode", "Check.strDLCPCode", strDLCPCode, "Check.DLCPCode", strDLCPCode);
+            }
+
+            // 4. Kiểm tra tồn tại mã đại lý mới: Master.Loyalty.cs:3260-3266 -> Mst_DealerCP_CheckDB (:2870-2934)
+            // strFlagExistToCheck = "0" (TConst.Flag.No). Nếu đã tồn tại dòng -> ErridnLoyalty.Mst_DealerCP_CheckDB_DLExist (:2907-2917)
+            var exists = await _db.Set<Mst_DealerCP>().AnyAsync(x =>
+                EF.Functions.Like((x.DLCPCode ?? "").ToLower(), PortQuery.Equal(strDLCPCode), PortQuery.Esc));
+            if (exists)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_DealerCP_CheckDB_DLExist", "Check.DLCPCode", strDLCPCode);
+            }
+
+            // 5. Kiểm tra đại lý cha (nếu có DLCPCodeParent): Master.Loyalty.cs:3270-3281
+            // strFlagExistToCheck = "1" (TConst.Flag.Yes), strFlagActiveListToCheck = "1" (TConst.Flag.Active)
+            if (!string.IsNullOrEmpty(strDLCPCodeParent))
+            {
+                var parent = await _db.Set<Mst_DealerCP>().FirstOrDefaultAsync(x =>
+                    EF.Functions.Like((x.DLCPCode ?? "").ToLower(), PortQuery.Equal(strDLCPCodeParent), PortQuery.Esc));
+
+                if (parent == null)
+                {
+                    // Không tìm thấy đại lý cha (:2896-2906) -> ErridnLoyalty.Mst_DealerCP_CheckDB_DLNotFound
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Mst_DealerCP_CheckDB_DLNotFound", "Check.DLCPCode", strDLCPCodeParent);
+                }
+
+                // Cờ hoạt động của đại lý cha không khớp (:2920-2933) -> ErridnLoyalty.Mst_DealerCP_CheckDB_FlagActiveNotMatched
+                if (!string.Equals(parent.FlagActive, "1", StringComparison.OrdinalIgnoreCase))
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Mst_DealerCP_CheckDB_FlagActiveNotMatched",
+                        "Check.DLCPCode", strDLCPCodeParent,
+                        "Check.strFlagActiveListToCheck", "1",
+                        "DB.FlagActive", parent.FlagActive);
+                }
+            }
+
+            // 6. Lưu 14 cột bảng Mst_DealerCP: Master.Loyalty.cs:3292-3305
+            var networkId = _config["Biz_NetworkID"] ?? "1001"; // Cần cấu hình Biz_NetworkID, mặc định 1001
+            var dtimeSys = DateTime.UtcNow;
+
+            var newDealer = new Mst_DealerCP
+            {
+                DLCPCode = strDLCPCode,                            // :3292 DLCPCode
+                NetworkID = networkId,                             // :3293 NetworkID
+                DLCPCodeParent = strDLCPCodeParent,                // :3294 DLCPCodeParent
+                DLCPBUCode = "X",                                  // :3295 DLCPBUCode tạm thời
+                DLCPBUPattern = "X",                               // :3296 DLCPBUPattern tạm thời
+                DLCPLevel = "1",                                   // :3297 DLCPLevel tạm thời
+                DLCPName = strDLCPName,                            // :3298 DLCPName
+                DLCPPhoneNo = strDLCPPhoneNo,                      // :3299 DLCPPhoneNo
+                FlagActive = "1",                                  // :3300 FlagActive = TConst.Flag.Active ("1")
+                FlagRoot = "0",                                    // :3301 FlagRoot = TConst.Flag.Inactive ("0")
+                FlagBirthPoints = "0",                             // :3302 FlagBirthPoints = TConst.Flag.Inactive ("0")
+                Remark = strRemark,                                // :3303 Remark
+                LogLUDTimeUTC = dtimeSys,                          // :3304 LogLUDTimeUTC
+                LogLUBy = "port"                                   // :3305 LogLUBy ("port" - đích chưa có session user, comment loại Đ)
+            };
+
+            await _db.Set<Mst_DealerCP>().AddAsync(newDealer);
+            await _db.SaveChangesAsync();
+
+            // 7. Post Save: Tính toán lại toàn bộ cây BU trên toàn bảng: Master.Loyalty.cs:3319 -> Mst_DealerCP_UpdBU (:2935-2971)
+            await UpdBUAsync();
+
+            // Commit Transaction (Master.Loyalty.cs:3165 TDALUtils.DBUtils.CommitSafety)
+            await tx.CommitAsync();
+
+            // Thành công trả về Data = null: gate Mst_DealerCPController.cs:507-508
+            return Ok(new
+            {
+                Success = true,
+                Data = (object?)null
+            });
+        }
+        catch (Exception)
+        {
+            await tx.RollbackAsync();
+            throw;
+        }
     }
 
     /// <summary>
@@ -501,6 +623,81 @@ public class Mst_DealerCPControllerPort : ControllerBase
 
         return (itemCount, rows, maps);
     }
+
+    /// <summary>
+    /// Port 1:1 Mst_DealerCP_UpdBU (Master.Loyalty.cs:2935-2971).
+    /// Cập nhật lại cây BU (DLCPBUCode, DLCPBUPattern, DLCPLevel) trên toàn bảng Mst_DealerCP.
+    /// Thuật toán nguồn:
+    /// (1) Gốc 'HO' viết cứng (:2938-2950): DLCPBUCode='HO', DLCPBUPattern='HO%', DLCPLevel=1.
+    /// (2) Lặp 7 vòng (@nDeepDealer 0..6 :2952-2968): mỗi dòng DLCPCode != 'HO':
+    ///     DLCPBUCode = IsNull(cha.DLCPBUCode + '.', '') + DLCPCode;
+    ///     DLCPBUPattern = IsNull(cha.DLCPBUCode + '.', '') + DLCPCode + '%';
+    ///     DLCPLevel = IsNull(cha.DLCPLevel, 0) + 1 (cha = left join theo DLCPCodeParent).
+    /// Thực hiện trong bộ nhớ trên danh sách entity đã tải rồi SaveChangesAsync.
+    /// </summary>
+    private async Task UpdBUAsync()
+    {
+        var allDealers = await _db.Set<Mst_DealerCP>().ToListAsync();
+        if (allDealers.Count == 0) return;
+
+        // Bước 1: Dòng có DLCPCode = 'HO' (gốc viết cứng nguồn :2938-2950)
+        foreach (var d in allDealers)
+        {
+            if (string.Equals(d.DLCPCode, "HO", StringComparison.OrdinalIgnoreCase))
+            {
+                d.DLCPBUCode = "HO";
+                d.DLCPBUPattern = "HO%";
+                d.DLCPLevel = "1";
+            }
+        }
+
+        // Bước 2: Lặp 7 vòng (nguồn @nDeepDealer <= 6 lặp 7 lần :2952-2968)
+        for (int round = 0; round < 7; round++)
+        {
+            // Lấy snapshot giá trị BUCode và Level của các đại lý tại đầu mỗi vòng lặp
+            var parentMap = allDealers.ToDictionary(
+                d => d.DLCPCode,
+                d => (d.DLCPBUCode, d.DLCPLevel),
+                StringComparer.OrdinalIgnoreCase);
+
+            foreach (var t in allDealers)
+            {
+                if (string.Equals(t.DLCPCode, "HO", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                string? parentBU = null;
+                int parentLevel = 0;
+
+                if (!string.IsNullOrEmpty(t.DLCPCodeParent) && parentMap.TryGetValue(t.DLCPCodeParent, out var pInfo))
+                {
+                    parentBU = pInfo.DLCPBUCode;
+                    if (int.TryParse(pInfo.DLCPLevel, out var pl))
+                        parentLevel = pl;
+                }
+
+                var prefix = !string.IsNullOrEmpty(parentBU) ? parentBU + "." : "";
+                t.DLCPBUCode = prefix + t.DLCPCode;
+                t.DLCPBUPattern = prefix + t.DLCPCode + "%";
+                t.DLCPLevel = (parentLevel + 1).ToString();
+            }
+        }
+
+        await _db.SaveChangesAsync();
+    }
+}
+
+/// <summary>
+/// Request model cho action CreateOld — khớp tham số tại gate Mst_DealerCPController.cs:436,
+/// API MstDealerCPController.cs:93 và biz Master.Loyalty.cs:3214-3218.
+/// Chỉ nhận 5 trường (DLCPCode, DLCPCodeParent, DLCPName, DLCPPhoneNo, Remark); các trường khác bỏ qua như nguồn.
+/// </summary>
+public class Mst_DealerCPCreateOldRequest
+{
+    public string? DLCPCode { get; set; }
+    public string? DLCPCodeParent { get; set; }
+    public string? DLCPName { get; set; }
+    public string? DLCPPhoneNo { get; set; }
+    public string? Remark { get; set; }
 }
 
 /// <summary>
