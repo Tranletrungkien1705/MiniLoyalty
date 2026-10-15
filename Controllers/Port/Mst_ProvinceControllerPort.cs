@@ -11,21 +11,24 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục tỉnh/thành (Mst_Province) của dự án nguồn 2022.7.Loyalty (#213, #214, #215, #216).
+// PORT 1:1 — màn danh mục tỉnh/thành (Mst_Province) của dự án nguồn 2022.7.Loyalty (#213, #214, #215, #216, #217).
 //
 // Nguồn controller (tầng gate):
 //   Mst_ProvinceController.cs:31-111   Search              -> WA_Mst_Province_Get
 //   Mst_ProvinceController.cs:113-176  GetByProvinceCode   -> WA_Mst_Province_Get
 //   Mst_ProvinceController.cs:178-241  GetAllActive        -> WA_Mst_Province_Get
 //   Mst_ProvinceController.cs:245-305  Create              -> WA_Mst_Province_Create
+//   Mst_ProvinceController.cs:309-373  Update              -> WA_Mst_Province_Update
 //   Mst_ProvinceController.cs:735-759  strWhereClause_Mst_Province (mệnh đề lọc Search, GetAllActive)
 //   Mst_ProvinceController.cs:761-776  strWhereClause_Mst_Province_By_ProvinceCode (mệnh đề lọc By ProvinceCode)
 // Nguồn API:
 //   MstProvinceController.cs:20-91     WA_Mst_Province_Get
 //   MstProvinceController.cs:94-165    WA_Mst_Province_Create
+//   MstProvinceController.cs:168-239   WA_Mst_Province_Update
 // Nguồn biz:
 //   Master.Loyalty.cs (WAS_Mst_Province_Get -> Mst_Province_Get -> Mst_Province_Get SQL: :442-488)
 //   Master.cs:1215-1297 (WAS_Mst_Province_Create) -> Master.cs:591-743 (Mst_Province_Create) -> Master.cs:27-91 (Mst_Province_CheckDB)
+//   Master.cs:1299-1385 (WAS_Mst_Province_Update) -> Master.cs:744-894 (Mst_Province_Update) -> Master.cs:27-91 (Mst_Province_CheckDB)
 //
 // GIỮ ĐÚNG NGUỒN:
 //   * Endpoint là POST (nguồn [AcceptVerbs("POST")]).
@@ -42,6 +45,10 @@ namespace MiniLoyalty.Controllers.Port;
 //     (3) tên rỗng -> InvalidProvinceName; mã lưu chữ hoa qua StdParam, tên chỉ Trim (không Normalize);
 //     NetworkID cấu hình Biz_NetworkID, mặc định 1001; FlagActive "1", LogLUBy "port", LogLUDTimeUTC = UtcNow;
 //     body rỗng -> ServiceException ("strJson null") -> Fail("Mst_Province_Create").
+//   * Update: Ft_Cols_Upd gồm ProvinceName và FlagActive (:338-341); kiểm tra thứ tự: (1) body rỗng -> Fail("Mst_Province_Update"),
+//     (2) CheckDB(Flag.Yes) không thấy -> ProvinceNotFound, (3) bUpd_ProvinceName && tên rỗng -> InvalidProvinceName;
+//     mã qua StdParam (Trim + ToUpper), tên chỉ Trim; StdFlag: thiếu/không phải "1" -> "0" (cảnh báo: thiếu FlagActive cập nhật về "0");
+//     LogLUBy "port", LogLUDTimeUTC = UtcNow; 1 transaction, lỗi -> rollback.
 //
 // Bỏ qua có chủ đích (loại Đ):
 //   - CheckGatewayAuthentication: gate Mst_ProvinceController.cs:264; API MstProvinceController.cs:117-122
@@ -74,6 +81,14 @@ public class MstProvinceCreateReq
 {
     public string? ProvinceCode { get; set; }         // Mã tỉnh/thành — Mst_Province.cs:11, Master.cs:640
     public string? ProvinceName { get; set; }         // Tên tỉnh/thành — Mst_Province.cs:15, Master.cs:641
+}
+
+/// <summary>Port 1:1 <c>Update</c> — body nhận ProvinceCode, ProvinceName, FlagActive (Mst_ProvinceController.cs:309-370).</summary>
+public class MstProvinceUpdateReq
+{
+    public string? ProvinceCode { get; set; }         // Mã tỉnh/thành — Mst_Province.cs:11, Master.cs:802
+    public string? ProvinceName { get; set; }         // Tên tỉnh/thành — Mst_Province.cs:15, Master.cs:803
+    public object? FlagActive { get; set; }           // Cờ hoạt động — Mst_Province.cs:17, Master.cs:804
 }
 
 [ApiController]
@@ -239,6 +254,129 @@ public class Mst_ProvinceControllerPort(AppDbContext db, IConfiguration config) 
         }
     }
 
+    // ============================================================================================
+    // Update — nguồn gate Mst_ProvinceController.cs:309-370 -> API WA_Mst_Province_Update
+    // (MstProvinceController.cs:168-239) -> biz WAS_Mst_Province_Update (Master.cs:1299-1385)
+    // -> Mst_Province_Update (Master.cs:744-894) -> Mst_Province_CheckDB (Master.cs:27-91).
+    //
+    // Quy trình và thứ tự kiểm tra:
+    //   1. Body rỗng / null: gate :318-325 -> ServiceException("strJson null") -> Fail("Mst_Province_Update", "Check.strJson", null)
+    //   2. Chuỗi Ft_Cols_Upd do gate gửi lên: gate :338-341
+    //      - strFt_Cols_Upd = "Mst_Province.ProvinceName,Mst_Province.FlagActive,"
+    //      - strFt_Cols_Upd = StdParam(objFt_Cols_Upd) (:799)
+    //      - bUpd_ProvinceName = strFt_Cols_Upd.Contains("Mst_Province.ProvinceName".ToUpper()) (:806)
+    //      - bUpd_FlagActive = strFt_Cols_Upd.Contains("Mst_Province.FlagActive".ToUpper()) (:807)
+    //   3. Chuẩn hoá dữ liệu input:
+    //      - strProvinceCode = StdParam(objProvinceCode) (:802: Trim + ToUpper, rỗng -> null)
+    //      - strProvinceName = string.Format("{0}", objProvinceName).Trim() (:803: CHỈ Trim, null -> "")
+    //      - strFlagActive = StdFlag(objFlagActive) (:804: "1" nếu "1", mọi giá trị khác kể cả null/thiếu -> "0")
+    //   4. CẢNH BÁO / HÀNH VI NGUỒN:
+    //      Gate luôn gửi FlagActive trong Ft_Cols_Upd (:341), Update dùng StdFlag(objFlagActive) (:804).
+    //      StdFlag coi null / thiếu / không phải "1" đều thành "0".
+    //      Do đó, nếu request JSON thiếu FlagActive, giá trị trong DB sẽ bị cập nhật về "0".
+    //   5. Kiểm tra tồn tại trong DB: Mst_Province_CheckDB với Flag.Yes ("1") (:813-818, :53-63)
+    //      Nếu mã rỗng hoặc không tìm thấy -> Fail("Mst_Province_CheckDB_ProvinceNotFound", "Check.ProvinceCode", strProvinceCode)
+    //   6. Kiểm tra tên hợp lệ: if (bUpd_ProvinceName && string.IsNullOrEmpty(strProvinceName)) (:821-831)
+    //      -> Fail("Mst_Province_Update_InvalidProvinceName", "Check.strProvinceName", strProvinceName)
+    //   7. Lưu các cột có cờ hiệu lực: Master.cs:836-854
+    //      if (bUpd_ProvinceName) province.ProvinceName = strProvinceName;
+    //      if (bUpd_FlagActive) province.FlagActive = strFlagActive;
+    //      province.LogLUDTimeUTC = DateTime.UtcNow; (:844)
+    //      province.LogLUBy = "port"; (:845, loại Đ: đích chưa có session user)
+    //   8. Commit và trả Ok({ Success = true, Data = null }) (:359-360).
+    // ============================================================================================
+    [HttpPost("update")]
+    public async Task<IActionResult> Update([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] MstProvinceUpdateReq? req)
+    {
+        // 1. Kiểm tra body rỗng / null: gate Mst_ProvinceController.cs:318-325
+        if (req == null)
+        {
+            return PortResult.Fail("Mst_Province_Update", "Check.strJson", null);
+        }
+
+        // Bắt đầu Transaction toàn bộ quá trình cập nhật (Master.cs:784 _cf.db.BeginTransaction())
+        await using var tx = await db.Database.BeginTransactionAsync();
+        try
+        {
+            // 2. Chuỗi Ft_Cols_Upd do gate gửi lên: gate Mst_ProvinceController.cs:338-341
+            var strFt_Cols_Upd = "";
+            var tblMstProvince = "Mst_Province.";
+            strFt_Cols_Upd += string.Format("{0}{1},", tblMstProvince, "ProvinceName");
+            strFt_Cols_Upd += string.Format("{0}{1},", tblMstProvince, "FlagActive");
+
+            // Chuẩn hoá Ft_Cols_Upd theo Master.cs:799-800: StdParam(objFt_Cols_Upd)
+            strFt_Cols_Upd = StdParam(strFt_Cols_Upd) ?? "";
+
+            // So khớp các cột được phép cập nhật: Master.cs:806-807 (không rút gọn, giữ đúng cấu trúc ToUpper và Contains)
+            bool bUpd_ProvinceName = strFt_Cols_Upd.Contains("Mst_Province.ProvinceName".ToUpperInvariant());
+            bool bUpd_FlagActive = strFt_Cols_Upd.Contains("Mst_Province.FlagActive".ToUpperInvariant());
+
+            // 3. Chuẩn hoá dữ liệu input (Master.cs:802-804):
+            // strProvinceCode = StdParam(objProvinceCode) (Trim + ToUpper, rỗng -> null)
+            // strProvinceName = string.Format("{0}", objProvinceName).Trim() (CHỈ Trim, KHÔNG Normalize; null -> "")
+            // strFlagActive = StdFlag(req.FlagActive) ("1" nếu "1", mọi giá trị khác kể cả thiếu/null -> "0")
+            var strProvinceCode = StdParam(req.ProvinceCode);
+            var strProvinceName = string.Format("{0}", req.ProvinceName).Trim();
+            var strFlagActive = StdFlag(req.FlagActive);
+
+            // CẢNH BÁO / HÀNH VI NGUỒN (Master.cs:804, 843):
+            // Gate luôn đưa FlagActive vào Ft_Cols_Upd (:341), và Update dùng StdFlag(objFlagActive).
+            // StdFlag coi null / thiếu / không phải "1" đều thành "0".
+            // Vì vậy, nếu request JSON không truyền FlagActive, giá trị trong DB sẽ bị cập nhật về "0".
+
+            // 4. Kiểm tra tồn tại trong DB: Master.cs:813-818 -> Mst_Province_CheckDB (Master.cs:27-91)
+            // strFlagExistToCheck = "1" (TConst.Flag.Yes / Active). So mã qua PortQuery.Equal + Like (không phân biệt hoa/thường)
+            if (string.IsNullOrEmpty(strProvinceCode))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_Province_CheckDB_ProvinceNotFound", "Check.ProvinceCode", strProvinceCode);
+            }
+
+            var province = await db.Set<Mst_Province>().FirstOrDefaultAsync(x =>
+                EF.Functions.Like((x.ProvinceCode ?? "").ToLower(), PortQuery.Equal(strProvinceCode), PortQuery.Esc));
+
+            if (province == null)
+            {
+                // Không tìm thấy tỉnh/thành (:53-63) -> ErridnLoyalty.Mst_Province_CheckDB_ProvinceNotFound
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_Province_CheckDB_ProvinceNotFound", "Check.ProvinceCode", strProvinceCode);
+            }
+
+            // 5. Kiểm tra tên hợp lệ: Master.cs:821-831
+            // if (bUpd_ProvinceName && string.IsNullOrEmpty(strProvinceName)) -> ErridnLoyalty.Mst_Province_Update_InvalidProvinceName
+            if (bUpd_ProvinceName && string.IsNullOrEmpty(strProvinceName))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_Province_Update_InvalidProvinceName", "Check.strProvinceName", strProvinceName);
+            }
+
+            // 6. Cập nhật các cột có cờ hiệu lực: Master.cs:836-854
+            if (bUpd_ProvinceName) province.ProvinceName = strProvinceName;
+            if (bUpd_FlagActive) province.FlagActive = strFlagActive;
+
+            // Cột nhật ký hệ thống: Master.cs:844-845
+            province.LogLUDTimeUTC = DateTime.UtcNow;
+            province.LogLUBy = "port"; // Đích chưa có session người dùng (bỏ qua loại Đ)
+
+            await db.SaveChangesAsync();
+
+            // Commit Transaction (Master.cs:857 TDALUtils.DBUtils.CommitSafety)
+            await tx.CommitAsync();
+
+            // Thành công trả về Success = true, Data = null: gate Mst_ProvinceController.cs:359-360
+            return Ok(new
+            {
+                Success = true,
+                Data = (object?)null
+            });
+        }
+        catch (Exception)
+        {
+            await tx.RollbackAsync();
+            throw;
+        }
+    }
+
     /// <summary>
     /// Lọc + đếm + chia trang theo ProvinceCode asc — dùng chung cho Search, GetByProvinceCode và GetAllActive.
     /// Trả (itemCount, rows): itemCount = tổng số dòng sau lọc (MyCount, SQL :453); rows = trang đã cắt kèm MyIdxSeq 0-based (:443).
@@ -313,6 +451,18 @@ public class Mst_ProvinceControllerPort(AppDbContext db, IConfiguration config) 
         if (val == null) return null;
         var s = val.ToString()?.Trim();
         return string.IsNullOrEmpty(s) ? null : s.ToUpperInvariant();
+    }
+
+    /// <summary>
+    /// Chuẩn hoá cờ: "1" nếu đúng "1", mọi giá trị khác (kể cả null/thiếu/rỗng) -> "0".
+    /// Dùng cho cờ (FlagActive...).
+    /// Nguồn tham chiếu: 05.Refs.Biz\Biz\Loyalty.TVO\Loyalty.TVO.Utils\Utils.cs:89
+    /// </summary>
+    private static string StdFlag(object? val)
+    {
+        if (val == null) return "0";
+        var s = val.ToString()?.Trim();
+        return s == "1" ? "1" : "0";
     }
     #endregion
 }
