@@ -73,6 +73,9 @@ public class AppDbContext : DbContext
             e.Property(x => x.AutoId).ValueGeneratedOnAdd();
             e.HasIndex(x => new { x.MemberNo, x.CardNo });
         });
+
+        // Các bảng port 1:1 về sau: mỗi entity tự khai IEntityTypeConfiguration<T> trong file riêng (xem Data/PortInfra.cs).
+        b.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
     }
 
     // Tự đóng dấu OrgId cho mọi bản ghi mới thuộc tenant hiện tại (khỏi sửa từng service).

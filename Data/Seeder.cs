@@ -101,10 +101,13 @@ public static class Seeder
     private static async Task EnsureNewTablesAsync(AppDbContext db)
     {
         var pg = db.Database.IsNpgsql();
-        foreach (var clr in new[] { typeof(CrdMember), typeof(CrdCard), typeof(CrdCardTransaction), typeof(CrdMemberDiscountTransaction) })
+        // 4 bảng Crd_* port đợt đầu + MỌI entity trong namespace MiniLoyalty.Models.Port (port về sau, xem Data/PortInfra.cs).
+        var legacy = new[] { typeof(CrdMember), typeof(CrdCard), typeof(CrdCardTransaction), typeof(CrdMemberDiscountTransaction) };
+        var entityTypes = db.Model.GetEntityTypes()
+            .Where(e => legacy.Contains(e.ClrType) || (e.ClrType.Namespace ?? "").StartsWith("MiniLoyalty.Models.Port"))
+            .ToList();
+        foreach (var et in entityTypes)
         {
-            var et = db.Model.FindEntityType(clr);
-            if (et == null) continue;
             var schema = et.GetSchema();
             var table = (string.IsNullOrEmpty(schema) ? "" : Q(schema) + ".") + Q(et.GetTableName()!);
             var pk = et.FindPrimaryKey();
@@ -134,10 +137,62 @@ public static class Seeder
             // (bẫy đã biết: `{ }` bị coi là placeholder tham số và nuốt lỗi câm).
             try { await db.Database.ExecuteSqlRawAsync($"CREATE TABLE IF NOT EXISTS {table} (" + string.Join(", ", cols) + ")"); }
             catch { /* bảng đã có với schema khác -> bỏ qua, endpoint sẽ báo lỗi rõ khi truy vấn */ }
+
+            // Bảng đã có từ trước nhưng entity vừa được bổ sung cột (port thêm action) -> thêm cột còn thiếu.
+            await AddMissingColumnsAsync(db, et, schema, et.GetTableName()!, table, pg);
         }
         await SeedCrdDemoAsync(db);
 
+        // Dữ liệu mẫu của từng module port (mỗi module 1 class IPortSeeder trong file riêng).
+        var seeders = typeof(Seeder).Assembly.GetTypes()
+            .Where(t => typeof(IPortSeeder).IsAssignableFrom(t) && t is { IsAbstract: false, IsInterface: false })
+            .Select(t => (IPortSeeder)Activator.CreateInstance(t)!)
+            .OrderBy(s => s.Order).ThenBy(s => s.GetType().Name);
+        foreach (var s in seeders) await s.SeedAsync(db);
+
         static string Q(string id) => "\"" + id.Replace("\"", "\"\"") + "\"";
+    }
+
+    /// <summary>
+    /// So cột thật trong DB với metadata EF, `ADD COLUMN` cột còn thiếu. Cột thêm sau luôn cho phép NULL
+    /// (SQLite không cho `ADD COLUMN ... NOT NULL` mà không có mặc định — bẫy #47).
+    /// </summary>
+    private static async Task AddMissingColumnsAsync(AppDbContext db, Microsoft.EntityFrameworkCore.Metadata.IEntityType et,
+        string? schema, string tableName, string quotedTable, bool pg)
+    {
+        var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var conn = db.Database.GetDbConnection();
+        var wasOpen = conn.State == System.Data.ConnectionState.Open;
+        if (!wasOpen) await conn.OpenAsync();
+        try
+        {
+            await using var cmd = conn.CreateCommand();
+            if (pg)
+            {
+                cmd.CommandText = "select column_name from information_schema.columns where table_name = @t and table_schema = coalesce(@s, current_schema())";
+                var pt = cmd.CreateParameter(); pt.ParameterName = "@t"; pt.Value = tableName; cmd.Parameters.Add(pt);
+                var ps = cmd.CreateParameter(); ps.ParameterName = "@s"; ps.Value = (object?)schema ?? DBNull.Value; cmd.Parameters.Add(ps);
+            }
+            else
+            {
+                cmd.CommandText = "select name from pragma_table_info(@t)";
+                var pt = cmd.CreateParameter(); pt.ParameterName = "@t"; pt.Value = tableName; cmd.Parameters.Add(pt);
+            }
+            await using var rd = await cmd.ExecuteReaderAsync();
+            while (await rd.ReadAsync()) existing.Add(rd.GetString(0));
+        }
+        finally { if (!wasOpen) await conn.CloseAsync(); }
+        if (existing.Count == 0) return;   // bảng chưa tạo được -> không ALTER mù
+
+        foreach (var p in et.GetProperties())
+        {
+            var col = p.GetColumnName();
+            if (existing.Contains(col)) continue;
+            var store = p.GetColumnType() ?? p.GetRelationalTypeMapping().StoreType;
+            try { await db.Database.ExecuteSqlRawAsync($"ALTER TABLE {quotedTable} ADD COLUMN \"{col.Replace("\"", "\"\"")}\" {store} NULL"); }
+            catch (Exception ex) when (ex.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase)
+                                       || ex.Message.Contains("already exists", StringComparison.OrdinalIgnoreCase)) { }
+        }
     }
 
     /// <summary>
