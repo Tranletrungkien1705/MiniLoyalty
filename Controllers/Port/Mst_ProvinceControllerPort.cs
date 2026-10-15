@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -11,7 +13,7 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục tỉnh/thành (Mst_Province) của dự án nguồn 2022.7.Loyalty (#213, #214, #215, #216, #217, #218).
+// PORT 1:1 — màn danh mục tỉnh/thành (Mst_Province) của dự án nguồn 2022.7.Loyalty (#213, #214, #215, #216, #217, #218, #219).
 //
 // Nguồn controller (tầng gate):
 //   Mst_ProvinceController.cs:31-111   Search              -> WA_Mst_Province_Get
@@ -20,6 +22,7 @@ namespace MiniLoyalty.Controllers.Port;
 //   Mst_ProvinceController.cs:245-305  Create              -> WA_Mst_Province_Create
 //   Mst_ProvinceController.cs:309-373  Update              -> WA_Mst_Province_Update
 //   Mst_ProvinceController.cs:377-437  Delete              -> WA_Mst_Province_Delete
+//   Mst_ProvinceController.cs:441-592  Import              -> WA_Mst_Province_Create
 //   Mst_ProvinceController.cs:735-759  strWhereClause_Mst_Province (mệnh đề lọc Search, GetAllActive)
 //   Mst_ProvinceController.cs:761-776  strWhereClause_Mst_Province_By_ProvinceCode (mệnh đề lọc By ProvinceCode)
 // Nguồn API:
@@ -55,6 +58,11 @@ namespace MiniLoyalty.Controllers.Port;
 //   * Delete: kiểm tra thứ tự: (1) mã rỗng -> ServiceException("invalid_provincecode", "invalid_provincecode") chữ thường (:421-423),
 //     (2) CheckDB(Flag.Yes) không thấy -> ProvinceNotFound (:944-949, :53-63); không có FK tham chiếu Mst_Province -> không kiểm bảng con;
 //     xoá dòng Mst_Province (:958-964); 1 transaction, lỗi -> rollback; thành công Data = null (:418-419).
+//   * Import: nhận file .xlsx ([Consumes("multipart/form-data")]); file thiếu hoặc đuôi khác .xlsx -> Fail("Mst_Province_Import", "Message", "File excel import không hợp lệ");
+//     Đọc qua PortExcel.ReadSheet: không có dòng -> "File excel import không có dữ liệu"; columnCount != 2 -> "File excel import không hợp lệ";
+//     Kiểm tra TẤT CẢ dòng trước khi tạo: mã rỗng -> "Mã tỉnh/thành không được trống", tên rỗng -> "Tên quận/huyện không được trống" (nguồn viết nhầm "quận/huyện" cho tỉnh — giữ nguyên);
+//     Duyệt từng dòng: gọi CreateXAsync độc lập (mỗi dòng 1 transaction riêng); lỗi dòng k dừng ngay và trả lỗi dòng đó (import một phần, các dòng trước k đã lưu);
+//     Thành công Data = null (:572-573).
 //
 // Bỏ qua có chủ đích (loại Đ):
 //   - CheckGatewayAuthentication: gate Mst_ProvinceController.cs:264, 386; API MstProvinceController.cs:117-122, 265-270
@@ -199,6 +207,35 @@ public class Mst_ProvinceControllerPort(AppDbContext db, IConfiguration config) 
             return PortResult.Fail("Mst_Province_Create", "Check.strJson", null);
         }
 
+        // Gọi CreateXAsync thực hiện nghiệp vụ tạo (1 transaction / lần)
+        var err = await CreateXAsync(req.ProvinceCode, req.ProvinceName);
+        if (err != null)
+        {
+            return err;
+        }
+
+        // Thành công trả về Success = true, Data = null: gate Mst_ProvinceController.cs:291-292
+        return Ok(new
+        {
+            Success = true,
+            Data = (object?)null
+        });
+    }
+
+    /// <summary>
+    /// Nghiệp vụ tạo 1 tỉnh/thành — 1 transaction riêng biệt. Dùng chung cho Create (#216) và Import (#219, gọi từng dòng).
+    /// Nguồn: WA_Mst_Province_Create (MstProvinceController.cs:94-165) -> WAS_Mst_Province_Create (Master.cs:1215-1297)
+    /// -> Mst_Province_Create (Master.cs:591-743) -> Mst_Province_CheckDB (Master.cs:27-91).
+    /// Thứ tự kiểm tra:
+    ///   1. Chuẩn hoá: strProvinceCode = StdParam(code), strProvinceName = string.Format("{0}", name).Trim() (:640-641)
+    ///   2. Mã rỗng -> ErridnLoyalty.Mst_Province_Create_InvalidProvinceCode (:649-659)
+    ///   3. Mã trùng -> ErridnLoyalty.Mst_Province_CheckDB_ProvinceExist (:660-666, :64-74)
+    ///   4. Tên rỗng -> ErridnLoyalty.Mst_Province_Create_InvalidProvinceName (:668-678)
+    ///   5. Lưu 6 cột Mst_Province, commit transaction (:687-707).
+    /// Trả null nếu thành công; trả IActionResult lỗi (400) nếu thất bại.
+    /// </summary>
+    private async Task<IActionResult?> CreateXAsync(string? code, string? name)
+    {
         // Bắt đầu Transaction toàn bộ quá trình tạo (Master.cs:625 _cf.db.BeginTransaction())
         await using var tx = await db.Database.BeginTransactionAsync();
         try
@@ -206,8 +243,8 @@ public class Mst_ProvinceControllerPort(AppDbContext db, IConfiguration config) 
             // 2. Chuẩn hoá dữ liệu input (Master.cs:640-641):
             // strProvinceCode = StdParam(objProvinceCode) (Trim + ToUpper, rỗng -> null)
             // strProvinceName = string.Format("{0}", objProvinceName).Trim() (CHỈ Trim, KHÔNG Normalize; null -> "")
-            var strProvinceCode = StdParam(req.ProvinceCode);
-            var strProvinceName = string.Format("{0}", req.ProvinceName).Trim();
+            var strProvinceCode = StdParam(code);
+            var strProvinceName = string.Format("{0}", name).Trim();
 
             // 3. Kiểm tra mã tỉnh/thành: Master.cs:649-659
             if (string.IsNullOrEmpty(strProvinceCode))
@@ -252,12 +289,7 @@ public class Mst_ProvinceControllerPort(AppDbContext db, IConfiguration config) 
             // Commit Transaction (Master.cs:706 TDALUtils.DBUtils.CommitSafety)
             await tx.CommitAsync();
 
-            // Thành công trả về Success = true, Data = null: gate Mst_ProvinceController.cs:291-292
-            return Ok(new
-            {
-                Success = true,
-                Data = (object?)null
-            });
+            return null; // Thành công
         }
         catch (Exception)
         {
@@ -470,6 +502,120 @@ public class Mst_ProvinceControllerPort(AppDbContext db, IConfiguration config) 
             await tx.RollbackAsync();
             throw;
         }
+    }
+
+    // ============================================================================================
+    // Import — nguồn gate Mst_ProvinceController.cs:441-592 -> API WA_Mst_Province_Create
+    // (MstProvinceController.cs:94-165) -> biz WAS_Mst_Province_Create (Master.cs:1215-1297)
+    // -> Mst_Province_Create (Master.cs:591-743).
+    //
+    // GIẢ ĐỊNH (kế thừa từ Data/PortExcel.cs, commit f9de190):
+    //   - Định dạng file Excel: dòng 1 = tiêu đề (đúng file ExportTemplate sinh ra), dữ liệu bắt đầu từ ô A2 (firstDataRow = 2).
+    //   - Cột ánh xạ theo vị trí: cột 1 = ProvinceCode, cột 2 = ProvinceName (GetImportDicColumsTemplate có 2 cột:
+    //     ProvinceCode -> "Mã tỉnh/thành (*)", ProvinceName -> "Tên quận/huyện").
+    //
+    // Quy trình và thứ tự kiểm tra:
+    //   1. Kiểm tra file upload: gate Mst_ProvinceController.cs:465-470
+    //      - Thiếu file hoặc file rỗng hoặc đuôi file != ".xlsx" -> Fail("Mst_Province_Import", "Message", "File excel import không hợp lệ")
+    //   2. Đọc file bằng PortExcel.ReadSheet(stream, new[] { "ProvinceCode", "ProvinceName" }):
+    //      - Bảng không có dòng dữ liệu (table == null || table.Rows.Count == 0) -> Fail("Mst_Province_Import", "Message", "File excel import không có dữ liệu") (:482, :577-578)
+    //      - Số cột tiêu đề != GetImportDicColumsTemplate().Count (2 cột) -> Fail("Mst_Province_Import", "Message", "File excel import không hợp lệ") (:484-487)
+    //   3. Kiểm tra TẤT CẢ các dòng TRƯỚC khi tạo (#region["Check null"] :491-522):
+    //      - ProvinceCode rỗng / khoảng trắng -> Fail("Mst_Province_Import", "Message", "Mã tỉnh/thành không được trống") (:494-497)
+    //      - ProvinceName rỗng / khoảng trắng -> Fail("Mst_Province_Import", "Message", "Tên quận/huyện không được trống") (:499-502)
+    //        (nguồn viết nhầm "quận/huyện" cho tỉnh — GIỮ NGUYÊN VĂN)
+    //      Nếu có bất kỳ dòng nào vi phạm, dừng ngay và KHÔNG có dòng nào được tạo vào CSDL.
+    //   4. Lưu từng dòng (hành vi "import một phần"):
+    //      - Duyệt từng dòng theo thứ tự, gọi CreateXAsync(code, name) riêng cho mỗi dòng (mỗi dòng 1 transaction biz riêng biệt: gate :549-570).
+    //      - Nếu dòng thứ k gặp lỗi (vd trùng mã `Mst_Province_CheckDB_ProvinceExist`), vòng lặp dừng ngay lập tức,
+    //        trả về đúng lỗi của CreateXAsync cho dòng k.
+    //      - CÁC DÒNG TRƯỚC k ĐÃ ĐƯỢC COMMIT VÀO DB (không rollback các dòng đã tạo trước đó).
+    //      - Các dòng sau k không được duyệt.
+    //   5. Thành công: trả Ok({ Success = true, Data = null }) (:572-573).
+    //
+    // Bỏ qua có chủ đích (loại Đ):
+    //   - CheckGatewayAuthentication, CheckAuthorize (:452-453)
+    //   - Nguồn lưu file tạm xuống đĩa (FileUtils.SaveTempFile :473) -> ở đây đọc trực tiếp từ stream qua ClosedXML
+    //   - Session người dùng orgUserUI (:459, :552, :560-564).
+    // ============================================================================================
+    [HttpPost("import")]
+    [Consumes("multipart/form-data")]
+    public async Task<IActionResult> Import(IFormFile? file)
+    {
+        // 1. Kiểm tra file upload: gate Mst_ProvinceController.cs:465-470
+        if (file == null || file.Length == 0)
+        {
+            return PortResult.Fail("Mst_Province_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+        if (ext != ".xlsx")
+        {
+            return PortResult.Fail("Mst_Province_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        // 2. Đọc bảng tính bằng PortExcel.ReadSheet (giả định định dạng file Excel từ PortExcel)
+        int columnCount;
+        List<Dictionary<string, string?>> rows;
+        try
+        {
+            using var stream = file.OpenReadStream();
+            (columnCount, rows) = PortExcel.ReadSheet(stream, new[] { "ProvinceCode", "ProvinceName" });
+        }
+        catch
+        {
+            return PortResult.Fail("Mst_Province_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        // Kiểm tra có dữ liệu hay không: gate :482, :577-578 (table == null || table.Rows.Count == 0)
+        if (rows.Count == 0)
+        {
+            return PortResult.Fail("Mst_Province_Import", "Message", "File excel import không có dữ liệu");
+        }
+
+        // Kiểm tra số cột dòng tiêu đề so với GetImportDicColumsTemplate().Count (2 cột): gate :484-487
+        if (columnCount != 2)
+        {
+            return PortResult.Fail("Mst_Province_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        // 3. Kiểm tra TẤT CẢ các dòng TRƯỚC khi tạo (Check null: gate Mst_ProvinceController.cs:491-522)
+        foreach (var r in rows)
+        {
+            var code = r.GetValueOrDefault("ProvinceCode");
+            if (string.IsNullOrWhiteSpace(code))
+            {
+                return PortResult.Fail("Mst_Province_Import", "Message", "Mã tỉnh/thành không được trống");
+            }
+
+            var name = r.GetValueOrDefault("ProvinceName");
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                // Giữ nguyên văn chuỗi lỗi nguồn: nguồn viết "Tên quận/huyện không được trống" (:501)
+                return PortResult.Fail("Mst_Province_Import", "Message", "Tên quận/huyện không được trống");
+            }
+        }
+
+        // 4. Lưu từng dòng tuần tự: mỗi dòng 1 transaction riêng (hành vi "import một phần": gate :549-570)
+        foreach (var r in rows)
+        {
+            var code = r.GetValueOrDefault("ProvinceCode");
+            var name = r.GetValueOrDefault("ProvinceName");
+
+            var err = await CreateXAsync(code, name);
+            if (err != null)
+            {
+                // Lỗi ở dòng k -> thoát ngay, trả đúng lỗi của Create, các dòng trước k đã tạo thành công
+                return err;
+            }
+        }
+
+        // Thành công: gate :572-573
+        return Ok(new
+        {
+            Success = true,
+            Data = (object?)null
+        });
     }
 
     /// <summary>
