@@ -27,6 +27,7 @@ namespace MiniLoyalty.Controllers.Port;
 //   Mst_CardTypeController.cs:554-618  DeleteMultiple -> WA_Mst_CardType_Delete
 //   Mst_CardTypeController.cs:622-768  Import       ->  WA_Mst_CardType_Create
 //   Mst_CardTypeController.cs:773-851  Export       ->  WA_Mst_CardType_Get
+//   Mst_CardTypeController.cs:854-886  ExportTemplate
 //   Mst_CardTypeController.cs:283-308  strWhereClause_Mst_CardType (dựng mệnh đề lọc)
 // Nguồn API:  MstCardTypeController.cs:239-308  WA_Mst_CardType_Get
 //             MstCardTypeController.cs:21-91    WA_Mst_CardType_Create
@@ -51,6 +52,11 @@ namespace MiniLoyalty.Controllers.Port;
 //     Kiểm tra TẤT CẢ dòng trước khi tạo: CardType rỗng -> "Mã hạng thẻ không được trống", CardTypeName rỗng -> "Tên hạng thẻ không được trống", Value rỗng -> "Giá trị không được trống";
 //     Duyệt từng dòng: gọi CreateXAsync độc lập (mỗi dòng 1 transaction riêng); lỗi dòng k dừng ngay và trả lỗi dòng đó (import một phần, các dòng trước k đã lưu);
 //     Thành công Data = null (:748-750).
+//   * ExportTemplate: gate Mst_CardTypeController.cs:854-886; không body, không kiểm quyền, không truy vấn DB;
+//     khởi tạo danh sách rỗng List<Mst_CardType> (:862); từ điển cột GetImportDicColumsTemplate() (:864, :1003-1011) gồm 3 cột:
+//     CardType ("Mã hạng thẻ (*)"), CardTypeName ("Tên hạng thẻ"), Value ("Thứ tự");
+//     sinh đường dẫn file qua PortExcel.GenExcelExportFilePath(webRoot, "Mst_CardType") (:866), sheet "Mst_CardType" (:867);
+//     ghi file qua PortExcel.ExportToExcelFromList; trả về Success = true, Data = { Url = baseAddress + virtualPath } (:868-872).
 // ============================================================================================
 
 /// <summary>Port 1:1 <c>Mst_CardTypeSearch</c> — tham số lọc + phân trang của màn.</summary>
@@ -922,6 +928,52 @@ public class Mst_CardTypeControllerPort(AppDbContext db, IConfiguration config, 
         PortExcel.ExportToExcelFromList(rows, dicColNames, physicalPath, "Mst_CardType");
 
         // Trả URL tải file: Data = { Url = GetRequestBaseAddress() + url } (:828-832)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+            }
+        });
+    }
+
+    // ============================================================================================
+    // ExportTemplate — nguồn gate Mst_CardTypeController.cs:854-886.
+    // Action này KHÔNG kiểm quyền ở nguồn (không có CheckGatewayAuthentication và không có CheckAuthorize).
+    // Không gọi tầng service, không truy vấn cơ sở dữ liệu.
+    // Khởi tạo danh sách rỗng kiểu Mst_CardType (:862).
+    // Lấy từ điển cột mẫu từ GetImportDicColumsTemplate (:864, :1003-1011) gồm 3 cột:
+    //   1. CardType -> "Mã hạng thẻ (*)"
+    //   2. CardTypeName -> "Tên hạng thẻ"
+    //   3. Value -> "Thứ tự"
+    // Sinh đường dẫn file mẫu qua PortExcel.GenExcelExportFilePath(webRoot, "Mst_CardType") (:866).
+    // Xuất file Excel qua PortExcel.ExportToExcelFromList(list, dicColNames, physicalPath, "Mst_CardType") (:867).
+    // Trả về Success = true, Data = { Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath } (:868-872).
+    // Không có nhánh báo lỗi khi danh sách rỗng (khác với Export).
+    // ============================================================================================
+    [HttpPost("exporttemplate")]
+    public IActionResult ExportTemplate()
+    {
+        // Khởi tạo danh sách rỗng kiểu Mst_CardType (gate Mst_CardTypeController.cs:862)
+        var list = new List<Mst_CardType>();
+
+        // Lấy từ điển 3 cột mẫu import (gate Mst_CardTypeController.cs:864)
+        var dicColNames = GetImportDicColumsTemplate();
+
+        // Xác định thư mục webRoot và sinh đường dẫn file (gate Mst_CardTypeController.cs:866)
+        var webRoot = env.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = Path.Combine(env.ContentRootPath, "wwwroot");
+        }
+
+        var (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Mst_CardType");
+
+        // Ghi danh sách rỗng ra file Excel với tên sheet Mst_CardType (gate Mst_CardTypeController.cs:867)
+        PortExcel.ExportToExcelFromList(list, dicColNames, physicalPath, "Mst_CardType");
+
+        // Trả URL tải file với Success = true (gate Mst_CardTypeController.cs:868-872)
         return Ok(new
         {
             Success = true,
