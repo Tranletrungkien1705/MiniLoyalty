@@ -189,7 +189,7 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 177 | Mst_NNTController/Delete | Chưa làm | - |
 | 178 | Mst_OrgController/Search | Đã làm | 775577b |
 | 179 | Mst_OrgController/GetAllActive | Đã làm | 84327c2 |
-| 180 | Mst_OrgController/GetAllOrg_bk | Chưa làm | - |
+| 180 | Mst_OrgController/GetAllOrg_bk | Bỏ | - |
 | 181 | Mst_OrgController/GetAllOrg | Chưa làm | - |
 | 182 | Mst_OrgController/GetOrgsNotInSolution | Chưa làm | - |
 | 183 | Mst_ParamPromotionController/Search | Chưa làm | - |
