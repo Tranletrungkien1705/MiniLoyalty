@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using MiniLoyalty.Data;
 using MiniLoyalty.Models.Port;
 
@@ -56,16 +57,52 @@ public class MstPolicyMoneyToPointServiceGetByPolicyCodeReq
     public string? PolicyCode { get; set; }
 }
 
+/// <summary>
+/// DTO header chính sách trong request Save (nguồn Mst_PolicyMoneyToPointServiceController.cs:259-352, Master.Loyalty.cs:17579-17601).
+/// </summary>
+public class MstPolicyMoneyToPointServiceSaveHeaderReq
+{
+    public string? PolicyCode { get; set; }
+    public string? EffDateStart { get; set; }
+    public string? EffDateEnd { get; set; }
+    public string? Remark { get; set; }
+}
+
+/// <summary>
+/// DTO chi tiết chính sách trong request Save (nguồn Master.Loyalty.cs:18103-18161).
+/// </summary>
+public class MstPolicyMoneyToPointServiceSaveDtlReq
+{
+    public string? CardType { get; set; }
+    public double? ConvertValue { get; set; }
+    public double? ConvertPoint { get; set; }
+    public double? ValueRankCardType { get; set; }
+    public object? DiscountRate { get; set; }
+    public string? Remark { get; set; }
+}
+
+/// <summary>
+/// Body của action Save: { Mst_PolicyMoneyToPointService: { ... }, Lst_Mst_PolicyMoneyToPointServiceDtl: [ ... ] }
+/// (nguồn gate Mst_PolicyMoneyToPointServiceController.cs:259-352).
+/// </summary>
+public class MstPolicyMoneyToPointServiceSaveReq
+{
+    public MstPolicyMoneyToPointServiceSaveHeaderReq? Mst_PolicyMoneyToPointService { get; set; }
+    public List<MstPolicyMoneyToPointServiceSaveDtlReq>? Lst_Mst_PolicyMoneyToPointServiceDtl { get; set; }
+}
+
 [ApiController]
 [Route("api/mst_policymoneytopointservice")]
 [Produces("application/json")]
 public class Mst_PolicyMoneyToPointServiceControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly IConfiguration _config;
 
-    public Mst_PolicyMoneyToPointServiceControllerPort(AppDbContext db)
+    public Mst_PolicyMoneyToPointServiceControllerPort(AppDbContext db, IConfiguration config)
     {
         _db = db;
+        _config = config;
     }
 
     /// <summary>
@@ -139,6 +176,243 @@ public class Mst_PolicyMoneyToPointServiceControllerPort : ControllerBase
             }
         });
     }
+
+    // ============================================================================================
+    // Save — nguồn Mst_PolicyMoneyToPointServiceController.cs:259-352 (gate)
+    //   -> MstPolicyMoneyToPointServiceController.cs:22-92 (API WA_Mst_PolicyMoneyToPointService_Save)
+    //   -> Master.Loyalty.cs:17542-17632 (WAS_Mst_PolicyMoneyToPointService_Save)
+    //   -> :17633-17776 (Mst_PolicyMoneyToPointService_Save)
+    //   -> :17963-18345 (Mst_PolicyMoneyToPointService_SaveX).
+    //
+    // GIỮ ĐÚNG NGUỒN:
+    //   * Body JSON: { Mst_PolicyMoneyToPointService: { EffDateStart, ... }, Lst_Mst_PolicyMoneyToPointServiceDtl: [ ... ] }
+    //   * seq tăng cả khi lỗi: Lấy sequence trong transaction RIÊNG đã commit độc lập (gate Mst_PolicyMoneyToPointServiceController.cs:293-313,
+    //     SeqType.PolicyCode — Seq.cs:146: bảng Seq_PolicyCode, format "{0}POLICYCODE.{3}.{1:00000}{2}", max 100000)
+    //     qua bảng Seq_PolicyCode rồi gán vào header (:315-317). Do đó sequence tăng MỖI LẦN GỌI vượt qua bước body rỗng,
+    //     KỂ CẢ KHI LƯU LỖI SAU ĐÓ.
+    //     Body rỗng hoàn toàn -> ServiceException("strJson null") -> mã mặc định Mst_PolicyMoneyToPointService_Save (KHÔNG tăng seq).
+    //     Body {} (thiếu Mst_PolicyMoneyToPointService) -> NullReference SAU khi lấy seq -> Mst_PolicyMoneyToPointService_Save (seq ĐÃ tăng).
+    //   * EffDateStart: nguồn Master.Loyalty.cs:18008 gọi StdDate(header.EffDateStart). EffDateStart null/rỗng -> cột NOT NULL trong DB
+    //     gây lỗi -> mã mặc định Mst_PolicyMoneyToPointService_Save.
+    //   * EffDateEnd cố định: nguồn Master.Loyalty.cs:18009 gán cứng StdDate(Convert.ToDateTime("2100-01-01 00:00:00")).
+    //   * BirthPolicy check bỏ: nguồn Master.Loyalty.cs:18017-18034 gọi Mst_BirthPolicy_CheckDB(PolicyCode, "", ...) do chép nhầm
+    //     từ module BirthPolicy, kết quả kiểm tra không được sử dụng và bảng này không có ở hệ thống đích -> bỏ qua theo đề bài.
+    //   * Remark header bỏ: câu lệnh insert nguồn Master.Loyalty.cs:18214-18234 không có cột Remark nên giá trị Remark của header
+    //     bị bỏ qua (không lưu vào DB, Remark lưu null).
+    //   * Dtl: Lst null -> danh sách rỗng (Master.Loyalty.cs:17579-17580, không lỗi).
+    //     CardType chuẩn hoá bằng StdParam (Trim().ToUpper(), rỗng -> null) — Master.Loyalty.cs:18105.
+    //     ConvertValue, ConvertPoint, ValueRankCardType, DiscountRate, Remark chế độ "" = GIỮ NGUYÊN (Remark KHÔNG trim) — :18106-18110.
+    //     Kiểm tra Mst_CardType_CheckDB(CardType, "1", "1") (:18126-18132): không thấy -> Mst_CardType_CheckDB_CardTypeNotFound;
+    //     FlagActive != '1' -> Mst_CardType_CheckDB_FlagActiveNotMatched (NULL/rỗng FlagActive vẫn qua).
+    //     DiscountRate khác rỗng: Convert.ToDouble (sai định dạng -> ..._Save); < 0 hoặc > 100 -> Mst_PolicyMoneyToPointService_Save_InvalidValue (:18134-18153).
+    //     Trùng CardType -> vi phạm PK (PolicyCode, CardType) -> mã mặc định Mst_PolicyMoneyToPointService_Save (kiểm tra sau vòng lặp).
+    //   * Vô hiệu hoá chính sách khác: Master.Loyalty.cs:18294-18320 cập nhật FlagActive = '0' cho mọi header VÀ mọi Dtl có PolicyCode <> mã mới.
+    //     Chính sách mới là chính sách duy nhất hoạt động ('1').
+    //   * Lưu: 1 transaction duy nhất (:17667, commit :17739), lỗi -> rollback + PortResult.Fail. Thành công -> Data = null (:338-339).
+    //   * NetworkID lấy từ cấu hình: IConfiguration["Biz_NetworkID"] ?? "1001" (GAP nguồn lấy từ session user).
+    //   * LogLUBy = "port", LogLUDTimeUTC = DateTime.UtcNow.
+    // ============================================================================================
+    [HttpPost("save")]
+    public async Task<IActionResult> Save(
+        [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] MstPolicyMoneyToPointServiceSaveReq? req)
+    {
+        // 0. Body rỗng / null: gate :269-275 ném ServiceException("strJson null") -> mã mặc định Mst_PolicyMoneyToPointService_Save.
+        // Bước này xảy ra TRƯỚC khi gọi sequence nên KHÔNG tăng seq.
+        if (req == null)
+        {
+            return PortResult.Fail("Mst_PolicyMoneyToPointService_Save", "Check.strJson", null);
+        }
+
+        // Seq tăng cả khi lỗi: Lấy sequence trong transaction RIÊNG đã commit độc lập (gate Mst_PolicyMoneyToPointServiceController.cs:293-313,
+        // SeqType.PolicyCode — Seq.cs:146: bảng Seq_PolicyCode, format "{0}POLICYCODE.{3}.{1:00000}{2}", max 100000).
+        // Nhờ transaction riêng, mã sequence đã tăng sẽ không bị rollback kể cả khi bước lưu sau bị lỗi.
+        var seq = await PortSeq.NextAsync<Seq_PolicyCode>(_db);
+        var policyCode = PortSeq.Build("{0}POLICYCODE.{3}.{1:00000}{2}", "", seq, 100000, "", DateTime.UtcNow);
+
+        // Header null (client gửi `{}` thiếu Mst_PolicyMoneyToPointService):
+        // Nguồn gate :315 gán objMst_PolicyMoneyToPointService.PolicyCode ném NullReferenceException SAU khi lấy seq -> mã mặc định Mst_PolicyMoneyToPointService_Save (seq ĐÃ tăng).
+        if (req.Mst_PolicyMoneyToPointService == null)
+        {
+            return PortResult.Fail("Mst_PolicyMoneyToPointService_Save", "Check.Mst_PolicyMoneyToPointService", null);
+        }
+
+        // Kiểm tra EffDateStart của header (Master.Loyalty.cs:18008 StdDate(header.EffDateStart)):
+        // Cột EffDateStart là DateTime NOT NULL trong DB. Nếu thiếu hoặc sai định dạng date -> mã mặc định Mst_PolicyMoneyToPointService_Save.
+        // Thứ tự lỗi như nguồn: SAI định dạng -> StdDate ném ngay (:18008, TRƯỚC kiểm Dtl) ; THIẾU -> StdDate = null,
+        // chỉ lỗi khi INSERT cột NOT NULL (SAU kiểm Dtl) -> kiểm "thiếu" ở sau vòng lặp Dtl.
+        var effDateStartRaw = req.Mst_PolicyMoneyToPointService.EffDateStart;
+        var effDateStartMissing = string.IsNullOrWhiteSpace(effDateStartRaw);
+        DateTime parsedEffDateStart = default;
+        if (!effDateStartMissing && !DateTime.TryParse(effDateStartRaw, out parsedEffDateStart))
+        {
+            return PortResult.Fail("Mst_PolicyMoneyToPointService_Save", "Check.EffDateStart", effDateStartRaw);
+        }
+        var effDateStartUtc = DateTime.SpecifyKind(parsedEffDateStart.Date, DateTimeKind.Utc);
+
+        // EffDateEnd cố định: nguồn Master.Loyalty.cs:18009 gán cứng StdDate(Convert.ToDateTime("2100-01-01 00:00:00")).
+        var effDateEndUtc = new DateTime(2100, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        // BirthPolicy check bỏ: nguồn Master.Loyalty.cs:18017-18034 gọi Mst_BirthPolicy_CheckDB(PolicyCode, "", ...) do chép nhầm
+        // từ module BirthPolicy, kết quả kiểm tra không được sử dụng và bảng này không có ở hệ thống đích -> bỏ qua theo đề bài.
+
+        // Remark header bỏ: câu lệnh insert nguồn Master.Loyalty.cs:18214-18234 không có cột Remark nên giá trị Remark của header bị bỏ qua (lưu null).
+
+        // Lst Dtl null -> danh sách rỗng (Master.Loyalty.cs:17579-17580, không lỗi).
+        var dtlInputList = req.Lst_Mst_PolicyMoneyToPointServiceDtl ?? new List<MstPolicyMoneyToPointServiceSaveDtlReq>();
+
+        var networkId = _config["Biz_NetworkID"] ?? "1001";
+        var now = DateTime.UtcNow;
+        var newDtls = new List<Mst_PolicyMoneyToPointServiceDtl>();
+
+        // Duyệt từng dòng Dtl theo thứ tự gửi lên (Master.Loyalty.cs:18119-18163)
+        for (int nScan = 0; nScan < dtlInputList.Count; nScan++)
+        {
+            var drScan = dtlInputList[nScan];
+            // CardType chuẩn hoá bằng StdParam (Trim().ToUpper(), rỗng -> null) — Master.Loyalty.cs:18105
+            var strCardType = StdParam(drScan.CardType);
+
+            // Mst_CardType_CheckDB(CardType, "1", "1") — Master.Loyalty.cs:18126-18132
+            // Tra cứu Mst_CardType trong DB (so sánh Like + PortQuery.Equal không phân biệt hoa/thường)
+            var cardTypeDb = await _db.Set<Mst_CardType>().AsNoTracking()
+                .FirstOrDefaultAsync(x => EF.Functions.Like((x.CardType ?? "").ToLower(), PortQuery.Equal(strCardType ?? ""), PortQuery.Esc));
+
+            if (cardTypeDb == null)
+            {
+                return PortResult.Fail("Mst_CardType_CheckDB_CardTypeNotFound", "Check.CardType", strCardType);
+            }
+
+            // Nguồn Mst_CardType_CheckDB: !"1".Contains(Convert.ToString(FlagActive)) — NULL/rỗng FlagActive vẫn qua (như #230)
+            if (!"1".Contains(cardTypeDb.FlagActive ?? ""))
+            {
+                return PortResult.Fail("Mst_CardType_CheckDB_FlagActiveNotMatched",
+                    "Check.CardType", strCardType,
+                    "Check.strFlagActiveListToCheck", "1",
+                    "DB.FlagActive", cardTypeDb.FlagActive);
+            }
+
+            // Kiểm tra DiscountRate: khác rỗng -> Convert.ToDouble (sai định dạng -> ..._Save) ; < 0 hoặc > 100 -> Mst_PolicyMoneyToPointService_Save_InvalidValue (Master.Loyalty.cs:18134-18153)
+            double? discountRateVal = null;
+            if (drScan.DiscountRate != null)
+            {
+                try
+                {
+                    if (drScan.DiscountRate is System.Text.Json.JsonElement je)
+                    {
+                        if (je.ValueKind == System.Text.Json.JsonValueKind.Number)
+                        {
+                            discountRateVal = je.GetDouble();
+                        }
+                        else if (je.ValueKind == System.Text.Json.JsonValueKind.String)
+                        {
+                            var s = je.GetString();
+                            if (!string.IsNullOrWhiteSpace(s))
+                            {
+                                discountRateVal = Convert.ToDouble(s);
+                            }
+                        }
+                        else if (je.ValueKind != System.Text.Json.JsonValueKind.Null && je.ValueKind != System.Text.Json.JsonValueKind.Undefined)
+                        {
+                            discountRateVal = Convert.ToDouble(je.ToString());
+                        }
+                    }
+                    else
+                    {
+                        var s = drScan.DiscountRate.ToString();
+                        if (!string.IsNullOrWhiteSpace(s))
+                        {
+                            discountRateVal = Convert.ToDouble(drScan.DiscountRate);
+                        }
+                    }
+                }
+                catch
+                {
+                    return PortResult.Fail("Mst_PolicyMoneyToPointService_Save", "Check.DiscountRate", drScan.DiscountRate);
+                }
+            }
+
+            if (discountRateVal.HasValue)
+            {
+                if (discountRateVal.Value < 0 || discountRateVal.Value > 100)
+                {
+                    return PortResult.Fail("Mst_PolicyMoneyToPointService_Save_InvalidValue",
+                        "Check.CardType", drScan.CardType,
+                        "Check.DiscountRate", drScan.DiscountRate,
+                        "Check.ErrCoditional", "DiscountRate < 0 or DiscountRate > 100");
+                }
+            }
+
+            // Dtl: ConvertValue, ConvertPoint, ValueRankCardType, DiscountRate, Remark chế độ "" = GIỮ NGUYÊN (Remark KHÔNG trim) — Master.Loyalty.cs:18106-18110
+            newDtls.Add(new Mst_PolicyMoneyToPointServiceDtl
+            {
+                PolicyCode = policyCode,
+                CardType = strCardType!,
+                NetworkID = networkId,
+                ConvertValue = drScan.ConvertValue,
+                ConvertPoint = drScan.ConvertPoint,
+                ValueRankCardType = drScan.ValueRankCardType,
+                DiscountRate = discountRateVal,
+                FlagActive = "1",
+                Remark = drScan.Remark, // GIỮ NGUYÊN không trim
+                LogLUBy = "port",
+                LogLUDTimeUTC = now
+            });
+        }
+
+        // Kiểm tra trùng CardType sau vòng lặp: nếu trùng CardType -> vi phạm PK (PolicyCode, CardType) -> mã lỗi Mst_PolicyMoneyToPointService_Save
+        var distinctCardTypes = newDtls.Select(x => x.CardType).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+        if (distinctCardTypes < newDtls.Count)
+        {
+            return PortResult.Fail("Mst_PolicyMoneyToPointService_Save", "Check.DuplicateCardType", null);
+        }
+
+        // EffDateStart thiếu -> insert header vào cột NOT NULL lỗi (:18214-18234) -> mã mặc định Mst_PolicyMoneyToPointService_Save.
+        if (effDateStartMissing)
+        {
+            return PortResult.Fail("Mst_PolicyMoneyToPointService_Save", "Check.EffDateStart", effDateStartRaw);
+        }
+
+        // Lưu: 1 transaction duy nhất (Master.Loyalty.cs:17667, commit :17739)
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // 1. Insert header mới: Remark không lưu (null) — Master.Loyalty.cs:18214-18234
+            var newHeader = new Mst_PolicyMoneyToPointService
+            {
+                PolicyCode = policyCode,
+                NetworkID = networkId,
+                EffDateStart = effDateStartUtc,
+                EffDateEnd = effDateEndUtc,
+                FlagActive = "1",
+                Remark = null, // Remark header KHÔNG lưu
+                LogLUBy = "port",
+                LogLUDTimeUTC = now
+            };
+            _db.Set<Mst_PolicyMoneyToPointService>().Add(newHeader);
+
+            // 2. Insert các dòng Dtl mới — Master.Loyalty.cs:18238-18269
+            if (newDtls.Count > 0)
+            {
+                _db.Set<Mst_PolicyMoneyToPointServiceDtl>().AddRange(newDtls);
+            }
+            await _db.SaveChangesAsync();
+
+            // 3. Vô hiệu hoá chính sách khác: Master.Loyalty.cs:18294-18320 cập nhật FlagActive = '0' cho mọi header VÀ mọi Dtl có PolicyCode <> mã mới
+            await _db.Database.ExecuteSqlRawAsync(
+                "UPDATE \"Mst_PolicyMoneyToPointService\" SET \"FlagActive\" = '0' WHERE LOWER(\"PolicyCode\") <> LOWER({0})", policyCode);
+            await _db.Database.ExecuteSqlRawAsync(
+                "UPDATE \"Mst_PolicyMoneyToPointServiceDtl\" SET \"FlagActive\" = '0' WHERE LOWER(\"PolicyCode\") <> LOWER({0})", policyCode);
+
+            await tx.CommitAsync();
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return PortResult.Fail("Mst_PolicyMoneyToPointService_Save", "Exception", ex.Message);
+        }
+    }
+
+    private static string? StdParam(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim().ToUpperInvariant();
 
     /// <summary>
     /// Overload giữ nguyên tương thích cho GetAllActive (#194).
@@ -292,6 +566,7 @@ public class Mst_PolicyMoneyToPointServiceControllerPort : ControllerBase
                     d.ConvertValue,
                     d.ConvertPoint,
                     d.ValueRankCardType,
+                    d.DiscountRate,
                     d.FlagActive,
                     d.Remark,
                     d.LogLUBy,

@@ -73,6 +73,7 @@ public class Mst_PolicyMoneyToPointServiceDtl
     public double? ConvertValue { get; set; }                // Giá trị quy đổi — MyValue
     public double? ConvertPoint { get; set; }                // Điểm quy đổi — MyValue
     public double? ValueRankCardType { get; set; }           // Mốc tính lượt hạng thẻ — MyValue
+    public double? DiscountRate { get; set; }                // % chiết khấu dịch vụ — 20260723.z17.PolicyMoneyToPointService_DiscountRate.sql:19 (decimal(28,8) null / float)
     public string? FlagActive { get; set; }                  // Cờ hoạt động '1'/'0' — MyStatus
     public string? Remark { get; set; }                      // Ghi chú — Varchar400
     public string? LogLUBy { get; set; }                     // Người cập nhật — Varchar50
@@ -223,5 +224,29 @@ public class Mst_PolicyMoneyToPointServiceSeeder : IPortSeeder
         }
 
         await db.SaveChangesAsync();
+    }
+}
+
+/// <summary>
+/// Bảng sinh sequence cho mã chính sách quy đổi tiền sang điểm dịch vụ — port 1:1 bảng <c>Seq_PolicyCode</c>.
+/// DDL: 20221026.CreateDatabase.sql:695-704.
+/// PK = AutoId (bigint IDENTITY(1,1) PK tự tăng).
+/// </summary>
+public class Seq_PolicyCode
+{
+    public long AutoId { get; set; }                       // AutoId — bigint IDENTITY(1,1) PK
+    public string? Remark { get; set; }                    // Remark — Varchar50
+}
+
+/// <summary>
+/// Cấu hình EF cho <see cref="Seq_PolicyCode"/> — PK AutoId tự tăng.
+/// </summary>
+public class Seq_PolicyCodeConfig : IEntityTypeConfiguration<Seq_PolicyCode>
+{
+    public void Configure(EntityTypeBuilder<Seq_PolicyCode> b)
+    {
+        b.ToTable("Seq_PolicyCode");
+        b.HasKey(x => x.AutoId);
+        b.Property(x => x.AutoId).ValueGeneratedOnAdd();
     }
 }
