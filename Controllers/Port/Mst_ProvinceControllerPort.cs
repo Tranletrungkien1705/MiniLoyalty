@@ -14,7 +14,7 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục tỉnh/thành (Mst_Province) của dự án nguồn 2022.7.Loyalty (#213, #214, #215, #216, #217, #218, #219, #220).
+// PORT 1:1 — màn danh mục tỉnh/thành (Mst_Province) của dự án nguồn 2022.7.Loyalty (#213, #214, #215, #216, #217, #218, #219, #220, #221).
 //
 // Nguồn controller (tầng gate):
 //   Mst_ProvinceController.cs:31-111   Search              -> WA_Mst_Province_Get
@@ -25,6 +25,7 @@ namespace MiniLoyalty.Controllers.Port;
 //   Mst_ProvinceController.cs:377-437  Delete              -> WA_Mst_Province_Delete
 //   Mst_ProvinceController.cs:441-592  Import              -> WA_Mst_Province_Create
 //   Mst_ProvinceController.cs:597-675  Export              -> WA_Mst_Province_Get
+//   Mst_ProvinceController.cs:678-710  ExportTemplate
 //   Mst_ProvinceController.cs:735-759  strWhereClause_Mst_Province (mệnh đề lọc Search, GetAllActive, Export)
 //   Mst_ProvinceController.cs:761-776  strWhereClause_Mst_Province_By_ProvinceCode (mệnh đề lọc By ProvinceCode)
 // Nguồn API:
@@ -72,6 +73,11 @@ namespace MiniLoyalty.Controllers.Port;
 //     ProvinceCode ("Mã tỉnh/thành (*)"), ProvinceName ("Tên quận/huyện"), FlagActive ("Trạng thái");
 //     Sinh đường dẫn file qua PortExcel.GenExcelExportFilePath(webRoot, "Mst_Province") (:650), sheet "Mst_Province" (:651);
 //     Ghi file qua PortExcel.ExportToExcelFromList; trả về Success = true, Data = { Url = baseAddress + virtualPath } (:652-656).
+//   * ExportTemplate: gate Mst_ProvinceController.cs:678-710; không body, không kiểm quyền, không truy vấn DB;
+//     khởi tạo danh sách rỗng List<Mst_Province> (:686); từ điển cột GetImportDicColumsTemplate() (:688, :724-731) gồm 2 cột:
+//     ProvinceCode ("Mã tỉnh/thành (*)"), ProvinceName ("Tên quận/huyện");
+//     sinh đường dẫn file qua PortExcel.GenExcelExportFilePath(webRoot, "Mst_Province") (:690), sheet "Mst_Province" (:691);
+//     ghi file qua PortExcel.ExportToExcelFromList; trả về Success = true, Data = { Url = baseAddress + virtualPath } (:692-696).
 //
 // Bỏ qua có chủ đích (loại Đ):
 //   - CheckGatewayAuthentication: gate Mst_ProvinceController.cs:264, 386, 607; API MstProvinceController.cs:42-49, 117-122, 265-270
@@ -578,7 +584,7 @@ public class Mst_ProvinceControllerPort(AppDbContext db, IConfiguration config, 
         try
         {
             using var stream = file.OpenReadStream();
-            (columnCount, rows) = PortExcel.ReadSheet(stream, new[] { "ProvinceCode", "ProvinceName" });
+            (columnCount, rows) = PortExcel.ReadSheet(stream, GetImportDicColumsTemplate().Keys.ToArray());
         }
         catch
         {
@@ -592,7 +598,7 @@ public class Mst_ProvinceControllerPort(AppDbContext db, IConfiguration config, 
         }
 
         // Kiểm tra số cột dòng tiêu đề so với GetImportDicColumsTemplate().Count (2 cột): gate :484-487
-        if (columnCount != 2)
+        if (columnCount != GetImportDicColumsTemplate().Count)
         {
             return PortResult.Fail("Mst_Province_Import", "Message", "File excel import không hợp lệ");
         }
@@ -709,6 +715,49 @@ public class Mst_ProvinceControllerPort(AppDbContext db, IConfiguration config, 
         });
     }
 
+    // ============================================================================================
+    // ExportTemplate — nguồn gate Mst_ProvinceController.cs:678-710.
+    // Action này KHÔNG kiểm quyền ở nguồn (không có CheckGatewayAuthentication và không có CheckAuthorize).
+    // Không gọi tầng service, không truy vấn cơ sở dữ liệu.
+    // Khởi tạo danh sách rỗng kiểu Mst_Province (:686).
+    // Lấy từ điển cột mẫu từ GetImportDicColumsTemplate (:688, :724-731) gồm 2 cột.
+    // Sinh đường dẫn file mẫu qua PortExcel.GenExcelExportFilePath(webRoot, "Mst_Province") (:690).
+    // Xuất file Excel qua PortExcel.ExportToExcelFromList(list, dicColNames, physicalPath, "Mst_Province") (:691).
+    // Trả về Success = true, Data = { Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath } (:692-696).
+    // Không có nhánh báo lỗi khi danh sách rỗng (khác với Export).
+    // ============================================================================================
+    [HttpPost("exporttemplate")]
+    public IActionResult ExportTemplate()
+    {
+        // Khởi tạo danh sách rỗng kiểu Mst_Province (gate Mst_ProvinceController.cs:686)
+        var list = new List<Mst_Province>();
+
+        // Lấy từ điển 2 cột mẫu import (gate Mst_ProvinceController.cs:688, :724-731)
+        var dicColNames = GetImportDicColumsTemplate();
+
+        // Xác định thư mục webRoot và sinh đường dẫn file (gate Mst_ProvinceController.cs:690)
+        var webRoot = env.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = Path.Combine(env.ContentRootPath, "wwwroot");
+        }
+
+        var (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Mst_Province");
+
+        // Ghi danh sách rỗng ra file Excel với tên sheet Mst_Province (gate Mst_ProvinceController.cs:691)
+        PortExcel.ExportToExcelFromList(list, dicColNames, physicalPath, "Mst_Province");
+
+        // Trả URL tải file với Success = true (gate Mst_ProvinceController.cs:692-696)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+            }
+        });
+    }
+
     /// <summary>
     /// Từ điển cột xuất Excel: gate Mst_ProvinceController.cs:714-722 (GetImportDicColums).
     /// ĐẶC BIỆT LƯU Ý THEO NGUỒN: Nguồn tại Mst_ProvinceController.cs:647 sử dụng GetImportDicColums()
@@ -725,6 +774,21 @@ public class Mst_ProvinceControllerPort(AppDbContext db, IConfiguration config, 
             { "ProvinceCode", "Mã tỉnh/thành (*)" },
             { "ProvinceName", "Tên quận/huyện" },
             { "FlagActive", "Trạng thái" }
+        };
+    }
+
+    /// <summary>
+    /// Từ điển cột mẫu Import Excel: gate Mst_ProvinceController.cs:724-731 (GetImportDicColumsTemplate).
+    /// Giữ đúng thứ tự 2 cột từ nguồn:
+    /// 1. ProvinceCode ("Mã tỉnh/thành (*)")
+    /// 2. ProvinceName ("Tên quận/huyện" — nguồn viết nhầm "quận/huyện" cho danh mục tỉnh, giữ nguyên)
+    /// </summary>
+    private static Dictionary<string, string> GetImportDicColumsTemplate()
+    {
+        return new Dictionary<string, string>
+        {
+            { "ProvinceCode", "Mã tỉnh/thành (*)" },
+            { "ProvinceName", "Tên quận/huyện" }
         };
     }
 
