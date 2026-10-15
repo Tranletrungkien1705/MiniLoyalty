@@ -12,13 +12,14 @@ namespace MiniLoyalty.Controllers.Port;
 /// <summary>
 /// Port 1:1 Mst_DealerCPController.cs — Mst_DealerCP
 /// Chuỗi gọi nguồn:
-///   gate: Mst_DealerCPController.cs:26-106 (Search) + :107-230 (GetAllActive) + :364-389 (strWhereClause_Mst_DealerCP)
+///   gate: Mst_DealerCPController.cs:26-106 (Search) + :107-230 (GetAllActive) + :231-296 (GetByDLCPCode) + :364-389 (strWhereClause_Mst_DealerCP) + :390-406 (strWhereClause_Mst_DealerCP_By_DLCPCode)
 ///   API:  MstDealerCPController.cs:21-90 (WA_Mst_DealerCP_Get)
 ///   biz:  Master.Loyalty.cs:3937-4050 (WAS_Mst_DealerCP_Get) -> :4051-4206 (Mst_DealerCP_Get) -> :4209-4433 (Mst_DealerCP_GetX)
 ///
 /// Bỏ qua có chủ đích (loại Đ):
 /// - CheckGatewayAuthentication: gate Mst_DealerCPController.cs:35, 120; API MstDealerCPController.cs:42
-/// - CheckAuthorize: gate Mst_DealerCPController.cs:36, 121
+/// - CheckAuthorize: gate Mst_DealerCPController.cs:36, 121; dòng :241 đã bị comment out ở nguồn
+/// - Nguồn gọi bằng tài khoản hệ thống viết cứng (tài khoản + mật khẩu viết cứng tại :264-265 — KHÔNG chép giá trị), đích chưa có phân quyền; KHÔNG chép thông tin đăng nhập vào mã
 /// - Sys_User_CheckAuthorize: Master.Loyalty.cs:4107-4124 (hệ thống đích chưa có hệ phân quyền)
 /// - Ghi RequestLog/ReturnLog: Master.Loyalty.cs:4097-4104, 4196-4203
 /// </summary>
@@ -50,7 +51,8 @@ public class Mst_DealerCPControllerPort : ControllerBase
             recordStart: 0,
             recordCount: 123456000,
             getDealer: true,
-            getMap: true);
+            getMap: true,
+            dlcpCodeEqual: null);
 
         return Ok(new
         {
@@ -60,6 +62,51 @@ public class Mst_DealerCPControllerPort : ControllerBase
                 Lst_Mst_DealerCP = rows.Count > 0 ? rows : null,
                 Lst_Map_DealerCP_Org = maps.Count > 0 ? maps : null
             }
+        });
+    }
+
+    /// <summary>
+    /// Port 1:1 GetByDLCPCode action từ gate Mst_DealerCPController.cs:231-296.
+    /// Request JSON: { DLCPCode }.
+    /// Khi DLCPCode rỗng (null hoặc whitespace): nguồn kiểm tra !IsNullOrEmpty (:252),
+    /// bỏ qua truy vấn và trả về Success = true, Data = null (:282-283).
+    /// Khi DLCPCode có giá trị: lọc theo DLCPCode với toán tử '=' (strWhereClause_Mst_DealerCP_By_DLCPCode :390-406).
+    /// Không truyền FlagActive (:254-257) nên đại lý có FlagActive = '0' vẫn lấy được.
+    /// Ft_RecordStart = "0", Ft_RecordCount = "1" (:270-271); trả về phần tử đầu tiên rows[0] (:277-280).
+    ///
+    /// Bỏ qua có chủ đích (loại Đ):
+    /// - CheckAuthorize: gate Mst_DealerCPController.cs:241 đã bị comment out ở nguồn.
+    /// - Nguồn gọi bằng tài khoản hệ thống viết cứng (WAUserCode/WAUserPassword viết cứng tại :264-265 — KHÔNG chép giá trị),
+    ///   đích chưa có phân quyền; KHÔNG chép thông tin đăng nhập vào mã.
+    /// </summary>
+    [HttpPost("getbydlcpcode")]
+    public async Task<IActionResult> GetByDLCPCode([FromBody] Mst_DealerCPGetByDLCPCodeRequest? req)
+    {
+        // Khi DLCPCode rỗng: Success = true, Data = null và KHÔNG truy vấn (gate Mst_DealerCPController.cs:251-283)
+        if (string.IsNullOrWhiteSpace(req?.DLCPCode))
+        {
+            return Ok(new
+            {
+                Success = true,
+                Data = (object?)null
+            });
+        }
+
+        // Lấy đúng 1 đại lý (recordStart = 0, recordCount = 1), toán tử '=', getDealer = true, getMap = false
+        var (_, rows, _) = await GetXAsync(
+            keyWord: null,
+            flagActiveCsv: null,
+            recordStart: 0,
+            recordCount: 1,
+            getDealer: true,
+            getMap: false,
+            dlcpCodeEqual: req.DLCPCode);
+
+        // Nguồn: lấy phần tử đầu tiên Lst_Mst_DealerCP[0] nếu có (gate Mst_DealerCPController.cs:277-280)
+        return Ok(new
+        {
+            Success = true,
+            Data = rows.Count > 0 ? rows[0] : null
         });
     }
 
@@ -84,7 +131,8 @@ public class Mst_DealerCPControllerPort : ControllerBase
             recordStart: recordStart,
             recordCount: recordCount,
             getDealer: true,
-            getMap: false);
+            getMap: false,
+            dlcpCodeEqual: null);
 
         // Tính PageCount theo logic tầng gate Mst_DealerCPController.cs:81-89
         var pageCount = 0;
@@ -104,9 +152,10 @@ public class Mst_DealerCPControllerPort : ControllerBase
     }
 
     /// <summary>
-    /// Tách phần lọc + đếm + phân trang + select của Search và GetAllActive
+    /// Tách phần lọc + đếm + phân trang + select của Search, GetAllActive và GetByDLCPCode
     /// tương ứng Mst_DealerCP_GetX (Master.Loyalty.cs:4209-4433).
     /// Tham số getDealer và getMap tương ứng bGet_Mst_DealerCP (:4244) và bGet_Map_DealerCP_Org (:4245).
+    /// Tham số dlcpCodeEqual lọc theo DLCPCode với toán tử '=' (strWhereClause_Mst_DealerCP_By_DLCPCode :390-406).
     /// </summary>
     private async Task<(int itemCount, List<Mst_DealerCPSearchResultItem> rows, List<Map_DealerCP_OrgResultItem> maps)> GetXAsync(
         string? keyWord,
@@ -114,13 +163,25 @@ public class Mst_DealerCPControllerPort : ControllerBase
         long recordStart,
         long recordCount,
         bool getDealer,
-        bool getMap)
+        bool getMap,
+        string? dlcpCodeEqual = null)
     {
         // 1. Khởi tạo truy vấn bảng Mst_DealerCP (#tbl_Mst_DealerCP_Filter_Draft trong Master.Loyalty.cs:4271-4283)
         // Lưu ý: nguồn `select distinct identity(...)` + left join Map_DealerCP_Org; port coi là distinct theo DLCPCode.
         var query = _db.Set<Mst_DealerCP>().AsNoTracking();
 
-        // 2. Lọc theo KeyWord: Mst_DealerCPController.cs:369-372
+        // 2. Lọc theo DLCPCode (toán tử '='): Mst_DealerCPController.cs:395-398
+        // sbSql.AddWhereClause(Tbl_Mst_DealerCP + TblMst_DealerCP.DLCPCode, CUtils.StrValue(data.DLCPCode), "=");
+        // Nguồn dùng toán tử '=' không wildcard. Collation không phân biệt hoa/thường: dùng PortQuery.Equal và Esc.
+        if (!string.IsNullOrWhiteSpace(dlcpCodeEqual))
+        {
+            query = query.Where(x => EF.Functions.Like(
+                (x.DLCPCode ?? "").ToLower(),
+                PortQuery.Equal(dlcpCodeEqual),
+                PortQuery.Esc));
+        }
+
+        // 3. Lọc theo KeyWord: Mst_DealerCPController.cs:369-372
         // sbSql.AddWhereClause(Tbl_Mst_DealerCP + TblMst_DealerCP.DLCPName, "%" + CUtils.StrValue(data.KeyWord) + "%", "like");
         // Nguồn lọc cột DLCPName với toán tử like '%KeyWord%'. Collation không phân biệt hoa/thường: dùng PortQuery.Contains và Esc.
         if (!string.IsNullOrWhiteSpace(keyWord))
@@ -131,7 +192,7 @@ public class Mst_DealerCPControllerPort : ControllerBase
                 PortQuery.Esc));
         }
 
-        // 3. Lọc theo FlagActive: Mst_DealerCPController.cs:378-386
+        // 4. Lọc theo FlagActive: Mst_DealerCPController.cs:378-386
         // Khối '=' (:374-377) đã bị comment out trong mã nguồn. Nguồn tách mảng dấu phẩy và dùng toán tử 'in'.
         // CẤM ==/.Contains() trên chuỗi trực tiếp mà hạ chữ hai phía và dùng danh sách ds.Contains.
         if (!string.IsNullOrWhiteSpace(flagActiveCsv))
@@ -375,6 +436,14 @@ public class Mst_DealerCPSearchRequest
     public string? FlagActive { get; set; }
     public int Ft_PageIndex { get; set; } = 0;
     public int Ft_PageSize { get; set; } = 10;
+}
+
+/// <summary>
+/// Request model cho action GetByDLCPCode — khớp tham số tại Mst_DealerCPController.cs:231
+/// </summary>
+public class Mst_DealerCPGetByDLCPCodeRequest
+{
+    public string? DLCPCode { get; set; }
 }
 
 /// <summary>
