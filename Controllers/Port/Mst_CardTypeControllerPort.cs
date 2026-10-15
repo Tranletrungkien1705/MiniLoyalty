@@ -38,6 +38,21 @@ public class MstCardTypeGetByCardTypeReq
     public string? CardType { get; set; }             // Mã loại thẻ cần lấy — :238-241
 }
 
+/// <summary>
+/// Port 1:1 <c>Create</c> — body JSON 4 trường của model nguồn (Mst_CardTypeController.cs:329-414).
+/// Nguồn deserialize thẳng vào TModelLoyaltys.Mst_CardType (mọi cột là object) rồi truyền
+/// CardType/NetworkID/CardTypeName/Value xuống biz (Master.Loyalty.cs:5787-5790).
+/// Value để <c>JsonElement?</c> để chuyển đổi như <c>Convert.ToDouble(objValue)</c> của nguồn
+/// (chuỗi không phải số -> lỗi; thiếu -> null -> 0).
+/// </summary>
+public class MstCardTypeCreateReq
+{
+    public string? CardType { get; set; }             // Mã loại thẻ — :5787
+    public string? NetworkID { get; set; }            // NetworkID lấy từ JSON, KHÔNG từ cấu hình — :5788
+    public string? CardTypeName { get; set; }         // Tên loại thẻ — :5789
+    public System.Text.Json.JsonElement? Value { get; set; }  // Giá trị/ngưỡng — :5790 (Convert.ToDouble)
+}
+
 [ApiController]
 [Route("api/mst_cardtype")]
 [Produces("application/json")]
@@ -168,4 +183,191 @@ public class Mst_CardTypeControllerPort(AppDbContext db) : ControllerBase
 
         return (itemCount, rows);
     }
+
+    // ============================================================================================
+    // Create — nguồn Mst_CardTypeController.cs:329-414 (gate) -> MstCardTypeController.cs:21-91 (API)
+    //   -> Master.Loyalty.cs:5738 (WAS_Mst_CardType_Create) -> :5821-5967 (Mst_CardType_Create)
+    //   -> :5968-6099 (Mst_CardType_CreateX) -> :5264-5325 (Mst_CardType_CheckDB).
+    //
+    // GIỮ ĐÚNG NGUỒN:
+    //   * Body JSON 4 trường: CardType, NetworkID, CardTypeName, Value (:5787-5790).
+    //     NetworkID lấy TỪ JSON, KHÔNG từ cấu hình.
+    //   * Chuẩn hoá (:5999-6002): CardType = StdParam (Trim+ToUpper, rỗng->null);
+    //     CardTypeName = StdStr (Trim+Normalize, rỗng->null); NetworkID = StdParam;
+    //     Value = Convert.ToDouble(objValue) (null -> 0; chuỗi không phải số -> lỗi).
+    //   * Kiểm tra THEO THỨ TỰ (:6011-6066):
+    //       1) CardType null/rỗng -> Mst_CardType_Create_InvalidCardType
+    //       2) CheckDB(CardType, FlagExist "0") -> Mst_CardType_CheckDB_CardTypeExist nếu đã có
+    //       3) Value <= 0 -> Mst_CardType_Create_InvalidValue
+    //       4) Đã có dòng khác CÙNG Value -> Mst_CardType_Create_InvalidValue
+    //   * Lưu (:6076-6082): CardType, CardTypeName, NetworkID, Value, FlagActive = "1",
+    //     LogLUDTimeUTC = UtcNow, LogLUBy = user.
+    //   * Cột NOT NULL trong DDL: CardType, NetworkID, CardTypeName. Nguồn thiếu NetworkID/CardTypeName
+    //     -> SQL Server báo lỗi khi SaveData, bắt lại thành mã mặc định Mst_CardType_Create (:5830).
+    //
+    // Bỏ qua có chủ đích (loại Đ):
+    //   * CheckGatewayAuthentication/CheckAuthorize (gate :349-350), Sys_User_CheckAuthorize (:5883-5896):
+    //     hệ thống đích chưa có hệ phân quyền.
+    //   * Ghi RequestLog/ReturnLog (:5864-5871, :5957-5964).
+    //   * LogLUBy gán cố định "port" do đích chưa có session người dùng (:6082).
+    // ============================================================================================
+    [HttpPost("create")]
+    public async Task<IActionResult> Create([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] MstCardTypeCreateReq? req)
+    {
+        // 1. Body rỗng/null: gate :339-346 ném ServiceException("strJson null") -> mã mặc định Mst_CardType_Create.
+        if (req == null)
+        {
+            return PortResult.Fail("Mst_CardType_Create", "Check.strJson", null);
+        }
+
+        // 2. Mở 1 transaction cho toàn bộ nghiệp vụ (Master.Loyalty.cs:5861 _cf.db.BeginTransaction()).
+        await using var tx = await db.Database.BeginTransactionAsync();
+        try
+        {
+            // 3. Chuẩn hoá input (Master.Loyalty.cs:5999-6002).
+            //    StdParam = Trim().ToUpper(), rỗng -> null (05.Refs.Biz\Biz\Loyalty.TVO\Loyalty.TVO.Utils\Utils.cs:29).
+            //    StdStr   = Trim().Normalize(), rỗng -> null (cùng tệp Utils.cs:29).
+            string? strCardType = StdParam(req.CardType);
+            string? strCardTypeName = StdStr(req.CardTypeName);
+            string? strNetworkID = StdParam(req.NetworkID);
+
+            // Value = Convert.ToDouble(objValue) (:6002): null -> 0; chuỗi không phải số -> lỗi -> mã mặc định.
+            double dblValue;
+            try
+            {
+                dblValue = ConvertToDouble(req.Value);
+            }
+            catch (Exception)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_CardType_Create", "Check.objValue", req.Value?.ToString());
+            }
+
+            // 4.1. CardType null/rỗng -> Mst_CardType_Create_InvalidCardType (:6011-6021).
+            if (string.IsNullOrEmpty(strCardType))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_CardType_Create_InvalidCardType", "Check.strCardType", strCardType);
+            }
+
+            // 4.2. CheckDB(CardType, FlagExist "0") (:6023-6029 -> Mst_CardType_CheckDB :5264-5325):
+            //      FlagExist "0" + có dòng -> Mst_CardType_CheckDB_CardTypeExist.
+            var exists = await db.Set<Mst_CardType>().AnyAsync(x =>
+                EF.Functions.Like((x.CardType ?? "").ToLower(), PortQuery.Equal(strCardType), PortQuery.Esc));
+            if (exists)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_CardType_CheckDB_CardTypeExist", "Check.CardType", strCardType);
+            }
+
+            // 4.3. Value <= 0 -> Mst_CardType_Create_InvalidValue (:6031-6041).
+            if (dblValue <= 0)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_CardType_Create_InvalidValue", "Check.Value", dblValue);
+            }
+
+            // 4.4. Đã có dòng khác CÙNG Value -> Mst_CardType_Create_InvalidValue (:6043-6066).
+            //      Nguồn so `t.Value = @objValue` (so SỐ, không phải chuỗi).
+            var valueExists = await db.Set<Mst_CardType>().AnyAsync(x => x.Value == dblValue);
+            if (valueExists)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_CardType_Create_InvalidValue", "Check.Value", dblValue);
+            }
+
+            // 5. Giả lập ràng buộc NOT NULL của DDL (CardType, NetworkID, CardTypeName).
+            //    Nguồn thiếu NetworkID/CardTypeName -> SQL Server báo lỗi khi SaveData (:6086-6090),
+            //    bắt lại thành mã mặc định Mst_CardType_Create (:5830 strErrorCodeDefault).
+            if (string.IsNullOrEmpty(strNetworkID))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_CardType_Create", "Check.NotNull", "NetworkID");
+            }
+            if (string.IsNullOrEmpty(strCardTypeName))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_CardType_Create", "Check.NotNull", "CardTypeName");
+            }
+
+            // 6. Lưu dòng mới (Master.Loyalty.cs:6076-6082).
+            var dtimeSys = DateTime.UtcNow;   // :5842 dtimeSys = DateTime.UtcNow
+            var entity = new Mst_CardType
+            {
+                CardType = strCardType,           // :6076 CardType
+                CardTypeName = strCardTypeName,   // :6077 CardTypeName
+                NetworkID = strNetworkID,         // :6078 NetworkID
+                Value = dblValue,                 // :6079 Value
+                FlagActive = "1",                 // :6080 FlagActive = TConst.Flag.Active ("1")
+                LogLUDTimeUTC = dtimeSys,         // :6081 LogLUDTimeUTC
+                LogLUBy = "port"                  // :6082 LogLUBy (đích chưa có session user — loại Đ)
+            };
+            db.Set<Mst_CardType>().Add(entity);
+            await db.SaveChangesAsync();
+
+            // 7. Commit (Master.Loyalty.cs:5930 CommitSafety).
+            await tx.CommitAsync();
+
+            // 8. Thành công: gate :400-401 SetSuccess + Data = null.
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+        catch (Exception)
+        {
+            await tx.RollbackAsync();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Chuyển Value như <c>Convert.ToDouble(objValue)</c> của nguồn (Master.Loyalty.cs:6002):
+    /// null/thiếu -> 0; số -> giá trị; chuỗi số -> parse; chuỗi không phải số -> ném lỗi.
+    /// </summary>
+    private static double ConvertToDouble(System.Text.Json.JsonElement? value)
+    {
+        if (value == null) return 0d;
+        var el = value.Value;
+        switch (el.ValueKind)
+        {
+            case System.Text.Json.JsonValueKind.Number:
+                return el.GetDouble();
+            case System.Text.Json.JsonValueKind.String:
+                return Convert.ToDouble(el.GetString());
+            case System.Text.Json.JsonValueKind.Null:
+            case System.Text.Json.JsonValueKind.Undefined:
+                return 0d;
+            case System.Text.Json.JsonValueKind.True:
+                return 1d;
+            case System.Text.Json.JsonValueKind.False:
+                return 0d;
+            default:
+                return Convert.ToDouble(el.ToString());
+        }
+    }
+
+    #region Helper chuẩn hoá input (05.Refs.Biz\Biz\Loyalty.TVO\Loyalty.TVO.Utils\Utils.cs)
+    /// <summary>
+    /// Chuẩn hoá tham số mã: Trim, ToUpper, rỗng -> null.
+    /// Dùng cho mã (CardType, NetworkID...).
+    /// Nguồn tham chiếu: 05.Refs.Biz\Biz\Loyalty.TVO\Loyalty.TVO.Utils\Utils.cs:29
+    /// </summary>
+    private static string? StdParam(object? val)
+    {
+        if (val == null) return null;
+        var s = val.ToString()?.Trim();
+        return string.IsNullOrEmpty(s) ? null : s.ToUpperInvariant();
+    }
+
+    /// <summary>
+    /// Chuẩn hoá chuỗi: Trim, Normalize, rỗng -> null.
+    /// Dùng cho tên (CardTypeName...).
+    /// Nguồn tham chiếu: 05.Refs.Biz\Biz\Loyalty.TVO\Loyalty.TVO.Utils\Utils.cs:29
+    /// </summary>
+    private static string? StdStr(object? val)
+    {
+        if (val == null) return null;
+        var s = val.ToString()?.Trim();
+        if (string.IsNullOrEmpty(s)) return null;
+        return s.Normalize();
+    }
+    #endregion
 }
