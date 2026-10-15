@@ -1,16 +1,19 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using MiniLoyalty.Data;
 using MiniLoyalty.Models.Port;
 
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục dòng xe (Mst_CarModel) của dự án nguồn 2022.7.Loyalty (#97, #98, #99, #100, #101, #102, #103).
+// PORT 1:1 — màn danh mục dòng xe (Mst_CarModel) của dự án nguồn 2022.7.Loyalty (#97, #98, #99, #100, #101, #102, #103, #104).
 //
 // Nguồn controller (tầng gate):
 //   Mst_CarModelController.cs:25-105   Search              -> WA_Mst_CarModel_Get
@@ -20,6 +23,7 @@ namespace MiniLoyalty.Controllers.Port;
 //   Mst_CarModelController.cs:418-485  Update              -> WA_Mst_CarModel_Update
 //   Mst_CarModelController.cs:489-552  Delete              -> WA_Mst_CarModel_Delete (#102)
 //   Mst_CarModelController.cs:554-618  DeleteMultiple      -> WA_Mst_CarModel_Delete (#103)
+//   Mst_CarModelController.cs:622-766  Import              -> WA_Mst_CarModel_Create (#104)
 //   Mst_CarModelController.cs:284-305  strWhereClause_Mst_CarModel (mệnh đề lọc Search)
 //   Mst_CarModelController.cs:306-325  strWhereClause_Mst_CarModel_By_ModelCode (mệnh đề lọc GetByModelCode)
 // Nguồn API:
@@ -66,6 +70,13 @@ namespace MiniLoyalty.Controllers.Port;
 //     xoá dòng -> Success = true, Data = null.
 //   * DeleteMultiple: body là mảng [{ ModelCode }], lặp tuần tự từng phần tử trong 1 transaction riêng biệt.
 //     Lỗi phần tử thứ k -> thoát vòng lặp ngay, "xóa một phần" là hành vi nguồn. Body rỗng -> Mst_CarModel_Delete.
+//   * Import: nhận file .xlsx ([Consumes("multipart/form-data")]); file thiếu hoặc đuôi khác .xlsx -> Fail("Mst_CarModel_Import", "Message", "File excel import không hợp lệ");
+//     Đọc qua PortExcel.ReadSheet: không có dòng -> "File excel import không có dữ liệu"; columnCount != 3 -> "File excel import không hợp lệ";
+//     Kiểm tra TẤT CẢ dòng trước khi tạo: ModelCode rỗng -> "Mã Model không được trống", ModelName rỗng -> "Tên Model không được trống", BrandCode rỗng -> "Mã hiệu xe không được trống";
+//     Khối kiểm tra trùng trong file bị comment trong nguồn — không port;
+//     Duyệt từng dòng: gọi CreateXAsync độc lập (mỗi dòng 1 transaction riêng); lỗi dòng k dừng ngay và trả lỗi dòng đó (import một phần, các dòng trước k đã lưu);
+//     GAP NetworkID: nguồn lấy orgUserUI.NetworkId từ user đăng nhập, đích chưa có user -> IConfiguration["Biz_NetworkID"] ?? "1001";
+//     Thành công Data = null (:746-747).
 //
 // Bỏ qua có chủ đích (loại Đ):
 //   - CheckGatewayAuthentication: gate :34, :226, :498, :574; API MstCarModelController.cs:259-264, :187-192
@@ -134,10 +145,12 @@ public class MstCarModelDeleteReq
 public class Mst_CarModelControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly IConfiguration _config;
 
-    public Mst_CarModelControllerPort(AppDbContext db)
+    public Mst_CarModelControllerPort(AppDbContext db, IConfiguration config)
     {
         _db = db;
+        _config = config;
     }
 
     [HttpPost("search")]
@@ -614,6 +627,146 @@ public class Mst_CarModelControllerPort : ControllerBase
             await tx.RollbackAsync();
             throw;
         }
+    }
+
+    // ============================================================================================
+    // Import — nguồn gate Mst_CarModelController.cs:622-766 -> API WA_Mst_CarModel_Create
+    // (MstCarModelController.cs:20-90) -> biz WAS_Mst_CarModel_Create (Master.Loyalty.cs:1908-1991)
+    // -> Mst_CarModel_Create (Master.Loyalty.cs:1992-2141) -> Mst_CarModel_CreateX (Master.Loyalty.cs:2142-2250).
+    //
+    // GIẢ ĐỊNH (kế thừa từ Data/PortExcel.cs):
+    //   - Định dạng file Excel: dòng 1 = tiêu đề (đúng file template), dữ liệu bắt đầu từ ô A2 (firstDataRow = 2).
+    //   - Cột ánh xạ theo vị trí: cột 1 = ModelCode, cột 2 = ModelName, cột 3 = BrandCode (GetImportDicColumsTemplate có 3 cột:
+    //     ModelCode -> "Mã Model", ModelName -> "Tên Model(*)", BrandCode -> "Mã hiệu xe" :899-906).
+    //
+    // Quy trình và thứ tự kiểm tra:
+    //   1. Kiểm tra file upload: gate Mst_CarModelController.cs:646-651
+    //      - Thiếu file hoặc file rỗng hoặc đuôi file != ".xlsx" -> Fail("Mst_CarModel_Import", "Message", "File excel import không hợp lệ")
+    //   2. Đọc file bằng PortExcel.ReadSheet(stream, new[] { "ModelCode", "ModelName", "BrandCode" }):
+    //      - Bảng không có dòng dữ liệu (table == null || table.Rows.Count == 0) -> Fail("Mst_CarModel_Import", "Message", "File excel import không có dữ liệu") (:663, :751)
+    //      - Số cột tiêu đề != GetImportDicColumsTemplate().Count (3 cột) -> Fail("Mst_CarModel_Import", "Message", "File excel import không hợp lệ") (:665-667)
+    //   3. Kiểm tra TẤT CẢ các dòng TRƯỚC khi tạo (#region["Check null"] :672-699):
+    //      - ModelCode rỗng / khoảng trắng -> Fail("Mst_CarModel_Import", "Message", "Mã Model không được trống") (:675-678)
+    //      - ModelName rỗng / khoảng trắng -> Fail("Mst_CarModel_Import", "Message", "Tên Model không được trống") (:680-683)
+    //      - BrandCode rỗng / khoảng trắng -> Fail("Mst_CarModel_Import", "Message", "Mã hiệu xe không được trống") (:685-688)
+    //      Khối kiểm tra trùng trong file (#region["Check duplicate"] :701-718) bị COMMENT trong nguồn — KHÔNG port.
+    //      Nếu có bất kỳ dòng nào vi phạm, dừng ngay và KHÔNG có dòng nào được tạo vào CSDL.
+    //   4. Lưu từng dòng (hành vi "import một phần"):
+    //      - NetworkID: GAP nguồn lấy NetworkID = orgUserUI.NetworkId (:728) từ user đăng nhập;
+    //        đích chưa có user -> dùng IConfiguration["Biz_NetworkID"] ?? "1001".
+    //      - Duyệt từng dòng theo thứ tự, gọi CreateXAsync(modelCode, networkId, brandCode, modelName, remark: null) riêng cho mỗi dòng
+    //        (mỗi dòng 1 transaction biz riêng biệt: gate :725-745).
+    //      - Nếu dòng thứ k gặp lỗi (vd trùng mã Mst_CarModel_CheckDB_CarModelExist, hãng xe không tồn tại Mst_CarBrand_CheckDB_BrandNotFound,
+    //        hãng xe không hoạt động Mst_CarBrand_CheckDB_FlagActiveNotMatched), vòng lặp dừng ngay lập tức, trả về đúng lỗi của CreateXAsync cho dòng k.
+    //      - CÁC DÒNG TRƯỚC k ĐÃ ĐƯỢC COMMIT VÀO DB (không rollback các dòng đã tạo trước đó).
+    //      - Các dòng sau k không được duyệt.
+    //   5. Thành công: gate :746-747 trả SetSuccess + Data = null -> Ok(new { Success = true, Data = (object?)null }).
+    //
+    // Bỏ qua có chủ đích (loại Đ):
+    //   - CheckGatewayAuthentication, CheckAuthorize (:633-634)
+    //   - FileUtils.SaveTempFile (:654) -> đọc trực tiếp từ stream
+    //   - Session người dùng orgUserUI (:632, :728, :734-738).
+    // ============================================================================================
+    [HttpPost("import")]
+    [Consumes("multipart/form-data")]
+    public async Task<IActionResult> Import(IFormFile? file)
+    {
+        // 1. Kiểm tra file upload: gate Mst_CarModelController.cs:646-651
+        if (file == null || file.Length == 0)
+        {
+            return PortResult.Fail("Mst_CarModel_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+        if (ext != ".xlsx")
+        {
+            return PortResult.Fail("Mst_CarModel_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        // 2. Đọc bảng tính bằng PortExcel.ReadSheet (giả định định dạng file Excel từ PortExcel)
+        int columnCount;
+        List<Dictionary<string, string?>> rows;
+        try
+        {
+            using var stream = file.OpenReadStream();
+            (columnCount, rows) = PortExcel.ReadSheet(stream, new[] { "ModelCode", "ModelName", "BrandCode" });
+        }
+        catch
+        {
+            return PortResult.Fail("Mst_CarModel_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        // Kiểm tra có dữ liệu hay không: gate :663, :751 (table == null || table.Rows.Count == 0)
+        if (rows.Count == 0)
+        {
+            return PortResult.Fail("Mst_CarModel_Import", "Message", "File excel import không có dữ liệu");
+        }
+
+        // Kiểm tra số cột dòng tiêu đề so với GetImportDicColumsTemplate().Count (3 cột): gate :665-667
+        if (columnCount != GetImportDicColumsTemplate().Count)
+        {
+            return PortResult.Fail("Mst_CarModel_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        // 3. Kiểm tra TẤT CẢ các dòng TRƯỚC khi tạo (Check null: gate Mst_CarModelController.cs:672-699)
+        foreach (var r in rows)
+        {
+            var modelCode = r.GetValueOrDefault("ModelCode");
+            if (string.IsNullOrWhiteSpace(modelCode))
+            {
+                return PortResult.Fail("Mst_CarModel_Import", "Message", "Mã Model không được trống");
+            }
+
+            var modelName = r.GetValueOrDefault("ModelName");
+            if (string.IsNullOrWhiteSpace(modelName))
+            {
+                return PortResult.Fail("Mst_CarModel_Import", "Message", "Tên Model không được trống");
+            }
+
+            var brandCode = r.GetValueOrDefault("BrandCode");
+            if (string.IsNullOrWhiteSpace(brandCode))
+            {
+                return PortResult.Fail("Mst_CarModel_Import", "Message", "Mã hiệu xe không được trống");
+            }
+        }
+
+        // 4. Lưu từng dòng tuần tự: mỗi dòng 1 transaction riêng (hành vi "import một phần": gate :725-745)
+        // GAP: nguồn lấy NetworkID = orgUserUI.NetworkId (:728) từ user đăng nhập; đích chưa có user -> dùng IConfiguration["Biz_NetworkID"] ?? "1001"
+        var networkId = _config["Biz_NetworkID"] ?? "1001";
+        foreach (var r in rows)
+        {
+            var modelCode = r.GetValueOrDefault("ModelCode");
+            var modelName = r.GetValueOrDefault("ModelName");
+            var brandCode = r.GetValueOrDefault("BrandCode");
+
+            var err = await CreateXAsync(modelCode, networkId, brandCode, modelName, remark: null);
+            if (err != null)
+            {
+                // Lỗi ở dòng k -> thoát ngay, trả đúng lỗi của Create, các dòng trước k đã tạo thành công
+                return err;
+            }
+        }
+
+        // 5. Thành công: gate :746-747 SetSuccess + Data = null
+        return Ok(new
+        {
+            Success = true,
+            Data = (object?)null
+        });
+    }
+
+    /// <summary>
+    /// Từ điển 3 cột mẫu Import (Mst_CarModelController.cs:899-906 GetImportDicColumsTemplate):
+    /// ModelCode -> "Mã Model", ModelName -> "Tên Model(*)", BrandCode -> "Mã hiệu xe".
+    /// </summary>
+    private static Dictionary<string, string> GetImportDicColumsTemplate()
+    {
+        return new Dictionary<string, string>
+        {
+            { "ModelCode", "Mã Model" },
+            { "ModelName", "Tên Model(*)" },
+            { "BrandCode", "Mã hiệu xe" }
+        };
     }
 
     /// <summary>
