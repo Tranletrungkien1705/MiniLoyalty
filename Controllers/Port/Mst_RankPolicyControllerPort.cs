@@ -4,18 +4,20 @@ using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using MiniLoyalty.Data;
 using MiniLoyalty.Models.Port;
 
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục chính sách xếp hạng (Mst_RankPolicy) của dự án nguồn 2022.7.Loyalty (#227, #228, #229).
+// PORT 1:1 — màn danh mục chính sách xếp hạng (Mst_RankPolicy) của dự án nguồn 2022.7.Loyalty (#227, #228, #229, #230).
 //
 // Nguồn controller (tầng gate):
 //   Mst_RankPolicyController.cs:23-103   Search -> WA_Mst_RankPolicy_Get (#227)
 //   Mst_RankPolicyController.cs:104-213  GetAllActive -> WA_Mst_RankPolicy_Get (#228)
 //   Mst_RankPolicyController.cs:214-277  GetByRankPolicyCode -> WA_Mst_RankPolicy_Get (#229)
+//   Mst_RankPolicyController.cs:319-411  Save -> WA_Mst_RankPolicy_Save (#230)
 //   Mst_RankPolicyController.cs:281-298  strWhereClause_Mst_RankPolicy (mệnh đề lọc Search / GetAllActive)
 //   Mst_RankPolicyController.cs:299-315  strWhereClause_Mst_RankPolicy_By_RankPolicyCode (mệnh đề lọc GetByRankPolicyCode)
 // Nguồn API:
@@ -86,16 +88,45 @@ public class MstRankPolicyGetByRankPolicyCodeReq
     public string? RankPolicyCode { get; set; }       // Mã chính sách xếp hạng — :214, :234-238
 }
 
+/// <summary>
+/// Dòng cấu hình chính sách cho 1 hạng thẻ trong payload Save (Master.Loyalty.cs:7166-7180).
+/// </summary>
+public class MstRankPolicySaveRowReq
+{
+    public string? CardType { get; set; }
+    public double? Value { get; set; }
+    public double? PointUpBegin { get; set; }
+    public double? PointUpEnd { get; set; }
+    public double? QtyVisitUpBegin { get; set; }
+    public double? QtyVisitUpEnd { get; set; }
+    public double? PointKeepBegin { get; set; }
+    public double? PointKeepEnd { get; set; }
+    public double? QtyVisitKeepBegin { get; set; }
+    public double? QtyVisitKeepEnd { get; set; }
+    public double? QtyMonth { get; set; }
+    public string? Remark { get; set; }
+}
+
+/// <summary>
+/// Body của Save: { Lst_Mst_RankPolicy: [ ... ] } (gate Mst_RankPolicyController.cs:328-336).
+/// </summary>
+public class MstRankPolicySaveReq
+{
+    public List<MstRankPolicySaveRowReq>? Lst_Mst_RankPolicy { get; set; }
+}
+
 [ApiController]
 [Route("api/mst_rankpolicy")]
 [Produces("application/json")]
 public class Mst_RankPolicyControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly IConfiguration _config;
 
-    public Mst_RankPolicyControllerPort(AppDbContext db)
+    public Mst_RankPolicyControllerPort(AppDbContext db, IConfiguration config)
     {
         _db = db;
+        _config = config;
     }
 
     /// <summary>
@@ -180,6 +211,247 @@ public class Mst_RankPolicyControllerPort : ControllerBase
         // Nguồn: Lst_Mst_RankPolicy[0] khi có dòng, ngược lại null (:258-261).
         return Ok(new { Success = true, Data = rows.Count > 0 ? rows[0] : null });
     }
+
+    // ============================================================================================
+    // Save — nguồn Mst_RankPolicyController.cs:319-411 (gate) -> MstRankPolicyController.cs:22-92 (API)
+    //   -> Master.Loyalty.cs:6770-6855 (WAS_Mst_RankPolicy_Save) -> :6856-6995 (Mst_RankPolicy_Save)
+    //   -> :7096-7441 (Mst_RankPolicy_SaveX) -> :6997-7094 (Mst_RankPolicy_Perform).
+    //
+    // GIỮ ĐÚNG NGUỒN:
+    //   * Body JSON: { Lst_Mst_RankPolicy: [ { CardType, Value, PointUpBegin, PointUpEnd, ... } ] }
+    //   * seq tăng cả khi lỗi: Lấy mã sequence trước khi lưu (gate :351-371, SeqType.RankPolicyCode)
+    //     qua bảng Seq_RankPolicyCode trong transaction RIÊNG đã commit độc lập, rồi gán CÙNG 1 mã
+    //     cho mọi dòng (:373-376). Do đó sequence tăng MỖI LẦN GỌI vượt qua bước body rỗng, KỂ CẢ KHI
+    //     LƯU LỖI SAU ĐÓ.
+    //     Body rỗng hoàn toàn -> ServiceException("strJson null") -> mã mặc định Mst_RankPolicy_Save (KHÔNG tăng seq).
+    //   * xoá toàn bảng: Mst_RankPolicy_SaveX (:7284-7293) thực hiện `delete t from Mst_RankPolicy t where (1=1)`
+    //     xoá toàn bộ chính sách trước khi insert các dòng input mới.
+    //   * [] xoá hết: Nếu client gửi Lst_Mst_RankPolicy: [], không có lỗi xảy ra, bảng Mst_RankPolicy
+    //     bị XOÁ HẾT thành 0 dòng (hành vi nguồn).
+    //   * End tính từ dòng kế: Duyệt từng dòng theo thứ tự gửi lên (:7188-7248):
+    //     - Dòng KHÔNG phải cuối: PointUpEnd = PointUpBegin(kế) - 1, QtyVisitUpEnd = QtyVisitUpBegin(kế) - 1,
+    //       PointKeepEnd = PointKeepBegin(kế) - 1, QtyVisitKeepEnd = QtyVisitKeepBegin(kế) - 1 (:7219-7230).
+    //       Nếu dòng kế tiếp có trường nào null thì Convert.ToDouble ném ngoại lệ -> mã mặc định Mst_RankPolicy_Save.
+    //     - Dòng CUỐI: cả 4 cột End = 9999999999 (:7233-7236). Mọi giá trị End do client gửi lên BỊ BỎ QUA.
+    //   * Hist: Mst_RankPolicy_Perform (:6997-7094) copy toàn bộ các dòng input vào bảng Mst_RankPolicyHist
+    //     (17 cột + AutoId tự tăng).
+    //   * Kiểm tra hợp lệ:
+    //     1) Mst_CardType_CheckDB(CardType, "1", "1") -> không tồn tại: Mst_CardType_CheckDB_CardTypeNotFound (:7194-7200);
+    //        FlagActive != '1': Mst_CardType_CheckDB_FlagActiveNotMatched.
+    //     2) PointUpBegin < PointKeepBegin -> Mst_RankPolicy_Save_InvalidValue (:7201-7215).
+    //        Nếu PointUpBegin hoặc PointKeepBegin là null -> Convert.ToDouble ném lỗi -> Mst_RankPolicy_Save.
+    //     3) Trùng CardType trong input -> vi phạm PK (CardType, RankPolicyCode) -> Mst_RankPolicy_Save.
+    //   * Lưu: 1 transaction duy nhất, lỗi -> rollback + PortResult.Fail. Thành công -> Data = null (:397-398).
+    //   * NetworkID lấy từ cấu hình: IConfiguration["Biz_NetworkID"] ?? "1001" (GAP nguồn lấy từ session user).
+    //   * LogLUBy = "port", LogLUDTimeUTC = DateTime.UtcNow.
+    // ============================================================================================
+    [HttpPost("save")]
+    public async Task<IActionResult> Save([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] MstRankPolicySaveReq? req)
+    {
+        // 0. Body rỗng / null: gate :329-336 ném ServiceException("strJson null") -> mã mặc định Mst_RankPolicy_Save.
+        // Bước này xảy ra TRƯỚC khi gọi sequence nên KHÔNG tăng seq.
+        if (req == null)
+        {
+            return PortResult.Fail("Mst_RankPolicy_Save", "Check.strJson", null);
+        }
+
+        // seq tăng cả khi lỗi: Lấy sequence trong transaction RIÊNG đã commit (gate :351-371).
+        // Nhờ transaction riêng, mã sequence đã tăng sẽ không bị rollback kể cả khi bước lưu sau bị lỗi.
+        var seq = await PortSeq.NextAsync<Seq_RankPolicyCode>(_db);
+        var rankPolicyCode = PortSeq.Build("{0}RANKPOLICYCODE.{3}.{1:00000}{2}", "", seq, 100000, "", DateTime.UtcNow);
+
+        // 1. Kiểm tra bảng input Mst_RankPolicy có tồn tại không (Master.Loyalty.cs:7141)
+        // Nếu body là {} (thiếu Lst_Mst_RankPolicy) -> Mst_RankPolicy_Save_Input_Mst_RankPolicyTblNotFound.
+        // Gate :373 gọi Lst_Mst_RankPolicy.Count() khi Lst null ⇒ NullReferenceException SAU khi đã lấy seq ⇒ mã mặc định Mst_RankPolicy_Save
+        // (Mst_RankPolicy_Save_Input_Mst_RankPolicyTblNotFound :7141 không bao giờ tới được vì ToDataTable luôn tạo bảng).
+        if (req.Lst_Mst_RankPolicy == null)
+        {
+            return PortResult.Fail("Mst_RankPolicy_Save", "Check.Lst_Mst_RankPolicy", null);
+        }
+
+        var inputRows = req.Lst_Mst_RankPolicy;
+
+        // [] xoá hết: Nếu mảng rỗng -> xoá sạch toàn bộ Mst_RankPolicy, không sinh dòng nào, không lỗi (hành vi nguồn).
+        if (inputRows.Count == 0)
+        {
+            await using var txEmpty = await _db.Database.BeginTransactionAsync();
+            try
+            {
+                // xoá toàn bảng Mst_RankPolicy (Master.Loyalty.cs:7284-7293)
+                await _db.Database.ExecuteSqlRawAsync("DELETE FROM \"Mst_RankPolicy\"");
+                await txEmpty.CommitAsync();
+                return Ok(new { Success = true, Data = (object?)null });
+            }
+            catch (Exception ex)
+            {
+                await txEmpty.RollbackAsync();
+                return PortResult.Fail("Mst_RankPolicy_Save", "Exception", ex.Message);
+            }
+        }
+
+        // 3. Duyệt từng dòng theo thứ tự gửi lên để kiểm tra hợp lệ và tính toán các cột End (Master.Loyalty.cs:7188-7248)
+        var networkId = _config["Biz_NetworkID"] ?? "1001";
+        var now = DateTime.UtcNow;
+        var newPolicies = new List<Mst_RankPolicy>();
+        var newHists = new List<Mst_RankPolicyHist>();
+
+        for (int nScan = 0; nScan < inputRows.Count; nScan++)
+        {
+            var drScan = inputRows[nScan];
+            var strCardType = StdParam(drScan.CardType);
+
+            // 3.a. Mst_CardType_CheckDB(CardType, "1", "1") — :7194-7200
+            // Tra cứu Mst_CardType trong DB (so sánh Like + PortQuery.Equal không phân biệt hoa/thường)
+            var cardTypeDb = await _db.Set<Mst_CardType>().AsNoTracking()
+                .FirstOrDefaultAsync(x => EF.Functions.Like((x.CardType ?? "").ToLower(), PortQuery.Equal(strCardType ?? ""), PortQuery.Esc));
+
+            if (cardTypeDb == null)
+            {
+                return PortResult.Fail("Mst_CardType_CheckDB_CardTypeNotFound", "Check.CardType", strCardType);
+            }
+
+            // Nguồn Mst_CardType_CheckDB: `!"1".Contains(Convert.ToString(FlagActive))` — NULL/rỗng ⇒ "" ⇒ Contains("") = true ⇒ VẪN qua.
+            if (!"1".Contains(cardTypeDb.FlagActive ?? ""))
+            {
+                return PortResult.Fail("Mst_CardType_CheckDB_FlagActiveNotMatched",
+                    "Check.CardType", strCardType,
+                    "Check.strFlagActiveListToCheck", "1",
+                    "DB.FlagActive", cardTypeDb.FlagActive);
+            }
+
+            // 3.b. Convert.ToDouble(PointUpBegin) < Convert.ToDouble(PointKeepBegin) — :7201-7215
+            // Nếu PointUpBegin hoặc PointKeepBegin là null -> Convert.ToDouble ném lỗi -> mã mặc định Mst_RankPolicy_Save
+            if (!drScan.PointUpBegin.HasValue || !drScan.PointKeepBegin.HasValue)
+            {
+                return PortResult.Fail("Mst_RankPolicy_Save",
+                    "Check.DB.PointUpBegin", drScan.PointUpBegin,
+                    "Check.DB.PointKeepBegin", drScan.PointKeepBegin);
+            }
+
+            if (drScan.PointUpBegin.Value < drScan.PointKeepBegin.Value)
+            {
+                return PortResult.Fail("Mst_RankPolicy_Save_InvalidValue",
+                    "Check.DB.RankPolicyCode", rankPolicyCode,
+                    "Check.DB.CardType", strCardType,
+                    "Check.DB.PointUpBegin", drScan.PointUpBegin.Value,
+                    "Check.DB.PointKeepBegin", drScan.PointKeepBegin.Value,
+                    "Check.ErrCoditional", "PointUpBegin < PointKeepBegin");
+            }
+
+            // 3.c. End tính từ dòng kế: tính các cột End (:7219-7238). Giá trị End của client gửi lên BỊ BỎ QUA.
+            double pointUpEnd;
+            double qtyVisitUpEnd;
+            double pointKeepEnd;
+            double qtyVisitKeepEnd;
+
+            if (nScan != inputRows.Count - 1)
+            {
+                var nextRow = inputRows[nScan + 1];
+                // Dòng kế tiếp có bất kỳ giá trị nào null -> Convert.ToDouble ném lỗi -> mã mặc định Mst_RankPolicy_Save
+                if (!nextRow.PointUpBegin.HasValue || !nextRow.QtyVisitUpBegin.HasValue
+                    || !nextRow.PointKeepBegin.HasValue || !nextRow.QtyVisitKeepBegin.HasValue)
+                {
+                    return PortResult.Fail("Mst_RankPolicy_Save", "Check.NextRowValues", null);
+                }
+
+                pointUpEnd = nextRow.PointUpBegin.Value - 1;
+                qtyVisitUpEnd = nextRow.QtyVisitUpBegin.Value - 1;
+                pointKeepEnd = nextRow.PointKeepBegin.Value - 1;
+                qtyVisitKeepEnd = nextRow.QtyVisitKeepBegin.Value - 1;
+            }
+            else
+            {
+                // Dòng cuối: cả 4 cột End = 9999999999 (:7233-7236)
+                pointUpEnd = 9999999999;
+                qtyVisitUpEnd = 9999999999;
+                pointKeepEnd = 9999999999;
+                qtyVisitKeepEnd = 9999999999;
+            }
+
+            var remark = StdStr(drScan.Remark);
+
+            // Tạo entity Mst_RankPolicy (17 cột đúng DDL)
+            newPolicies.Add(new Mst_RankPolicy
+            {
+                CardType = strCardType!,
+                RankPolicyCode = rankPolicyCode,
+                NetworkID = networkId,
+                Value = drScan.Value,
+                PointUpBegin = drScan.PointUpBegin,
+                PointUpEnd = pointUpEnd,
+                QtyVisitUpBegin = drScan.QtyVisitUpBegin,
+                QtyVisitUpEnd = qtyVisitUpEnd,
+                PointKeepBegin = drScan.PointKeepBegin,
+                PointKeepEnd = pointKeepEnd,
+                QtyVisitKeepBegin = drScan.QtyVisitKeepBegin,
+                QtyVisitKeepEnd = qtyVisitKeepEnd,
+                QtyMonth = drScan.QtyMonth,
+                FlagActive = "1",
+                Remark = remark,
+                LogLUDTimeUTC = now,
+                LogLUBy = "port"
+            });
+
+            // Hist: Tạo entity Mst_RankPolicyHist (17 cột + AutoId tự tăng) — Mst_RankPolicy_Perform (:6997-7094)
+            newHists.Add(new Mst_RankPolicyHist
+            {
+                CardType = strCardType!,
+                RankPolicyCode = rankPolicyCode,
+                NetworkID = networkId,
+                Value = drScan.Value,
+                PointUpBegin = drScan.PointUpBegin,
+                PointUpEnd = pointUpEnd,
+                QtyVisitUpBegin = drScan.QtyVisitUpBegin,
+                QtyVisitUpEnd = qtyVisitUpEnd,
+                PointKeepBegin = drScan.PointKeepBegin,
+                PointKeepEnd = pointKeepEnd,
+                QtyVisitKeepBegin = drScan.QtyVisitKeepBegin,
+                QtyVisitKeepEnd = qtyVisitKeepEnd,
+                QtyMonth = drScan.QtyMonth,
+                FlagActive = "1",
+                Remark = remark,
+                LogLUDTimeUTC = now,
+                LogLUBy = "port"
+            });
+        }
+
+        // Trùng CardType trong input ⇒ nguồn chỉ lỗi khi INSERT (vi phạm PK (CardType, RankPolicyCode) :7300-7358), tức SAU khi mọi dòng đã qua kiểm tra
+        // ⇒ kiểm tra ở đây (sau vòng lặp) để giữ đúng thứ tự lỗi ; mã mặc định Mst_RankPolicy_Save.
+        var seenCardTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var np in newPolicies)
+        {
+            if (!seenCardTypes.Add(np.CardType))
+            {
+                return PortResult.Fail("Mst_RankPolicy_Save", "Check.CardTypeDuplicate", np.CardType);
+            }
+        }
+
+        // 4. Giao dịch lưu: xoá toàn bảng Mst_RankPolicy rồi insert các dòng mới và copy vào Mst_RankPolicyHist
+        // 1 transaction duy nhất (Master.Loyalty.cs:6888 _cf.db.BeginTransaction(), :6958 CommitSafety)
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // xoá toàn bảng Mst_RankPolicy (:7284-7293, delete from Mst_RankPolicy where (1=1))
+            await _db.Database.ExecuteSqlRawAsync("DELETE FROM \"Mst_RankPolicy\"");
+
+            await _db.Set<Mst_RankPolicy>().AddRangeAsync(newPolicies);
+            await _db.Set<Mst_RankPolicyHist>().AddRangeAsync(newHists);
+
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+
+            // Thành công: Data = null (gate Mst_RankPolicyController.cs:397-398)
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return PortResult.Fail("Mst_RankPolicy_Save", "Exception", ex.Message);
+        }
+    }
+
+    private static string? StdParam(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim().ToUpperInvariant();
+    private static string? StdStr(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim().Normalize();
 
     /// <summary>
     /// Thực hiện 2 bước truy vấn nghiệp vụ của Mst_RankPolicy_GetX (Master.Loyalty.cs:7697-7872).

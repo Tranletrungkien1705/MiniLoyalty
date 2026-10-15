@@ -212,3 +212,72 @@ public class Mst_RankPolicySeeder : IPortSeeder
         await db.SaveChangesAsync();
     }
 }
+
+/// <summary>
+/// Lịch sử chính sách xếp hạng — port 1:1 bảng <c>Mst_RankPolicyHist</c>.
+/// DDL: 20221026.z11.UpdDB.02.MasterData.Loyalty.sql:21-46.
+/// PK = AutoId (bigint IDENTITY(1,1) PK tự tăng).
+/// Gồm 17 cột như Mst_RankPolicy + AutoId (câu insert Master.Loyalty.cs:7028 có NetworkID).
+/// Được ghi bởi Mst_RankPolicy_Perform (Master.Loyalty.cs:6997-7094).
+/// </summary>
+public class Mst_RankPolicyHist
+{
+    public long AutoId { get; set; }                       // AutoId — bigint IDENTITY(1,1) PK
+    public string CardType { get; set; } = "";             // Mã hạng thẻ — Varchar50 NOT NULL
+    public string RankPolicyCode { get; set; } = "";       // Mã chính sách xếp hạng — Varchar50 NOT NULL
+    public string NetworkID { get; set; } = "";            // NetworkID — Varchar50 NOT NULL
+    public double? Value { get; set; }                     // Giá trị ngưỡng của chính sách — MyValue
+    public double? PointUpBegin { get; set; }              // Tích lũy điểm nâng hạng từ — MyValue
+    public double? PointUpEnd { get; set; }                // Tích lũy điểm nâng hạng đến — MyValue
+    public double? QtyVisitUpBegin { get; set; }           // Số lần ghé thăm để nâng hạng từ — MyValue
+    public double? QtyVisitUpEnd { get; set; }             // Số lần ghé thăm để nâng hạng đến — MyValue
+    public double? PointKeepBegin { get; set; }            // Tích lũy điểm duy trì từ — MyValue
+    public double? PointKeepEnd { get; set; }              // Tích lũy điểm duy trì đến — MyValue
+    public double? QtyVisitKeepBegin { get; set; }         // Số lần ghé thăm để duy trì từ — MyValue
+    public double? QtyVisitKeepEnd { get; set; }           // Số lần ghé thăm để duy trì đến — MyValue
+    public double? QtyMonth { get; set; }                  // Thời gian duy trì (tháng) — MyValue
+    public string? FlagActive { get; set; }                // Cờ hoạt động '1'/'0' — MyStatus
+    public string? Remark { get; set; }                    // Ghi chú — Varchar400
+    public DateTime? LogLUDTimeUTC { get; set; }           // Thời điểm cập nhật UTC — MyDateTime
+    public string? LogLUBy { get; set; }                   // Người cập nhật — Varchar50
+}
+
+/// <summary>
+/// Cấu hình EF cho <see cref="Mst_RankPolicyHist"/> — PK AutoId tự tăng.
+/// </summary>
+public class Mst_RankPolicyHistConfig : IEntityTypeConfiguration<Mst_RankPolicyHist>
+{
+    public void Configure(EntityTypeBuilder<Mst_RankPolicyHist> b)
+    {
+        b.ToTable("Mst_RankPolicyHist");
+        b.HasKey(x => x.AutoId);
+        b.Property(x => x.AutoId).ValueGeneratedOnAdd();
+        b.Property(x => x.CardType).IsRequired();
+        b.Property(x => x.RankPolicyCode).IsRequired();
+        b.Property(x => x.NetworkID).IsRequired();
+    }
+}
+
+/// <summary>
+/// Bảng sinh sequence cho mã chính sách xếp hạng — port 1:1 bảng <c>Seq_RankPolicyCode</c>.
+/// DDL: 20221026.CreateDatabase.sql:306-315.
+/// PK = AutoId (bigint IDENTITY(1,1) PK tự tăng).
+/// </summary>
+public class Seq_RankPolicyCode
+{
+    public long AutoId { get; set; }                       // AutoId — bigint IDENTITY(1,1) PK
+    public string? Remark { get; set; }                    // Remark — Varchar50
+}
+
+/// <summary>
+/// Cấu hình EF cho <see cref="Seq_RankPolicyCode"/> — PK AutoId tự tăng.
+/// </summary>
+public class Seq_RankPolicyCodeConfig : IEntityTypeConfiguration<Seq_RankPolicyCode>
+{
+    public void Configure(EntityTypeBuilder<Seq_RankPolicyCode> b)
+    {
+        b.ToTable("Seq_RankPolicyCode");
+        b.HasKey(x => x.AutoId);
+        b.Property(x => x.AutoId).ValueGeneratedOnAdd();
+    }
+}
