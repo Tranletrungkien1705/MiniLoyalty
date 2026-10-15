@@ -1,5 +1,12 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using MiniLoyalty.Data;
 using MiniLoyalty.Models;
 using MiniLoyalty.Models.Port;
@@ -17,6 +24,7 @@ namespace MiniLoyalty.Controllers.Port;
 //   Mst_CardTypeController.cs:418-485  Update       ->  WA_Mst_CardType_Update
 //   Mst_CardTypeController.cs:489-552  Delete       ->  WA_Mst_CardType_Delete
 //   Mst_CardTypeController.cs:554-618  DeleteMultiple -> WA_Mst_CardType_Delete
+//   Mst_CardTypeController.cs:622-768  Import       ->  WA_Mst_CardType_Create
 //   Mst_CardTypeController.cs:283-308  strWhereClause_Mst_CardType (dựng mệnh đề lọc)
 // Nguồn API:  MstCardTypeController.cs:239-308  WA_Mst_CardType_Get
 //             MstCardTypeController.cs:21-91    WA_Mst_CardType_Create
@@ -36,6 +44,11 @@ namespace MiniLoyalty.Controllers.Port;
 //     giả lập 4 FK đích -> Mst_CardType_Delete; xoá dòng -> Success = true, Data = null.
 //   * DeleteMultiple: body là mảng [{ CardType }], lặp tuần tự từng phần tử trong 1 transaction riêng biệt.
 //     Lỗi phần tử thứ k -> thoát vòng lặp ngay, "xóa một phần" là hành vi nguồn.
+//   * Import: nhận file .xlsx ([Consumes("multipart/form-data")]); file thiếu hoặc đuôi khác .xlsx -> Fail("Mst_CardType_Import", "Message", "File excel import không hợp lệ");
+//     Đọc qua PortExcel.ReadSheet: không có dòng -> "File excel import không có dữ liệu"; columnCount != 3 -> "File excel import không hợp lệ";
+//     Kiểm tra TẤT CẢ dòng trước khi tạo: CardType rỗng -> "Mã hạng thẻ không được trống", CardTypeName rỗng -> "Tên hạng thẻ không được trống", Value rỗng -> "Giá trị không được trống";
+//     Duyệt từng dòng: gọi CreateXAsync độc lập (mỗi dòng 1 transaction riêng); lỗi dòng k dừng ngay và trả lỗi dòng đó (import một phần, các dòng trước k đã lưu);
+//     Thành công Data = null (:748-750).
 // ============================================================================================
 
 /// <summary>Port 1:1 <c>Mst_CardTypeSearch</c> — tham số lọc + phân trang của màn.</summary>
@@ -95,7 +108,7 @@ public class MstCardTypeDeleteReq
 [ApiController]
 [Route("api/mst_cardtype")]
 [Produces("application/json")]
-public class Mst_CardTypeControllerPort(AppDbContext db) : ControllerBase
+public class Mst_CardTypeControllerPort(AppDbContext db, IConfiguration config) : ControllerBase
 {
     [HttpPost("search")]
     public async Task<IActionResult> Search([FromBody] MstCardTypeSearchReq? req)
@@ -259,6 +272,36 @@ public class Mst_CardTypeControllerPort(AppDbContext db) : ControllerBase
             return PortResult.Fail("Mst_CardType_Create", "Check.strJson", null);
         }
 
+        // Gọi CreateXAsync thực hiện nghiệp vụ tạo (1 transaction / lần)
+        var err = await CreateXAsync(req.CardType, req.NetworkID, req.CardTypeName, req.Value);
+        if (err != null)
+        {
+            return err;
+        }
+
+        // 8. Thành công: gate :400-401 SetSuccess + Data = null.
+        return Ok(new { Success = true, Data = (object?)null });
+    }
+
+    /// <summary>
+    /// Nghiệp vụ tạo 1 loại thẻ — 1 transaction riêng biệt. Dùng chung cho Create (#90) và Import (#94, gọi từng dòng).
+    /// Nguồn: WA_Mst_CardType_Create (MstCardTypeController.cs:21-91) -> WAS_Mst_CardType_Create (Master.Loyalty.cs:5738-5820)
+    /// -> Mst_CardType_Create (Master.Loyalty.cs:5821-5967) -> Mst_CardType_CreateX (Master.Loyalty.cs:5968-6099)
+    /// -> Mst_CardType_CheckDB (Master.Loyalty.cs:5264-5325).
+    ///
+    /// Thứ tự kiểm tra:
+    ///   1. Chuẩn hoá: strCardType = StdParam(cardType), strCardTypeName = StdStr(name), strNetworkID = StdParam(networkId)
+    ///   2. Parse Value = ConvertToDouble(valueRaw) -> nếu lỗi ném mã ErridnLoyalty.Mst_CardType_Create (:6002)
+    ///   3. CardType rỗng -> ErridnLoyalty.Mst_CardType_Create_InvalidCardType (:6011-6021)
+    ///   4. CheckDB trùng CardType -> ErridnLoyalty.Mst_CardType_CheckDB_CardTypeExist (:6023-6029)
+    ///   5. Value <= 0 -> ErridnLoyalty.Mst_CardType_Create_InvalidValue (:6031-6041)
+    ///   6. Trùng Value trong DB -> ErridnLoyalty.Mst_CardType_Create_InvalidValue (:6043-6066)
+    ///   7. Giả lập NOT NULL của DDL: NetworkID rỗng / CardTypeName rỗng -> ErridnLoyalty.Mst_CardType_Create (:6086-6090)
+    ///   8. Lưu 7 cột Mst_CardType, commit transaction (:6076-6090).
+    /// Trả null nếu thành công; trả IActionResult (PortResult.Fail) nếu thất bại.
+    /// </summary>
+    private async Task<IActionResult?> CreateXAsync(string? cardType, string? networkId, string? name, object? valueRaw)
+    {
         // 2. Mở 1 transaction cho toàn bộ nghiệp vụ (Master.Loyalty.cs:5861 _cf.db.BeginTransaction()).
         await using var tx = await db.Database.BeginTransactionAsync();
         try
@@ -266,20 +309,20 @@ public class Mst_CardTypeControllerPort(AppDbContext db) : ControllerBase
             // 3. Chuẩn hoá input (Master.Loyalty.cs:5999-6002).
             //    StdParam = Trim().ToUpper(), rỗng -> null (05.Refs.Biz\Biz\Loyalty.TVO\Loyalty.TVO.Utils\Utils.cs:29).
             //    StdStr   = Trim().Normalize(), rỗng -> null (cùng tệp Utils.cs:29).
-            string? strCardType = StdParam(req.CardType);
-            string? strCardTypeName = StdStr(req.CardTypeName);
-            string? strNetworkID = StdParam(req.NetworkID);
+            string? strCardType = StdParam(cardType);
+            string? strCardTypeName = StdStr(name);
+            string? strNetworkID = StdParam(networkId);
 
             // Value = Convert.ToDouble(objValue) (:6002): null -> 0; chuỗi không phải số -> lỗi -> mã mặc định.
             double dblValue;
             try
             {
-                dblValue = ConvertToDouble(req.Value);
+                dblValue = ConvertToDouble(valueRaw);
             }
             catch (Exception)
             {
                 await tx.RollbackAsync();
-                return PortResult.Fail("Mst_CardType_Create", "Check.objValue", req.Value?.ToString());
+                return PortResult.Fail("Mst_CardType_Create", "Check.objValue", valueRaw?.ToString());
             }
 
             // 4.1. CardType null/rỗng -> Mst_CardType_Create_InvalidCardType (:6011-6021).
@@ -347,8 +390,7 @@ public class Mst_CardTypeControllerPort(AppDbContext db) : ControllerBase
             // 7. Commit (Master.Loyalty.cs:5930 CommitSafety).
             await tx.CommitAsync();
 
-            // 8. Thành công: gate :400-401 SetSuccess + Data = null.
-            return Ok(new { Success = true, Data = (object?)null });
+            return null;
         }
         catch (Exception)
         {
@@ -683,31 +725,186 @@ public class Mst_CardTypeControllerPort(AppDbContext db) : ControllerBase
         }
     }
 
+    // ============================================================================================
+    // Import — nguồn gate Mst_CardTypeController.cs:622-768 -> API WA_Mst_CardType_Create
+    // (MstCardTypeController.cs:21-91) -> biz WAS_Mst_CardType_Create (Master.Loyalty.cs:5738-5820)
+    // -> Mst_CardType_Create (Master.Loyalty.cs:5821-5967) -> Mst_CardType_CreateX (Master.Loyalty.cs:5968-6099).
+    //
+    // GIẢ ĐỊNH (kế thừa từ Data/PortExcel.cs):
+    //   - Định dạng file Excel: dòng 1 = tiêu đề (đúng file ExportTemplate sinh ra), dữ liệu bắt đầu từ ô A2 (firstDataRow = 2).
+    //   - Cột ánh xạ theo vị trí: cột 1 = CardType, cột 2 = CardTypeName, cột 3 = Value (GetImportDicColumsTemplate có 3 cột:
+    //     CardType -> "Mã hạng thẻ (*)", CardTypeName -> "Tên hạng thẻ", Value -> "Thứ tự").
+    //
+    // Quy trình và thứ tự kiểm tra:
+    //   1. Kiểm tra file upload: gate Mst_CardTypeController.cs:646-651
+    //      - Thiếu file hoặc file rỗng hoặc đuôi file != ".xlsx" -> Fail("Mst_CardType_Import", "Message", "File excel import không hợp lệ")
+    //   2. Đọc file bằng PortExcel.ReadSheet(stream, new[] { "CardType", "CardTypeName", "Value" }):
+    //      - Bảng không có dòng dữ liệu (table == null || table.Rows.Count == 0) -> Fail("Mst_CardType_Import", "Message", "File excel import không có dữ liệu") (:663, :752-756)
+    //      - Số cột tiêu đề != GetImportDicColumsTemplate().Count (3 cột) -> Fail("Mst_CardType_Import", "Message", "File excel import không hợp lệ") (:665-669)
+    //   3. Kiểm tra TẤT CẢ các dòng TRƯỚC khi tạo (#region["Check null"] :672-699):
+    //      - CardType rỗng / khoảng trắng -> Fail("Mst_CardType_Import", "Message", "Mã hạng thẻ không được trống") (:675-679)
+    //      - CardTypeName rỗng / khoảng trắng -> Fail("Mst_CardType_Import", "Message", "Tên hạng thẻ không được trống") (:680-684)
+    //      - Value rỗng / khoảng trắng -> Fail("Mst_CardType_Import", "Message", "Giá trị không được trống") (:685-689)
+    //      Nếu có bất kỳ dòng nào vi phạm, dừng ngay và KHÔNG có dòng nào được tạo vào CSDL.
+    //   4. Lưu từng dòng (hành vi "import một phần"):
+    //      - NetworkID lấy từ cấu hình: IConfiguration["Biz_NetworkID"] ?? "1001" (GAP: nguồn lấy NetworkID = orgUserUI.NetworkId từ user đăng nhập :728).
+    //      - Duyệt từng dòng theo thứ tự, gọi CreateXAsync(cardType, networkId, name, value) riêng cho mỗi dòng (mỗi dòng 1 transaction biz riêng biệt: gate :725-746).
+    //      - Nếu dòng thứ k gặp lỗi (vd trùng mã Mst_CardType_CheckDB_CardTypeExist, sai Value Mst_CardType_Create_InvalidValue),
+    //        vòng lặp dừng ngay lập tức, trả về đúng lỗi của CreateXAsync cho dòng k.
+    //      - CÁC DÒNG TRƯỚC k ĐÃ ĐƯỢC COMMIT VÀO DB (không rollback các dòng đã tạo trước đó).
+    //      - Các dòng sau k không được duyệt.
+    //   5. Thành công: trả Ok({ Success = true, Data = null }) (:748-750).
+    //
+    // Bỏ qua có chủ đích (loại Đ):
+    //   - CheckGatewayAuthentication, CheckAuthorize (:633-634)
+    //   - Nguồn lưu file tạm xuống đĩa (FileUtils.SaveTempFile :654) -> ở đây đọc trực tiếp từ stream qua ClosedXML
+    //   - Session người dùng orgUserUI (:632, :728, :736-740).
+    // ============================================================================================
+    [HttpPost("import")]
+    [Consumes("multipart/form-data")]
+    public async Task<IActionResult> Import(IFormFile? file)
+    {
+        // 1. Kiểm tra file upload: gate Mst_CardTypeController.cs:646-651
+        if (file == null || file.Length == 0)
+        {
+            return PortResult.Fail("Mst_CardType_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+        if (ext != ".xlsx")
+        {
+            return PortResult.Fail("Mst_CardType_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        // 2. Đọc bảng tính bằng PortExcel.ReadSheet (giả định định dạng file Excel từ PortExcel)
+        int columnCount;
+        List<Dictionary<string, string?>> rows;
+        try
+        {
+            using var stream = file.OpenReadStream();
+            (columnCount, rows) = PortExcel.ReadSheet(stream, GetImportDicColumsTemplate().Keys.ToArray());
+        }
+        catch
+        {
+            return PortResult.Fail("Mst_CardType_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        // Kiểm tra có dữ liệu hay không: gate :663, :752-756 (table == null || table.Rows.Count == 0)
+        if (rows.Count == 0)
+        {
+            return PortResult.Fail("Mst_CardType_Import", "Message", "File excel import không có dữ liệu");
+        }
+
+        // Kiểm tra số cột dòng tiêu đề so với GetImportDicColumsTemplate().Count (3 cột): gate :665-669
+        if (columnCount != GetImportDicColumsTemplate().Count)
+        {
+            return PortResult.Fail("Mst_CardType_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        // 3. Kiểm tra TẤT CẢ các dòng TRƯỚC khi tạo (Check null: gate Mst_CardTypeController.cs:672-699)
+        foreach (var r in rows)
+        {
+            var cardType = r.GetValueOrDefault("CardType");
+            if (string.IsNullOrWhiteSpace(cardType))
+            {
+                return PortResult.Fail("Mst_CardType_Import", "Message", "Mã hạng thẻ không được trống");
+            }
+
+            var cardTypeName = r.GetValueOrDefault("CardTypeName");
+            if (string.IsNullOrWhiteSpace(cardTypeName))
+            {
+                return PortResult.Fail("Mst_CardType_Import", "Message", "Tên hạng thẻ không được trống");
+            }
+
+            var value = r.GetValueOrDefault("Value");
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return PortResult.Fail("Mst_CardType_Import", "Message", "Giá trị không được trống");
+            }
+        }
+
+        // 4. Lưu từng dòng tuần tự: mỗi dòng 1 transaction riêng (hành vi "import một phần": gate :725-746)
+        // GAP: nguồn lấy NetworkID = orgUserUI.NetworkId (:728) từ user đăng nhập; đích chưa có user -> dùng IConfiguration["Biz_NetworkID"] ?? "1001"
+        var networkId = config["Biz_NetworkID"] ?? "1001";
+        foreach (var r in rows)
+        {
+            var cardType = r.GetValueOrDefault("CardType");
+            var cardTypeName = r.GetValueOrDefault("CardTypeName");
+            var value = r.GetValueOrDefault("Value");
+
+            var err = await CreateXAsync(cardType, networkId, cardTypeName, value);
+            if (err != null)
+            {
+                // Lỗi ở dòng k -> thoát ngay, trả đúng lỗi của Create, các dòng trước k đã tạo thành công
+                return err;
+            }
+        }
+
+        // Thành công: gate :748-750
+        return Ok(new
+        {
+            Success = true,
+            Data = (object?)null
+        });
+    }
+
     /// <summary>
     /// Chuyển Value như <c>Convert.ToDouble(objValue)</c> của nguồn (Master.Loyalty.cs:6002):
     /// null/thiếu -> 0; số -> giá trị; chuỗi số -> parse; chuỗi không phải số -> ném lỗi.
     /// </summary>
-    private static double ConvertToDouble(System.Text.Json.JsonElement? value)
+    private static double ConvertToDouble(object? value)
     {
         if (value == null) return 0d;
-        var el = value.Value;
-        switch (el.ValueKind)
+        if (value is System.Text.Json.JsonElement el)
         {
-            case System.Text.Json.JsonValueKind.Number:
-                return el.GetDouble();
-            case System.Text.Json.JsonValueKind.String:
-                return Convert.ToDouble(el.GetString());
-            case System.Text.Json.JsonValueKind.Null:
-            case System.Text.Json.JsonValueKind.Undefined:
-                return 0d;
-            case System.Text.Json.JsonValueKind.True:
-                return 1d;
-            case System.Text.Json.JsonValueKind.False:
-                return 0d;
-            default:
-                return Convert.ToDouble(el.ToString());
+            switch (el.ValueKind)
+            {
+                case System.Text.Json.JsonValueKind.Number:
+                    return el.GetDouble();
+                case System.Text.Json.JsonValueKind.String:
+                    var str = el.GetString();
+                    if (string.IsNullOrWhiteSpace(str)) return 0d;
+                    if (double.TryParse(str, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var d1)) return d1;
+                    return Convert.ToDouble(str);
+                case System.Text.Json.JsonValueKind.Null:
+                case System.Text.Json.JsonValueKind.Undefined:
+                    return 0d;
+                case System.Text.Json.JsonValueKind.True:
+                    return 1d;
+                case System.Text.Json.JsonValueKind.False:
+                    return 0d;
+                default:
+                    var sEl = el.ToString();
+                    if (double.TryParse(sEl, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var d2)) return d2;
+                    return Convert.ToDouble(sEl);
+            }
         }
+        if (value is double d) return d;
+        if (value is int i) return i;
+        if (value is long l) return l;
+        if (value is decimal m) return (double)m;
+        if (value is float f) return f;
+        if (value is string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return 0d;
+            if (double.TryParse(s, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var dVal))
+                return dVal;
+            return Convert.ToDouble(s);
+        }
+        return Convert.ToDouble(value);
     }
+
+    #region DicColums
+    private static Dictionary<string, string> GetImportDicColumsTemplate()
+    {
+        return new Dictionary<string, string>
+        {
+            { "CardType", "Mã hạng thẻ (*)" },
+            { "CardTypeName", "Tên hạng thẻ" },
+            { "Value", "Thứ tự" }
+        };
+    }
+    #endregion
 
     #region Helper chuẩn hoá input (05.Refs.Biz\Biz\Loyalty.TVO\Loyalty.TVO.Utils\Utils.cs)
     /// <summary>
