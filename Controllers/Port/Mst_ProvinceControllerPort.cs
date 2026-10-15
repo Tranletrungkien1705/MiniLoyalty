@@ -4,24 +4,28 @@ using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using MiniLoyalty.Data;
 using MiniLoyalty.Models.Port;
 
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục tỉnh/thành (Mst_Province) của dự án nguồn 2022.7.Loyalty (#213, #214, #215).
+// PORT 1:1 — màn danh mục tỉnh/thành (Mst_Province) của dự án nguồn 2022.7.Loyalty (#213, #214, #215, #216).
 //
 // Nguồn controller (tầng gate):
 //   Mst_ProvinceController.cs:31-111   Search              -> WA_Mst_Province_Get
 //   Mst_ProvinceController.cs:113-176  GetByProvinceCode   -> WA_Mst_Province_Get
 //   Mst_ProvinceController.cs:178-241  GetAllActive        -> WA_Mst_Province_Get
+//   Mst_ProvinceController.cs:245-305  Create              -> WA_Mst_Province_Create
 //   Mst_ProvinceController.cs:735-759  strWhereClause_Mst_Province (mệnh đề lọc Search, GetAllActive)
 //   Mst_ProvinceController.cs:761-776  strWhereClause_Mst_Province_By_ProvinceCode (mệnh đề lọc By ProvinceCode)
 // Nguồn API:
 //   MstProvinceController.cs:20-91     WA_Mst_Province_Get
+//   MstProvinceController.cs:94-165    WA_Mst_Province_Create
 // Nguồn biz:
 //   Master.Loyalty.cs (WAS_Mst_Province_Get -> Mst_Province_Get -> Mst_Province_Get SQL: :442-488)
+//   Master.cs:1215-1297 (WAS_Mst_Province_Create) -> Master.cs:591-743 (Mst_Province_Create) -> Master.cs:27-91 (Mst_Province_CheckDB)
 //
 // GIỮ ĐÚNG NGUỒN:
 //   * Endpoint là POST (nguồn [AcceptVerbs("POST")]).
@@ -34,6 +38,19 @@ namespace MiniLoyalty.Controllers.Port;
 //   * Chia trang theo mp.ProvinceCode asc (:449), select cuối sắp theo t.MyIdxSeq asc (:488).
 //   * MyIdxSeq 0-based identity (:443).
 //   * PageSize = 0 -> DataList rỗng, PageCount = 0 (gate :86-94).
+//   * Create: kiểm tra thứ tự: (1) mã rỗng -> InvalidProvinceCode, (2) CheckDB trùng -> ProvinceExist,
+//     (3) tên rỗng -> InvalidProvinceName; mã lưu chữ hoa qua StdParam, tên chỉ Trim (không Normalize);
+//     NetworkID cấu hình Biz_NetworkID, mặc định 1001; FlagActive "1", LogLUBy "port", LogLUDTimeUTC = UtcNow;
+//     body rỗng -> ServiceException ("strJson null") -> Fail("Mst_Province_Create").
+//
+// Bỏ qua có chủ đích (loại Đ):
+//   - CheckGatewayAuthentication: gate Mst_ProvinceController.cs:264; API MstProvinceController.cs:117-122
+//   - CheckAuthorize: gate Mst_ProvinceController.cs:265 (hệ thống đích chưa có hệ phân quyền)
+//   - Nguồn gọi bằng tài khoản hệ thống viết cứng (tài khoản + mật khẩu viết cứng tại :279-282 — KHÔNG chép giá trị),
+//     đích chưa có phân quyền; KHÔNG chép thông tin đăng nhập vào mã
+//   - Ghi RequestLog/ReturnLog: Master.cs:628-635, 733-740
+//   - LogLUBy gán cố định "port" do hệ thống đích chưa có session người dùng (Master.cs:693)
+//   - Biz_NetworkID lấy từ cấu hình IConfiguration, mặc định "1001" nếu thiếu (Common.cs:39, 124; Master.cs:689)
 // ============================================================================================
 
 /// <summary>Port 1:1 <c>Mst_ProvinceSearch</c> — tham số lọc + phân trang của màn (Mst_ProvinceController.cs:31, 58-63).</summary>
@@ -52,10 +69,17 @@ public class MstProvinceGetByProvinceCodeReq
     public string? ProvinceCode { get; set; }         // Mã tỉnh/thành cần lấy — :135-138
 }
 
+/// <summary>Port 1:1 <c>Create</c> — body nhận ProvinceCode, ProvinceName (Mst_ProvinceController.cs:245-305).</summary>
+public class MstProvinceCreateReq
+{
+    public string? ProvinceCode { get; set; }         // Mã tỉnh/thành — Mst_Province.cs:11, Master.cs:640
+    public string? ProvinceName { get; set; }         // Tên tỉnh/thành — Mst_Province.cs:15, Master.cs:641
+}
+
 [ApiController]
 [Route("api/mst_province")]
 [Produces("application/json")]
-public class Mst_ProvinceControllerPort(AppDbContext db) : ControllerBase
+public class Mst_ProvinceControllerPort(AppDbContext db, IConfiguration config) : ControllerBase
 {
     [HttpPost("search")]
     public async Task<IActionResult> Search([FromBody] MstProvinceSearchReq? req)
@@ -116,6 +140,103 @@ public class Mst_ProvinceControllerPort(AppDbContext db) : ControllerBase
     {
         var (_, rows) = await GetXAsync(null, "1", 0, 123456000, null);
         return Ok(new { Success = true, Data = new { Lst_Mst_Province = rows.Count > 0 ? rows : null } });
+    }
+
+    // ============================================================================================
+    // Create — nguồn gate Mst_ProvinceController.cs:245-305 -> API WA_Mst_Province_Create
+    // (MstProvinceController.cs:94-165) -> biz WAS_Mst_Province_Create (Master.cs:1215-1297)
+    // -> Mst_Province_Create (Master.cs:591-743) -> Mst_Province_CheckDB (Master.cs:27-91).
+    //
+    // Quy trình và thứ tự kiểm tra:
+    //   1. Body rỗng / null: gate :254-261 -> ServiceException("strJson null") -> Fail("Mst_Province_Create")
+    //   2. Chuẩn hoá:
+    //      - strProvinceCode = StdParam(objProvinceCode) (:640: Trim + ToUpper, rỗng -> null)
+    //      - strProvinceName = string.Format("{0}", objProvinceName).Trim() (:641: chỉ Trim, không Normalize)
+    //   3. Kiểm tra mã: if (strProvinceCode == null || strProvinceCode.Length < 1)
+    //      -> Fail("Mst_Province_Create_InvalidProvinceCode", "Check.strProvinceCode", strProvinceCode) (:649-659)
+    //   4. Kiểm tra tồn tại trong DB: Mst_Province_CheckDB với Flag "0" (:660-666, :64-74)
+    //      nếu đã có -> Fail("Mst_Province_CheckDB_ProvinceExist", "Check.ProvinceCode", strProvinceCode)
+    //   5. Kiểm tra tên: if (strProvinceName.Length < 1)
+    //      -> Fail("Mst_Province_Create_InvalidProvinceName", "Check.strProvinceName", strProvinceName) (:668-678)
+    //   6. Lưu 6 cột Mst_Province (:687-701):
+    //      ProvinceCode = strProvinceCode, NetworkID = config["Biz_NetworkID"] ?? "1001",
+    //      ProvinceName = strProvinceName, FlagActive = "1", LogLUDTimeUTC = UtcNow, LogLUBy = "port".
+    //   7. Commit và trả Ok({ Success = true, Data = null }) (:291-292).
+    // ============================================================================================
+    [HttpPost("create")]
+    public async Task<IActionResult> Create([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] MstProvinceCreateReq? req)
+    {
+        // 1. Kiểm tra body rỗng / null: gate Mst_ProvinceController.cs:254-261
+        if (req == null)
+        {
+            return PortResult.Fail("Mst_Province_Create", "Check.strJson", null);
+        }
+
+        // Bắt đầu Transaction toàn bộ quá trình tạo (Master.cs:625 _cf.db.BeginTransaction())
+        await using var tx = await db.Database.BeginTransactionAsync();
+        try
+        {
+            // 2. Chuẩn hoá dữ liệu input (Master.cs:640-641):
+            // strProvinceCode = StdParam(objProvinceCode) (Trim + ToUpper, rỗng -> null)
+            // strProvinceName = string.Format("{0}", objProvinceName).Trim() (CHỈ Trim, KHÔNG Normalize; null -> "")
+            var strProvinceCode = StdParam(req.ProvinceCode);
+            var strProvinceName = string.Format("{0}", req.ProvinceName).Trim();
+
+            // 3. Kiểm tra mã tỉnh/thành: Master.cs:649-659
+            if (string.IsNullOrEmpty(strProvinceCode))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_Province_Create_InvalidProvinceCode", "Check.strProvinceCode", strProvinceCode);
+            }
+
+            // 4. Kiểm tra tồn tại mã tỉnh/thành mới: Master.cs:660-666 -> Mst_Province_CheckDB (Master.cs:27-91)
+            var exists = await db.Set<Mst_Province>().AnyAsync(x =>
+                EF.Functions.Like((x.ProvinceCode ?? "").ToLower(), PortQuery.Equal(strProvinceCode), PortQuery.Esc));
+            if (exists)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_Province_CheckDB_ProvinceExist", "Check.ProvinceCode", strProvinceCode);
+            }
+
+            // 5. Kiểm tra tên tỉnh/thành: Master.cs:668-678
+            if (strProvinceName.Length < 1)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_Province_Create_InvalidProvinceName", "Check.strProvinceName", strProvinceName);
+            }
+
+            // 6. Lưu dữ liệu bảng Mst_Province: Master.cs:687-701
+            var networkId = config["Biz_NetworkID"] ?? "1001"; // Cấu hình Biz_NetworkID, mặc định 1001 (Common.cs:39, 124)
+            var now = DateTime.UtcNow;
+
+            var newProvince = new Mst_Province
+            {
+                ProvinceCode = strProvinceCode,                    // :688 ProvinceCode
+                NetworkID = networkId,                             // :689 NetworkID = nNetworkID
+                ProvinceName = strProvinceName,                    // :690 ProvinceName
+                FlagActive = "1",                                  // :691 FlagActive = TConst.Flag.Active ("1")
+                LogLUDTimeUTC = now,                               // :692 LogLUDTimeUTC = dtimeSys
+                LogLUBy = "port"                                   // :693 LogLUBy ("port" - đích chưa có session user, comment loại Đ)
+            };
+
+            await db.Set<Mst_Province>().AddAsync(newProvince);
+            await db.SaveChangesAsync();
+
+            // Commit Transaction (Master.cs:706 TDALUtils.DBUtils.CommitSafety)
+            await tx.CommitAsync();
+
+            // Thành công trả về Success = true, Data = null: gate Mst_ProvinceController.cs:291-292
+            return Ok(new
+            {
+                Success = true,
+                Data = (object?)null
+            });
+        }
+        catch (Exception)
+        {
+            await tx.RollbackAsync();
+            throw;
+        }
     }
 
     /// <summary>
@@ -180,4 +301,18 @@ public class Mst_ProvinceControllerPort(AppDbContext db) : ControllerBase
 
         return (itemCount, rows);
     }
+
+    #region Helper chuẩn hoá input (05.Refs.Biz\Biz\Loyalty.TVO\Loyalty.TVO.Utils\Utils.cs)
+    /// <summary>
+    /// Chuẩn hoá tham số mã: Trim, ToUpper, rỗng -> null.
+    /// Dùng cho mã (ProvinceCode...).
+    /// Nguồn tham chiếu: 05.Refs.Biz\Biz\Loyalty.TVO\Loyalty.TVO.Utils\Utils.cs:29
+    /// </summary>
+    private static string? StdParam(object? val)
+    {
+        if (val == null) return null;
+        var s = val.ToString()?.Trim();
+        return string.IsNullOrEmpty(s) ? null : s.ToUpperInvariant();
+    }
+    #endregion
 }
