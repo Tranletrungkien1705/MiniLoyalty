@@ -17,10 +17,12 @@ namespace MiniLoyalty.Controllers.Port;
 //   Mst_CarBrandController.cs:283-308  strWhereClause_Mst_CarBrand (mệnh đề lọc Search)
 //   Mst_CarBrandController.cs:332-419  Create              -> WA_Mst_CarBrand_Create (#80)
 //   Mst_CarBrandController.cs:421-488  Update              -> WA_Mst_CarBrand_Update (#81)
+//   Mst_CarBrandController.cs:492-555  Delete              -> WA_Mst_CarBrand_Delete (#82)
 // Nguồn API:
 //   MstCarBrandController.cs:238-307   WA_Mst_CarBrand_Get
 //   MstCarBrandController.cs:20-90     WA_Mst_CarBrand_Create
 //   MstCarBrandController.cs:92-162    WA_Mst_CarBrand_Update
+//   MstCarBrandController.cs:165-235   WA_Mst_CarBrand_Delete
 // Nguồn biz:
 //   Master.Loyalty.cs:93-193   WAS_Mst_CarBrand_Get
 //   Master.Loyalty.cs:194-346  Mst_CarBrand_Get
@@ -31,6 +33,9 @@ namespace MiniLoyalty.Controllers.Port;
 //   Master.Loyalty.cs:829-913  WAS_Mst_CarBrand_Update
 //   Master.Loyalty.cs:914-1066 Mst_CarBrand_Update
 //   Master.Loyalty.cs:1068-1156 Mst_CarBrand_UpdateX
+//   Master.Loyalty.cs:1157-1235 WAS_Mst_CarBrand_Delete
+//   Master.Loyalty.cs:1236-1372 Mst_CarBrand_Delete
+//   Master.Loyalty.cs:1374-1430 Mst_CarBrand_DeleteX
 //   Master.Loyalty.cs:28-91    Mst_CarBrand_CheckDB
 //
 // GIỮ ĐÚNG NGUỒN:
@@ -45,14 +50,18 @@ namespace MiniLoyalty.Controllers.Port;
 //   * Update: Ft_Cols_Upd cố định ở gate -> luôn cập nhật 3 cột; thiếu FlagActive -> '0' (StdFlag).
 //     BrandName qua StdStr (không viết hoa, khác Create #80 dùng StdParam).
 //     NetworkID và BrandCode không đổi.
+//   * Delete: kiểm tra rỗng tại gate -> invalid_Brandcode (chữ 'c' viết thường, nguyên văn nguồn);
+//     CheckDB(BrandCode, FlagExist "1") -> Mst_CarBrand_CheckDB_BrandNotFound;
+//     khong co FK toi Mst_CarBrand trong DDL — dong xe co the mo coi (xóa hãng đang được dòng xe dùng vẫn thành công);
+//     xoá dòng -> Success = true, Data = null.
 //
 // Bỏ qua có chủ đích (loại Đ):
-//   - CheckGatewayAuthentication: gate :34, :352, :441; API MstCarBrandController.cs:259-264, :42, :114-119
-//   - CheckAuthorize: gate :35, :353, :442 (hệ thống đích chưa có hệ phân quyền)
+//   - CheckGatewayAuthentication: gate :34, :352, :441, :501; API MstCarBrandController.cs:259-264, :42, :114-119, :187-192
+//   - CheckAuthorize: gate :35, :353, :442, :502 (hệ thống đích chưa có hệ phân quyền)
 //   - Nguồn gọi bằng tài khoản hệ thống viết cứng (tài khoản + mật khẩu viết cứng — KHÔNG chép giá trị),
 //     đích chưa có phân quyền; KHÔNG chép thông tin đăng nhập vào mã
-//   - Ghi RequestLog/ReturnLog: Master.Loyalty.cs:238-245, 336-343, 628-635, 721-728, 960-967, 1056-1063
-//   - Sys_User_CheckAuthorize: Master.Loyalty.cs:251-264, 647-660, 979-992
+//   - Ghi RequestLog/ReturnLog: Master.Loyalty.cs:238-245, 336-343, 628-635, 721-728, 960-967, 1056-1063, 1272-1279, 1362-1369
+//   - Sys_User_CheckAuthorize: Master.Loyalty.cs:251-264, 647-660, 979-992, 1291-1305
 // ============================================================================================
 
 /// <summary>Port 1:1 <c>Mst_CarBrandSearch</c> — tham số lọc + phân trang của màn (Mst_CarBrandController.cs:25, 52-56).</summary>
@@ -95,6 +104,14 @@ public class MstCarBrandUpdateReq
     public string? BrandName { get; set; }            // Tên hãng xe (StdStr, không viết hoa) — :879, :1111
     public string? Remark { get; set; }               // Ghi chú (StdStr) — :880, :1112
     public string? FlagActive { get; set; }           // Cờ hoạt động (StdFlag, "1" -> "1", khác -> "0") — :881, :1113
+}
+
+/// <summary>
+/// Port 1:1 <c>Delete</c> — body chỉ có BrandCode (Mst_CarBrandController.cs:492-555).
+/// </summary>
+public class MstCarBrandDeleteReq
+{
+    public string? BrandCode { get; set; }            // Mã hãng xe cần xoá — :492, :516
 }
 
 [ApiController]
@@ -439,6 +456,90 @@ public class Mst_CarBrandControllerPort : ControllerBase
             await tx.CommitAsync();
 
             // 8. Thành công: gate Mst_CarBrandController.cs:474-475 SetSuccess + Data = null.
+            return Ok(new
+            {
+                Success = true,
+                Data = (object?)null
+            });
+        }
+        catch (Exception)
+        {
+            await tx.RollbackAsync();
+            throw;
+        }
+    }
+
+    // ============================================================================================
+    // Delete — nguồn Mst_CarBrandController.cs:492-555 (gate) -> MstCarBrandController.cs:165-235 (API)
+    //   -> Master.Loyalty.cs:1157-1235 (WAS_Mst_CarBrand_Delete) -> :1236-1372 (Mst_CarBrand_Delete)
+    //   -> :1374-1430 (Mst_CarBrand_DeleteX) -> :28-91 (Mst_CarBrand_CheckDB).
+    //
+    // GIỮ ĐÚNG NGUỒN:
+    //   * Kiểm tra mã rỗng tại gate (Mst_CarBrandController.cs:511, 541): BrandCode rỗng -> ném
+    //     ServiceException("invalid_Brandcode", "invalid_Brandcode") (GIỮ NGUYÊN chữ "Brandcode" viết thường 'c' từ nguồn).
+    //   * Mở 1 transaction cho toàn bộ nghiệp vụ (Master.Loyalty.cs:1269 _cf.db.BeginTransaction()).
+    //   * Chuẩn hoá mã qua StdParam (:1400): Trim + ToUpper, rỗng -> null.
+    //   * CheckDB(BrandCode, FlagExist "1", "") (:1406-1412 -> Mst_CarBrand_CheckDB :28-91):
+    //     FlagExist "1" + KHÔNG có dòng (hoặc strBrandCode rỗng) -> ErridnLoyalty.Mst_CarBrand_CheckDB_BrandNotFound.
+    //   * Ràng buộc khoá ngoại: không có FK tới Mst_CarBrand trong DDL — dòng xe có thể mồ côi
+    //     (khong co FK toi Mst_CarBrand trong DDL — dong xe co the mo coi).
+    //     Mst_CarModel.BrandCode trỏ tên nhưng KHÔNG có ràng buộc -> xóa hãng đang được dòng xe dùng VẪN THÀNH CÔNG.
+    //   * Xoá dòng Mst_CarBrand (:1421-1427 dtDB_Mst_CarBrand.Rows[0].Delete()) và CommitSafety (:1335).
+    //   * Thành công: gate :535-536 SetSuccess + Data = null.
+    //
+    // Bỏ qua có chủ đích (loại Đ):
+    //   * CheckGatewayAuthentication/CheckAuthorize (gate :501-502), Sys_User_CheckAuthorize (:1291-1305):
+    //     hệ thống đích chưa có hệ phân quyền.
+    //   * Ghi RequestLog/ReturnLog (:1272-1279, :1362-1369).
+    // ============================================================================================
+    [HttpPost("delete")]
+    public async Task<IActionResult> Delete([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] MstCarBrandDeleteReq? req)
+    {
+        // 1. Kiểm tra mã rỗng tại gate (Mst_CarBrandController.cs:511, 541):
+        //    Giữ nguyên chữ "Brandcode" viết thường 'c': ServiceException("invalid_Brandcode", "invalid_Brandcode")
+        if (string.IsNullOrWhiteSpace(req?.BrandCode))
+        {
+            return PortResult.Fail("invalid_Brandcode", "Check.BrandCode", req?.BrandCode);
+        }
+
+        // 2. Mở 1 transaction cho toàn bộ nghiệp vụ (Master.Loyalty.cs:1269 _cf.db.BeginTransaction()).
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // 3. Chuẩn hoá mã qua StdParam: Trim, ToUpper, rỗng -> null (Master.Loyalty.cs:1400)
+            string? strBrandCode = StdParam(req.BrandCode);
+
+            // 4. Mst_CarBrand_CheckDB(BrandCode, Flag "1", "") (Master.Loyalty.cs:1406-1412 -> :28-91):
+            //    FlagExist "1" + KHÔNG có dòng (hoặc strBrandCode rỗng) -> ErridnLoyalty.Mst_CarBrand_CheckDB_BrandNotFound.
+            if (string.IsNullOrEmpty(strBrandCode))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_CarBrand_CheckDB_BrandNotFound", "Check.BrandCode", strBrandCode);
+            }
+
+            // Tìm dòng bằng Like + PortQuery.Equal (hạ chữ 2 phía, SQL Server collation không phân biệt hoa thường)
+            var entity = await _db.Set<Mst_CarBrand>().FirstOrDefaultAsync(x =>
+                EF.Functions.Like((x.BrandCode ?? "").ToLower(), PortQuery.Equal(strBrandCode), PortQuery.Esc));
+
+            if (entity == null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_CarBrand_CheckDB_BrandNotFound", "Check.BrandCode", strBrandCode);
+            }
+
+            // 5. Ràng buộc khoá ngoại: không có FK tới Mst_CarBrand trong DDL — dòng xe có thể mồ côi
+            //    (khong co FK toi Mst_CarBrand trong DDL — dong xe co the mo coi).
+            //    Không có bảng nào trong DDL có REFERENCES Mst_CarBrand; Mst_CarModel.BrandCode chỉ trỏ theo tên
+            //    nhưng không có FK nên xóa hãng xe đang được dòng xe sử dụng vẫn thành công.
+
+            // 6. Xoá dòng Mst_CarBrand (Master.Loyalty.cs:1421-1427 dtDB_Mst_CarBrand.Rows[0].Delete())
+            _db.Set<Mst_CarBrand>().Remove(entity);
+            await _db.SaveChangesAsync();
+
+            // 7. Commit transaction (Master.Loyalty.cs:1335 TDALUtils.DBUtils.CommitSafety)
+            await tx.CommitAsync();
+
+            // 8. Thành công: gate Mst_CarBrandController.cs:535-536 SetSuccess + Data = null
             return Ok(new
             {
                 Success = true,
