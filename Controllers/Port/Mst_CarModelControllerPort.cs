@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -13,7 +14,7 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục dòng xe (Mst_CarModel) của dự án nguồn 2022.7.Loyalty (#97, #98, #99, #100, #101, #102, #103, #104).
+// PORT 1:1 — màn danh mục dòng xe (Mst_CarModel) của dự án nguồn 2022.7.Loyalty (#97, #98, #99, #100, #101, #102, #103, #104, #105).
 //
 // Nguồn controller (tầng gate):
 //   Mst_CarModelController.cs:25-105   Search              -> WA_Mst_CarModel_Get
@@ -24,7 +25,8 @@ namespace MiniLoyalty.Controllers.Port;
 //   Mst_CarModelController.cs:489-552  Delete              -> WA_Mst_CarModel_Delete (#102)
 //   Mst_CarModelController.cs:554-618  DeleteMultiple      -> WA_Mst_CarModel_Delete (#103)
 //   Mst_CarModelController.cs:622-766  Import              -> WA_Mst_CarModel_Create (#104)
-//   Mst_CarModelController.cs:284-305  strWhereClause_Mst_CarModel (mệnh đề lọc Search)
+//   Mst_CarModelController.cs:771-849  Export              -> WA_Mst_CarModel_Get (#105)
+//   Mst_CarModelController.cs:284-305  strWhereClause_Mst_CarModel (mệnh đề lọc Search, Export)
 //   Mst_CarModelController.cs:306-325  strWhereClause_Mst_CarModel_By_ModelCode (mệnh đề lọc GetByModelCode)
 // Nguồn API:
 //   MstCarModelController.cs:20-90     WA_Mst_CarModel_Create
@@ -77,10 +79,19 @@ namespace MiniLoyalty.Controllers.Port;
 //     Duyệt từng dòng: gọi CreateXAsync độc lập (mỗi dòng 1 transaction riêng); lỗi dòng k dừng ngay và trả lỗi dòng đó (import một phần, các dòng trước k đã lưu);
 //     GAP NetworkID: nguồn lấy orgUserUI.NetworkId từ user đăng nhập, đích chưa có user -> IConfiguration["Biz_NetworkID"] ?? "1001";
 //     Thành công Data = null (:746-747).
+//   * Export: gate Mst_CarModelController.cs:771-849; body nhận { OrgID, KeyWord, FlagActive };
+//     OrgID truyền vào nhưng strWhereClause_Mst_CarModel (:284-305) không dùng -> không lọc OrgID;
+//     KeyWord lọc like '%kw%' trên ModelName; FlagActive toán tử '=' (không tách dấu phẩy);
+//     Ft_RecordStart = "0", Ft_RecordCount = "123456000"; thứ tự ModelCode asc;
+//     Nếu danh sách rỗng -> throw ServiceException("Không có dữ liệu") -> 400 ErridnLoyalty.Mst_CarModel_Export;
+//     Từ điển cột GetImportDicColums() (4 cột: ModelCode -> "Mã Model (*)", ModelName -> "Tên Model(*)",
+//     BrandCode -> "Mã hiệu xe (*)", FlagActive -> "Trạng thái");
+//     Sinh file qua PortExcel.GenExcelExportFilePath(webRoot, "Mst_CarModel"), sheet "Mst_CarModel";
+//     Ghi file qua PortExcel.ExportToExcelFromList; trả Data = { Url = baseAddress + virtualPath }.
 //
 // Bỏ qua có chủ đích (loại Đ):
-//   - CheckGatewayAuthentication: gate :34, :226, :498, :574; API MstCarModelController.cs:259-264, :187-192
-//   - CheckAuthorize: gate :35, :227, :499, :575 (hệ thống đích chưa có hệ phân quyền)
+//   - CheckGatewayAuthentication: gate :34, :226, :498, :574, :781; API MstCarModelController.cs:259-264, :187-192
+//   - CheckAuthorize: gate :35, :227, :499, :575, :782 (hệ thống đích chưa có hệ phân quyền)
 //   - Nguồn gọi bằng tài khoản hệ thống viết cứng (tài khoản + mật khẩu viết cứng — KHÔNG chép giá trị),
 //     đích chưa có phân quyền; KHÔNG chép thông tin đăng nhập vào mã
 //   - Ghi RequestLog/ReturnLog: Master.Loyalty.cs:1578-1586, 1676-1684, 2708-2715, 2798-2805
@@ -139,6 +150,14 @@ public class MstCarModelDeleteReq
     public string? ModelCode { get; set; }            // Mã dòng xe cần xoá — :489, :513
 }
 
+/// <summary>Port 1:1 <c>Export</c> — body nhận OrgID, KeyWord, FlagActive (Mst_CarModelController.cs:771, 792-797).</summary>
+public class MstCarModelExportReq
+{
+    public string? OrgID { get; set; }               // Tổ chức — gate nhận (:771, :795) nhưng strWhereClause_Mst_CarModel (:284-305) KHÔNG dùng OrgID -> không lọc
+    public string? KeyWord { get; set; }             // Từ khoá tìm theo tên dòng xe (ModelName) — :771, :794, :291
+    public string? FlagActive { get; set; }          // Cờ hoạt động, toán tử '=' — :771, :796, :299-302
+}
+
 [ApiController]
 [Route("api/mst_carmodel")]
 [Produces("application/json")]
@@ -146,11 +165,13 @@ public class Mst_CarModelControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly IConfiguration _config;
+    private readonly IWebHostEnvironment _env;
 
-    public Mst_CarModelControllerPort(AppDbContext db, IConfiguration config)
+    public Mst_CarModelControllerPort(AppDbContext db, IConfiguration config, IWebHostEnvironment env)
     {
         _db = db;
         _config = config;
+        _env = env;
     }
 
     [HttpPost("search")]
@@ -755,6 +776,101 @@ public class Mst_CarModelControllerPort : ControllerBase
         });
     }
 
+    // ============================================================================================
+    // Export — nguồn gate Mst_CarModelController.cs:771-849 -> API WA_Mst_CarModel_Get
+    // (MstCarModelController.cs:238-307) -> biz WAS_Mst_CarModel_Get (Master.Loyalty.cs:1434-1534)
+    // -> Mst_CarModel_Get (Master.Loyalty.cs:1535-1687) -> Mst_CarModel_GetX (Master.Loyalty.cs:1688-1842).
+    //
+    // GIỮ ĐÚNG NGUỒN:
+    //   * Tham số nhận qua body: OrgID, KeyWord, FlagActive (Mst_CarModelController.cs:771, 792-797).
+    //   * strWhereClause_Mst_CarModel (:284-305):
+    //       - KeyWord: like '%kw%' trên ModelName (:291).
+    //       - FlagActive: toán tử '=' (:299-302) — KHÔNG dùng IN, không tách dấu phẩy.
+    //       - OrgID: không lọc (:284-305 không có nhánh lọc OrgID).
+    //   * Ft_RecordStart = "0", Ft_RecordCount = "123456000" (:810-811), Rt_Cols_Mst_CarModel = "*" (:814).
+    //   * Thứ tự: Mst_CarModel_GetX chia trang theo ModelCode asc (Master.Loyalty.cs:1748).
+    //   * Nếu danh sách rỗng (rows == null || rows.Count == 0):
+    //     ném ServiceException("Không có dữ liệu") (:818, :835) -> trả 400 ErridnLoyalty.Mst_CarModel_Export.
+    //   * Từ điển cột: GetImportDicColums() (:822, :888-897) gồm đúng 4 cột:
+    //       1. ModelCode -> "Mã Model (*)"
+    //       2. ModelName -> "Tên Model(*)"
+    //       3. BrandCode -> "Mã hiệu xe (*)"
+    //       4. FlagActive -> "Trạng thái"
+    //   * Sinh đường dẫn file xuất: BaseController.GenExcelExportFilePath (:824)
+    //     -> PortExcel.GenExcelExportFilePath(webRoot, "Mst_CarModel").
+    //   * Tên sheet: "Mst_CarModel" (:825).
+    //   * Ghi file qua PortExcel.ExportToExcelFromList(rows, dicColNames, physicalPath, "Mst_CarModel") (:825).
+    //   * Trả URL tải file với Success = true, Data = { Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath } (:826-830).
+    //
+    // Bỏ qua có chủ đích (loại Đ):
+    //   * CheckGatewayAuthentication: gate Mst_CarModelController.cs:781; API MstCarModelController.cs:259-264
+    //   * CheckAuthorize: gate Mst_CarModelController.cs:782 (hệ thống đích chưa có hệ phân quyền)
+    //   * Sys_User_CheckAuthorize: Master.Loyalty.cs:1592-1606
+    //   * Ghi RequestLog/ReturnLog: Master.Loyalty.cs:1578-1586, 1676-1684
+    // ============================================================================================
+    [HttpPost("export")]
+    public async Task<IActionResult> Export([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] MstCarModelExportReq? req)
+    {
+        req ??= new MstCarModelExportReq();
+
+        // Nguồn: strWhereClause_Mst_CarModel (:284-305) chỉ lọc theo KeyWord (like trên ModelName) và FlagActive (toán tử '='),
+        // OrgID truyền vào (:795) nhưng KHÔNG được sử dụng trong hàm tạo WHERE clause -> không lọc OrgID.
+        // Ft_RecordStart = "0", Ft_RecordCount = "123456000", Rt_Cols_Mst_CarModel = "*" (:810-814).
+        var (_, rows) = await GetXAsync(req.KeyWord, req.FlagActive, 0, 123456000);
+
+        // Nguồn :818, :835: nếu danh sách rỗng -> throw ServiceException("Không có dữ liệu")
+        if (rows == null || rows.Count == 0)
+        {
+            return PortResult.Fail("Mst_CarModel_Export", "Message", "Không có dữ liệu");
+        }
+
+        // Tạo thư mục và đường dẫn file Excel xuất: BaseController.GenExcelExportFilePath (:824)
+        var webRoot = _env.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = Path.Combine(_env.ContentRootPath, "wwwroot");
+        }
+
+        // Lấy từ điển cột: Mst_CarModelController.cs:822 gọi GetImportDicColums() (4 cột)
+        var dicColNames = GetImportDicColums();
+        var (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Mst_CarModel");
+
+        // Ghi danh sách ra file Excel: ExcelExport.ExportToExcelFromList (:825) với sheet "Mst_CarModel"
+        PortExcel.ExportToExcelFromList(rows, dicColNames, physicalPath, "Mst_CarModel");
+
+        // Trả URL tải file: Data = { Url = GetRequestBaseAddress() + url } (:826-830)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+            }
+        });
+    }
+
+    #region DicColums
+    /// <summary>
+    /// Từ điển 4 cột xuất Excel: gate Mst_CarModelController.cs:888-897 (GetImportDicColums).
+    /// ĐẶC BIỆT LƯU Ý THEO NGUỒN: Nguồn tại Mst_CarModelController.cs:822 sử dụng GetImportDicColums()
+    /// (dùng từ điển Import cho Export là thiết kế của nguồn).
+    /// Giữ đúng thứ tự 4 cột từ nguồn:
+    /// 1. ModelCode -> "Mã Model (*)"
+    /// 2. ModelName -> "Tên Model(*)"
+    /// 3. BrandCode -> "Mã hiệu xe (*)"
+    /// 4. FlagActive -> "Trạng thái"
+    /// </summary>
+    private static Dictionary<string, string> GetImportDicColums()
+    {
+        return new Dictionary<string, string>
+        {
+            { "ModelCode", "Mã Model (*)" },
+            { "ModelName", "Tên Model(*)" },
+            { "BrandCode", "Mã hiệu xe (*)" },
+            { "FlagActive", "Trạng thái" }
+        };
+    }
+
     /// <summary>
     /// Từ điển 3 cột mẫu Import (Mst_CarModelController.cs:899-906 GetImportDicColumsTemplate):
     /// ModelCode -> "Mã Model", ModelName -> "Tên Model(*)", BrandCode -> "Mã hiệu xe".
@@ -768,6 +884,7 @@ public class Mst_CarModelControllerPort : ControllerBase
             { "BrandCode", "Mã hiệu xe" }
         };
     }
+    #endregion
 
     /// <summary>
     /// Lọc + đếm + chia trang theo ModelCode asc — dùng cho Search, GetAllActive, GetByModelCode.
