@@ -15,21 +15,21 @@ namespace MiniLoyalty.Models.Port;
 //   - SQL select: idn.Loyalty.Biz/Master.cs (Mst_District_Get — bản LIVE, SQL excerpt :1883-1929)
 //
 // ĐẶC ĐIỂM BẢNG (đúng 7 cột):
-//   DistrictCode (PK, string not null), ProvinceCode (string?), NetworkID (string?),
+//   ProvinceCode + DistrictCode (PK ghép, string not null — Master.cs:1744-1745), NetworkID (string?),
 //   DistrictName (string?), FlagActive (string?), LogLUDTimeUTC (DateTime?), LogLUBy (string?).
 //   Comment: "khong co DDL trong repo — kieu cot can xac nhan".
 // ===========================================================================================
 
 /// <summary>
 /// Danh mục quận/huyện — port 1:1 bảng <c>Mst_District</c>.
-/// Model nguồn: Mst_District.cs:9-24. PK = DistrictCode.
+/// Model nguồn: Mst_District.cs:9-24. PK ghép = (ProvinceCode, DistrictCode) (Master.cs:1744-1745).
 /// Không có DDL trong repo — kiểu cột cần xác nhận.
 /// Đúng 7 cột: DistrictCode, ProvinceCode, NetworkID, DistrictName, FlagActive, LogLUDTimeUTC, LogLUBy.
 /// </summary>
 public class Mst_District
 {
-    public string DistrictCode { get; set; } = "";        // Mã quận/huyện — PK (không có DDL trong repo — kiểu cột cần xác nhận)
-    public string? ProvinceCode { get; set; }             // Mã tỉnh/thành
+    public string DistrictCode { get; set; } = "";        // Mã quận/huyện — PK ghép (Master.cs:1744-1745)
+    public string ProvinceCode { get; set; } = "";        // Mã tỉnh/thành — PK ghép (Master.cs:1744-1745; cùng 1 mã huyện được tồn tại ở 2 tỉnh khác nhau)
     public string? NetworkID { get; set; }                // Mã mạng
     public string? DistrictName { get; set; }             // Tên quận/huyện
     public string? FlagActive { get; set; }               // Cờ hoạt động '1'/'0'
@@ -37,13 +37,15 @@ public class Mst_District
     public string? LogLUBy { get; set; }                  // Người cập nhật
 }
 
-/// <summary>Cấu hình EF cho <see cref="Mst_District"/> — tên bảng Mst_District + khoá chính DistrictCode.</summary>
+/// <summary>Cấu hình EF cho <see cref="Mst_District"/> — tên bảng Mst_District + khoá chính ghép (ProvinceCode, DistrictCode).</summary>
 public class Mst_DistrictConfig : IEntityTypeConfiguration<Mst_District>
 {
     public void Configure(EntityTypeBuilder<Mst_District> b)
     {
         b.ToTable("Mst_District");
-        b.HasKey(x => x.DistrictCode);                    // PK = DistrictCode
+        // CheckDB và Delete đều theo cặp (ProvinceCode, DistrictCode) => khoá thật là khoá ghép (Master.cs:1744-1745; cùng 1 mã huyện được tồn tại ở 2 tỉnh khác nhau)
+        b.HasKey(x => new { x.ProvinceCode, x.DistrictCode });
+        b.Property(x => x.ProvinceCode).IsRequired();
         b.Property(x => x.DistrictCode).IsRequired();
     }
 }

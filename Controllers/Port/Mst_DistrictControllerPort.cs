@@ -4,26 +4,31 @@ using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using MiniLoyalty.Data;
 using MiniLoyalty.Models.Port;
 
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục quận/huyện (Mst_District) của dự án nguồn 2022.7.Loyalty (#139, #140, #141, #142).
+// PORT 1:1 — màn danh mục quận/huyện (Mst_District) của dự án nguồn 2022.7.Loyalty (#139, #140, #141, #142, #143).
 //
 // Nguồn controller (tầng gate):
 //   Mst_DistrictController.cs:31-111   Search              -> WA_Mst_District_Get
 //   Mst_DistrictController.cs:113-177  GetDetail           -> WA_Mst_District_Get
 //   Mst_DistrictController.cs:179-250  GetByProvinceCode   -> WA_Mst_District_Get
 //   Mst_DistrictController.cs:252-315  GetAllActive        -> WA_Mst_District_Get
+//   Mst_DistrictController.cs:316-376  Create              -> WA_Mst_District_Create
 //   Mst_DistrictController.cs:818-833  strWhereClause_Mst_District (mệnh đề lọc Search, GetAllActive)
 //   Mst_DistrictController.cs:835-863  strWhereClause_Mst_District_Detail (mệnh đề lọc GetDetail, GetByProvinceCode)
 // Nguồn API:
 //   MstDistrictController.cs:20-91     WA_Mst_District_Get
+//   MstDistrictController.cs:94-165    WA_Mst_District_Create
 // Nguồn biz:
 //   Master.cs:2584-2708                WAS_Mst_District_Get
 //   Master.cs:1801-2023                Mst_District_Get (SQL excerpt :1883-1929)
+//   Master.cs:2710-2794                WAS_Mst_District_Create
+//   Master.cs:2024-2193                Mst_District_Create -> Mst_District_CheckDB (Master.cs:1729-1799) -> Mst_Province_CheckDB (Master.cs:27-91)
 //
 // GIỮ ĐÚNG NGUỒN:
 //   * Endpoint là POST (nguồn [AcceptVerbs("POST")]).
@@ -34,6 +39,11 @@ namespace MiniLoyalty.Controllers.Port;
 //   * GetByProvinceCode: nguồn gán FlagActive = "1" nếu rỗng (:201-203), nhưng strWhereClause_Mst_District_Detail (:848-851) bị comment nên KHÔNG lọc cờ hoạt động (huyện '0' vẫn lấy được).
 //   * GetByProvinceCode: Ft_RecordStart = "0", Ft_RecordCount = "123456000" (:221-222) -> trả Lst_Mst_District = rows.Count > 0 ? rows : null (:228-237).
 //   * GetAllActive: không body, Ft_RecordStart = "0", Ft_RecordCount = "123456000" (:287-288); gọi strWhereClause_Mst_District với FlagActive = "1" (:272-275) -> lọc FlagActive = '1' CÓ TÁC DỤNG (khác GetByProvinceCode); trả Data = lst_Mst_District (danh sách trần, null nếu rỗng — :298-299, KHÁC Mst_Province bọc { Lst_Mst_Province }).
+//   * Create: kiểm tra thứ tự: (1) mã rỗng -> InvalidDistrictCode, (2) CheckDB trùng theo CẶP (ProvinceCode, DistrictCode) -> DistrictExist,
+//     (3) Province_CheckDB: không thấy -> ProvinceNotFound, cờ không '1' -> FlagActiveNotMatched,
+//     (4) tên rỗng -> InvalidDistrictName; mã lưu chữ hoa qua StdParam, tên chỉ Trim (không Normalize);
+//     NetworkID cấu hình Biz_NetworkID, mặc định 1001; FlagActive "1", LogLUBy "port", LogLUDTimeUTC = UtcNow;
+//     body rỗng -> ServiceException ("strJson null") -> Fail("Mst_District_Create").
 //   * Lọc KeyWord: like '%x%' trên DistrictName (:823-826).
 //   * Lọc FlagActive: toán tử = (:827-830) — KHÁC Province dùng IN ('a','b').
 //   * OrgID: gate nhận (:31, :61, :125, :149, :264, :285) nhưng strWhereClause_Mst_District (:818-833) và strWhereClause_Mst_District_Detail (:835-863) KHÔNG lọc OrgID.
@@ -43,12 +53,13 @@ namespace MiniLoyalty.Controllers.Port;
 //   * PageSize = 0 -> DataList rỗng, PageCount = 0 (gate :86-94).
 //
 // Bỏ qua có chủ đích (loại Đ):
-//   - CheckGatewayAuthentication: gate Mst_DistrictController.cs:40, 122, 188; API MstDistrictController.cs:42-49
-//   - CheckAuthorize: gate Mst_DistrictController.cs:41, 123, 189 (hệ thống đích chưa có hệ phân quyền)
+//   - CheckGatewayAuthentication: gate Mst_DistrictController.cs:40, 122, 188, 335; API MstDistrictController.cs:42-49, 117-122
+//   - CheckAuthorize: gate Mst_DistrictController.cs:41, 123, 189, 336 (hệ thống đích chưa có hệ phân quyền)
 //   - Nguồn gọi bằng tài khoản hệ thống viết cứng tại MstDistrictController.cs — không chép giá trị
-//   - Ghi RequestLog/ReturnLog: Master.cs:1841-1849, 2700-2705
+//   - Ghi RequestLog/ReturnLog: Master.cs:1841-1849, 2063-2070, 2183-2190, 2700-2705
 //   - Sys_User_CheckAuthorize: Master.cs:2623-2636
-//   - LogLUBy gán cố định "port" do hệ thống đích chưa có session người dùng
+//   - LogLUBy gán cố định "port" do hệ thống đích chưa có session người dùng (Master.cs:2143)
+//   - Biz_NetworkID lấy từ cấu hình IConfiguration, mặc định "1001" nếu thiếu (Common.cs:39, 124; Master.cs:2138)
 // ============================================================================================
 
 /// <summary>Port 1:1 <c>Mst_DistrictSearch</c> — tham số lọc + phân trang của màn (Mst_DistrictController.cs:31, 58-63).</summary>
@@ -75,10 +86,18 @@ public class MstDistrictGetByProvinceCodeReq
     public string? FlagActive { get; set; }          // Cờ hoạt động — :179, :201-208 (chú ý: nguồn gán "1" nếu rỗng nhưng strWhereClause_Mst_District_Detail không lọc)
 }
 
+/// <summary>Port 1:1 <c>Create</c> — body nhận DistrictCode, ProvinceCode, DistrictName (Mst_DistrictController.cs:316-376).</summary>
+public class MstDistrictCreateReq
+{
+    public string? DistrictCode { get; set; }        // Mã quận/huyện — Master.cs:2076
+    public string? ProvinceCode { get; set; }        // Mã tỉnh/thành — Master.cs:2077
+    public string? DistrictName { get; set; }        // Tên quận/huyện — Master.cs:2078
+}
+
 [ApiController]
 [Route("api/mst_district")]
 [Produces("application/json")]
-public class Mst_DistrictControllerPort(AppDbContext db) : ControllerBase
+public class Mst_DistrictControllerPort(AppDbContext db, IConfiguration config) : ControllerBase
 {
     [HttpPost("search")]
     public async Task<IActionResult> Search([FromBody] MstDistrictSearchReq? req)
@@ -188,6 +207,135 @@ public class Mst_DistrictControllerPort(AppDbContext db) : ControllerBase
         return Ok(new { Success = true, Data = rows.Count > 0 ? rows : null });
     }
 
+    // ============================================================================================
+    // Create — nguồn gate Mst_DistrictController.cs:316-376 -> API WA_Mst_District_Create
+    // (MstDistrictController.cs:94-165) -> biz WAS_Mst_District_Create (Master.cs:2710-2794)
+    // -> Mst_District_Create (Master.cs:2024-2193) -> Mst_District_CheckDB (Master.cs:1729-1799)
+    // -> Mst_Province_CheckDB (Master.cs:27-91).
+    //
+    // Quy trình và thứ tự kiểm tra:
+    //   1. Body rỗng / null: gate :325-332 -> ServiceException("strJson null") -> Fail("Mst_District_Create")
+    //   2. Chuẩn hoá dữ liệu input (Master.cs:2076-2078):
+    //      - strDistrictCode = StdParam(objDistrictCode) (:2076: Trim + ToUpper, rỗng -> null)
+    //      - strProvinceCode = StdParam(objProvinceCode) (:2077: Trim + ToUpper, rỗng -> null)
+    //      - strDistrictName = string.Format("{0}", objDistrictName).Trim() (:2078: chỉ Trim, không Normalize; null -> "")
+    //   3. Kiểm tra mã quận/huyện: if (strDistrictCode == null || strDistrictCode.Length < 1)
+    //      -> Fail("Mst_District_Create_InvalidDistrictCode", "Check.strDistrictCode", strDistrictCode) (:2086-2095)
+    //   4. Kiểm tra tồn tại trong DB theo CẶP (ProvinceCode, DistrictCode): Mst_District_CheckDB với Flag "0" (:2097-2104, :1744-1745, :1770-1781)
+    //      nếu đã có -> Fail("Mst_District_CheckDB_DistrictExist", "Check.ProvinceCode", strProvinceCode, "Check.DistrictCode", strDistrictCode)
+    //   5. Kiểm tra tỉnh/thành: Mst_Province_CheckDB với Flag "1", ActiveList "1" (:2108-2114, :53-63, :78-89)
+    //      - Không tìm thấy tỉnh (hoặc strProvinceCode rỗng) -> Fail("Mst_Province_CheckDB_ProvinceNotFound", "Check.ProvinceCode", strProvinceCode)
+    //      - Tỉnh có FlagActive != "1" -> Fail("Mst_Province_CheckDB_FlagActiveNotMatched", "Check.ProvinceCode", strProvinceCode, "Check.strFlagActiveListToCheck", "1", "DB.FlagActive", province.FlagActive)
+    //   6. Kiểm tra tên quận/huyện: if (strDistrictName.Length < 1)
+    //      -> Fail("Mst_District_Create_InvalidDistrictName", "Check.strDistrictName", strDistrictName) (:2116-2126)
+    //   7. Lưu 7 cột Mst_District (:2136-2144):
+    //      DistrictCode = strDistrictCode, NetworkID = config["Biz_NetworkID"] ?? "1001",
+    //      ProvinceCode = strProvinceCode, DistrictName = strDistrictName, FlagActive = "1",
+    //      LogLUDTimeUTC = UtcNow, LogLUBy = "port".
+    //   8. Commit và trả Ok({ Success = true, Data = null }) (:362-363).
+    // ============================================================================================
+    [HttpPost("create")]
+    public async Task<IActionResult> Create([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] MstDistrictCreateReq? req)
+    {
+        // 1. Kiểm tra body rỗng / null: gate Mst_DistrictController.cs:325-332
+        if (req == null)
+        {
+            return PortResult.Fail("Mst_District_Create", "Check.strJson", null);
+        }
+
+        // Bắt đầu Transaction toàn bộ quá trình tạo (Master.cs:2060 _cf.db.BeginTransaction())
+        await using var tx = await db.Database.BeginTransactionAsync();
+        try
+        {
+            // 2. Chuẩn hoá dữ liệu input (Master.cs:2076-2078):
+            // strDistrictCode = StdParam(objDistrictCode) (Trim + ToUpper, rỗng -> null)
+            // strProvinceCode = StdParam(objProvinceCode) (Trim + ToUpper, rỗng -> null)
+            // strDistrictName = string.Format("{0}", objDistrictName).Trim() (CHỈ Trim, KHÔNG Normalize; null -> "")
+            var strDistrictCode = StdParam(req.DistrictCode);
+            var strProvinceCode = StdParam(req.ProvinceCode);
+            var strDistrictName = string.Format("{0}", req.DistrictName).Trim();
+
+            // 3. Kiểm tra mã quận/huyện: Master.cs:2086-2095
+            if (string.IsNullOrEmpty(strDistrictCode))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_District_Create_InvalidDistrictCode", "Check.strDistrictCode", strDistrictCode);
+            }
+
+            // 4. Kiểm tra tồn tại trong DB theo CẶP (ProvinceCode, DistrictCode): Master.cs:2097-2104 -> Mst_District_CheckDB (Master.cs:1729-1799)
+            // SQL nguồn (:1744-1745): t.ProvinceCode = @objProvinceCode and t.DistrictCode = @objDistrictCode
+            var districtExists = !string.IsNullOrEmpty(strProvinceCode) && await db.Set<Mst_District>().AnyAsync(x =>
+                EF.Functions.Like((x.ProvinceCode ?? "").ToLower(), PortQuery.Equal(strProvinceCode), PortQuery.Esc) &&
+                EF.Functions.Like((x.DistrictCode ?? "").ToLower(), PortQuery.Equal(strDistrictCode), PortQuery.Esc));
+            if (districtExists)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_District_CheckDB_DistrictExist", "Check.ProvinceCode", strProvinceCode, "Check.DistrictCode", strDistrictCode);
+            }
+
+            // 5. Kiểm tra tỉnh/thành: Master.cs:2108-2114 -> Mst_Province_CheckDB (Master.cs:27-91)
+            var province = string.IsNullOrEmpty(strProvinceCode)
+                ? null
+                : await db.Set<Mst_Province>().FirstOrDefaultAsync(x =>
+                    EF.Functions.Like((x.ProvinceCode ?? "").ToLower(), PortQuery.Equal(strProvinceCode), PortQuery.Esc));
+
+            if (province == null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_Province_CheckDB_ProvinceNotFound", "Check.ProvinceCode", strProvinceCode);
+            }
+
+            if (province.FlagActive != "1")
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_Province_CheckDB_FlagActiveNotMatched",
+                    "Check.ProvinceCode", strProvinceCode,
+                    "Check.strFlagActiveListToCheck", "1",
+                    "DB.FlagActive", province.FlagActive);
+            }
+
+            // 6. Kiểm tra tên quận/huyện: Master.cs:2116-2126
+            if (strDistrictName.Length < 1)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_District_Create_InvalidDistrictName", "Check.strDistrictName", strDistrictName);
+            }
+
+            // 7. Lưu dữ liệu bảng Mst_District: Master.cs:2136-2144
+            var networkId = config["Biz_NetworkID"] ?? "1001"; // Cấu hình Biz_NetworkID, mặc định 1001 (Common.cs:39, 124)
+            var now = DateTime.UtcNow;
+
+            var newDistrict = new Mst_District
+            {
+                DistrictCode = strDistrictCode,                    // :2137 DistrictCode
+                NetworkID = networkId,                             // :2138 NetworkID = nNetworkID
+                ProvinceCode = strProvinceCode!,                   // :2139 ProvinceCode
+                DistrictName = strDistrictName,                    // :2140 DistrictName
+                FlagActive = "1",                                  // :2141 FlagActive = TConst.Flag.Active ("1")
+                LogLUDTimeUTC = now,                               // :2142 LogLUDTimeUTC = dtimeSys
+                LogLUBy = "port"                                   // :2143 LogLUBy ("port" - đích chưa có session user, comment loại Đ)
+            };
+
+            await db.Set<Mst_District>().AddAsync(newDistrict);
+            await db.SaveChangesAsync();
+
+            // Commit Transaction (Master.cs:2156 TDALUtils.DBUtils.CommitSafety)
+            await tx.CommitAsync();
+
+            // Thành công trả về Success = true, Data = null: gate Mst_DistrictController.cs:362-363
+            return Ok(new
+            {
+                Success = true,
+                Data = (object?)null
+            });
+        }
+        catch (Exception)
+        {
+            await tx.RollbackAsync();
+            throw;
+        }
+    }
+
     /// <summary>
     /// Hàm dùng chung lấy dữ liệu Mst_District hỗ trợ phân trang và tìm kiếm.
     /// Nguồn SQL: Master.cs:1881-1934 (Mst_District_Get).
@@ -264,4 +412,18 @@ public class Mst_DistrictControllerPort(AppDbContext db) : ControllerBase
 
         return (itemCount, rows);
     }
+
+    #region Helper chuẩn hoá input (05.Refs.Biz\Biz\Loyalty.TVO\Loyalty.TVO.Utils\Utils.cs)
+    /// <summary>
+    /// Chuẩn hoá tham số mã: Trim, ToUpper, rỗng -> null.
+    /// Dùng cho mã (DistrictCode, ProvinceCode...).
+    /// Nguồn tham chiếu: 05.Refs.Biz\Biz\Loyalty.TVO\Loyalty.TVO.Utils\Utils.cs:29
+    /// </summary>
+    private static string? StdParam(object? val)
+    {
+        if (val == null) return null;
+        var s = val.ToString()?.Trim();
+        return string.IsNullOrEmpty(s) ? null : s.ToUpperInvariant();
+    }
+    #endregion
 }
