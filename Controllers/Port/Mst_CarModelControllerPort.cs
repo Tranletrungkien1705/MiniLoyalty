@@ -14,7 +14,7 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục dòng xe (Mst_CarModel) của dự án nguồn 2022.7.Loyalty (#97, #98, #99, #100, #101, #102, #103, #104, #105).
+// PORT 1:1 — màn danh mục dòng xe (Mst_CarModel) của dự án nguồn 2022.7.Loyalty (#97, #98, #99, #100, #101, #102, #103, #104, #105, #106).
 //
 // Nguồn controller (tầng gate):
 //   Mst_CarModelController.cs:25-105   Search              -> WA_Mst_CarModel_Get
@@ -26,6 +26,7 @@ namespace MiniLoyalty.Controllers.Port;
 //   Mst_CarModelController.cs:554-618  DeleteMultiple      -> WA_Mst_CarModel_Delete (#103)
 //   Mst_CarModelController.cs:622-766  Import              -> WA_Mst_CarModel_Create (#104)
 //   Mst_CarModelController.cs:771-849  Export              -> WA_Mst_CarModel_Get (#105)
+//   Mst_CarModelController.cs:852-884  ExportTemplate      (#106)
 //   Mst_CarModelController.cs:284-305  strWhereClause_Mst_CarModel (mệnh đề lọc Search, Export)
 //   Mst_CarModelController.cs:306-325  strWhereClause_Mst_CarModel_By_ModelCode (mệnh đề lọc GetByModelCode)
 // Nguồn API:
@@ -88,6 +89,11 @@ namespace MiniLoyalty.Controllers.Port;
 //     BrandCode -> "Mã hiệu xe (*)", FlagActive -> "Trạng thái");
 //     Sinh file qua PortExcel.GenExcelExportFilePath(webRoot, "Mst_CarModel"), sheet "Mst_CarModel";
 //     Ghi file qua PortExcel.ExportToExcelFromList; trả Data = { Url = baseAddress + virtualPath }.
+//   * ExportTemplate: gate Mst_CarModelController.cs:852-884 (#106); không body, không kiểm quyền, không truy vấn DB;
+//     khởi tạo danh sách rỗng List<Mst_CarModel> (:860); từ điển cột GetImportDicColumsTemplate() (:862, :899-906) gồm đúng 3 cột:
+//     ModelCode ("Mã Model"), ModelName ("Tên Model(*)"), BrandCode ("Mã hiệu xe");
+//     sinh đường dẫn file qua PortExcel.GenExcelExportFilePath(webRoot, "Mst_CarModel") (:864), sheet "Mst_CarModel" (:865);
+//     ghi file qua PortExcel.ExportToExcelFromList; trả về Success = true, Data = { Url = baseAddress + virtualPath } (:866-870).
 //
 // Bỏ qua có chủ đích (loại Đ):
 //   - CheckGatewayAuthentication: gate :34, :226, :498, :574, :781; API MstCarModelController.cs:259-264, :187-192
@@ -839,6 +845,52 @@ public class Mst_CarModelControllerPort : ControllerBase
         PortExcel.ExportToExcelFromList(rows, dicColNames, physicalPath, "Mst_CarModel");
 
         // Trả URL tải file: Data = { Url = GetRequestBaseAddress() + url } (:826-830)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+            }
+        });
+    }
+
+    // ============================================================================================
+    // ExportTemplate — nguồn gate Mst_CarModelController.cs:852-884 (#106).
+    // Action này KHÔNG kiểm quyền ở nguồn (không có CheckGatewayAuthentication và không có CheckAuthorize).
+    // Không gọi tầng service, không truy vấn cơ sở dữ liệu.
+    // Khởi tạo danh sách rỗng kiểu Mst_CarModel (:860).
+    // Lấy từ điển cột mẫu từ GetImportDicColumsTemplate (:862, :899-906) gồm đúng 3 cột:
+    //   1. ModelCode -> "Mã Model"
+    //   2. ModelName -> "Tên Model(*)"
+    //   3. BrandCode -> "Mã hiệu xe"
+    // Sinh đường dẫn file mẫu qua PortExcel.GenExcelExportFilePath(webRoot, "Mst_CarModel") (:864).
+    // Xuất file Excel qua PortExcel.ExportToExcelFromList(list, dicColNames, physicalPath, "Mst_CarModel") (:865).
+    // Trả về Success = true, Data = { Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath } (:866-870).
+    // Không có nhánh báo lỗi khi danh sách rỗng (khác với Export).
+    // ============================================================================================
+    [HttpPost("exporttemplate")]
+    public IActionResult ExportTemplate()
+    {
+        // Khởi tạo danh sách rỗng kiểu Mst_CarModel (gate Mst_CarModelController.cs:860)
+        var list = new List<Mst_CarModel>();
+
+        // Lấy từ điển 3 cột mẫu import (gate Mst_CarModelController.cs:862, :899-906)
+        var dicColNames = GetImportDicColumsTemplate();
+
+        // Xác định thư mục webRoot và sinh đường dẫn file (gate Mst_CarModelController.cs:864)
+        var webRoot = _env.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = Path.Combine(_env.ContentRootPath, "wwwroot");
+        }
+
+        var (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Mst_CarModel");
+
+        // Ghi danh sách rỗng ra file Excel với tên sheet Mst_CarModel (gate Mst_CarModelController.cs:865)
+        PortExcel.ExportToExcelFromList(list, dicColNames, physicalPath, "Mst_CarModel");
+
+        // Trả URL tải file với Success = true (gate Mst_CarModelController.cs:866-870)
         return Ok(new
         {
             Success = true,
