@@ -10,17 +10,19 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục dòng xe (Mst_CarModel) của dự án nguồn 2022.7.Loyalty (#97, #98, #99, #100).
+// PORT 1:1 — màn danh mục dòng xe (Mst_CarModel) của dự án nguồn 2022.7.Loyalty (#97, #98, #99, #100, #101).
 //
 // Nguồn controller (tầng gate):
 //   Mst_CarModelController.cs:25-105   Search              -> WA_Mst_CarModel_Get
 //   Mst_CarModelController.cs:106-216  GetAllActive        -> WA_Mst_CarModel_Get
 //   Mst_CarModelController.cs:217-280  GetByModelCode      -> WA_Mst_CarModel_Get
 //   Mst_CarModelController.cs:329-414  Create              -> WA_Mst_CarModel_Create
+//   Mst_CarModelController.cs:418-485  Update              -> WA_Mst_CarModel_Update
 //   Mst_CarModelController.cs:284-305  strWhereClause_Mst_CarModel (mệnh đề lọc Search)
 //   Mst_CarModelController.cs:306-325  strWhereClause_Mst_CarModel_By_ModelCode (mệnh đề lọc GetByModelCode)
 // Nguồn API:
 //   MstCarModelController.cs:20-90     WA_Mst_CarModel_Create
+//   MstCarModelController.cs:92-162    WA_Mst_CarModel_Update
 //   MstCarModelController.cs:238-307   WA_Mst_CarModel_Get
 // Nguồn biz:
 //   Master.Loyalty.cs:1434-1534        WAS_Mst_CarModel_Get
@@ -29,6 +31,9 @@ namespace MiniLoyalty.Controllers.Port;
 //   Master.Loyalty.cs:1908-1991        WAS_Mst_CarModel_Create
 //   Master.Loyalty.cs:1992-2141        Mst_CarModel_Create
 //   Master.Loyalty.cs:2142-2250        Mst_CarModel_CreateX
+//   Master.Loyalty.cs:2251-2336        WAS_Mst_CarModel_Update
+//   Master.Loyalty.cs:2337-2492        Mst_CarModel_Update
+//   Master.Loyalty.cs:2494-2592        Mst_CarModel_UpdateX
 //   Master.Loyalty.cs:1843-1906        Mst_CarModel_CheckDB
 //   Master.Loyalty.cs:28-91            Mst_CarBrand_CheckDB
 //
@@ -86,6 +91,21 @@ public class MstCarModelCreateReq
     public string? BrandCode { get; set; }            // Mã hãng xe — :1959, :2175 (StdParam)
     public string? ModelName { get; set; }            // Tên dòng xe — :1960, :2176 (StdStr — KHÔNG viết hoa)
     public string? Remark { get; set; }               // Ghi chú — :1961, :2178 (StdStr)
+}
+
+/// <summary>
+/// Port 1:1 <c>Update</c> — body JSON của model nguồn (Mst_CarModelController.cs:418-485).
+/// Nguồn deserialize vào TModelLoyaltys.Mst_CarModel rồi truyền
+/// ModelCode/NetworkID/BrandCode/ModelName/Remark/FlagActive xuống biz (Master.Loyalty.cs:2299-2304, 2536-2541).
+/// </summary>
+public class MstCarModelUpdateReq
+{
+    public string? ModelCode { get; set; }            // Mã dòng xe — :2541 (StdParam)
+    public string? NetworkID { get; set; }            // NetworkID nhận từ JSON nhưng không lưu — :2537 (StdParam)
+    public string? BrandCode { get; set; }            // Mã hãng xe — :2536 (StdParam)
+    public string? ModelName { get; set; }            // Tên dòng xe — :2538 (StdStr — KHÔNG viết hoa)
+    public string? Remark { get; set; }               // Ghi chú — :2539 (StdStr)
+    public string? FlagActive { get; set; }           // Cờ hoạt động — :2540 (StdFlag)
 }
 
 [ApiController]
@@ -303,6 +323,109 @@ public class Mst_CarModelControllerPort : ControllerBase
         }
     }
 
+    // ============================================================================================
+    // Update — nguồn Mst_CarModelController.cs:418-485 (gate) -> MstCarModelController.cs:92-162 (API)
+    //   -> Master.Loyalty.cs:2251-2336 (WAS_Mst_CarModel_Update) -> :2337-2492 (Mst_CarModel_Update)
+    //   -> :2494-2592 (Mst_CarModel_UpdateX) -> :2553-2559 (Mst_CarModel_CheckDB)
+    //   -> :2561-2567 (Mst_CarBrand_CheckDB).
+    //
+    // GIỮ ĐÚNG NGUỒN:
+    //   * Body JSON nhận ModelCode, NetworkID, BrandCode, ModelName, Remark, FlagActive (:2299-2304).
+    //   * Body rỗng/null: gate :428-435 ném Exception("strJson null") -> bắt lại thành mã mặc định Mst_CarModel_Update (:2364).
+    //   * Ft_Cols_Upd cố định ở gate (:448-453): BrandCode, ModelName, Remark, FlagActive -> LUÔN cập nhật 4 cột.
+    //   * Chuẩn hoá input (:2536-2541):
+    //     - BrandCode = StdParam (Trim+ToUpper, rỗng->null)
+    //     - NetworkID = StdParam (nhận vào nhưng KHÔNG lưu, NetworkID giữ nguyên :2537)
+    //     - ModelName = StdStr (Trim+Normalize, rỗng->null — KHÔNG viết hoa, khác CarBrand)
+    //     - Remark    = StdStr (Trim+Normalize, rỗng->null)
+    //     - FlagActive = StdFlag ("1" chỉ khi đúng "1"; thiếu FlagActive -> '0')
+    //     - ModelCode = StdParam (Trim+ToUpper, rỗng->null)
+    //   * Kiểm tra ĐÚNG THỨ TỰ (:2553-2567):
+    //     1. Mst_CarModel_CheckDB(ModelCode, FlagExist "1", "") (:2553-2559):
+    //        Không tìm thấy dòng (hoặc ModelCode rỗng/null -> = NULL -> 0 dòng) -> Mst_CarModel_CheckDB_CarModelNotFound (:2558).
+    //     2. Mst_CarBrand_CheckDB(BrandCode, FlagExist "1", "") (:2561-2567):
+    //        Không tìm thấy dòng (hoặc BrandCode rỗng/null -> = NULL -> 0 dòng) -> Mst_CarBrand_CheckDB_BrandNotFound (:2566).
+    //        LƯU Ý: strFlagActiveListToCheck = "" -> KHÔNG kiểm FlagActive của hãng (khác Create #100): hãng inactive vẫn hợp lệ.
+    //   * Lưu (:2576-2590): ModelName, BrandCode, Remark, FlagActive + LogLUDTimeUTC = UtcNow + LogLUBy = "port".
+    //     NetworkID và ModelCode KHÔNG đổi. Mã mặc định Mst_CarModel_Update (:2364).
+    //   * Thành công: gate :471-472 SetSuccess + Data = null.
+    //
+    // Bỏ qua có chủ đích (loại Đ):
+    //   * CheckGatewayAuthentication/CheckAuthorize (gate :438-439), Sys_User_CheckAuthorize (:2404-2417).
+    //   * Ghi RequestLog/ReturnLog (:2384-2392, :2481-2489).
+    //   * LogLUBy gán cố định "port" do đích chưa có session người dùng (:2582).
+    // ============================================================================================
+    [HttpPost("update")]
+    public async Task<IActionResult> Update([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] MstCarModelUpdateReq? req)
+    {
+        // 1. Body rỗng/null: gate :428-435 ném Exception("strJson null") -> mã mặc định Mst_CarModel_Update (:2364).
+        if (req == null)
+        {
+            return PortResult.Fail("Mst_CarModel_Update", "Check.strJson", null);
+        }
+
+        // 2. Mở 1 transaction cho toàn bộ nghiệp vụ cập nhật (Master.Loyalty.cs:2382 _cf.db.BeginTransaction()).
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // 3. Chuẩn hoá input (Master.Loyalty.cs:2536-2541):
+            // Ft_Cols_Upd cố định ở gate; hãng inactive vẫn hợp lệ; thiếu FlagActive -> '0'.
+            var strBrandCode = StdParam(req.BrandCode);
+            var strModelName = StdStr(req.ModelName);
+            var strRemark = StdStr(req.Remark);
+            var strFlagActive = StdFlag(req.FlagActive);
+            var strModelCode = StdParam(req.ModelCode);
+
+            // 4. Kiểm tra ĐÚNG THỨ TỰ:
+            // Bước 1: Mst_CarModel_CheckDB(ModelCode, FlagExist "1", "") (:2553-2559).
+            // Nếu ModelCode rỗng hoặc không tìm thấy dòng -> Mst_CarModel_CheckDB_CarModelNotFound (:2558).
+            var entity = string.IsNullOrEmpty(strModelCode)
+                ? null
+                : await _db.Set<Mst_CarModel>().FirstOrDefaultAsync(x =>
+                    EF.Functions.Like((x.ModelCode ?? "").ToLower(), PortQuery.Equal(strModelCode), PortQuery.Esc));
+
+            if (entity == null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_CarModel_CheckDB_CarModelNotFound", "Check.ModelCode", strModelCode);
+            }
+
+            // Bước 2: Mst_CarBrand_CheckDB(BrandCode, FlagExist "1", "") (:2561-2567).
+            // Nếu BrandCode rỗng hoặc không tìm thấy dòng -> Mst_CarBrand_CheckDB_BrandNotFound (:2566).
+            // LƯU Ý: strFlagActiveListToCheck = "" -> KHÔNG kiểm FlagActive của hãng (khác Create #100): hãng inactive vẫn hợp lệ.
+            var brandExists = !string.IsNullOrEmpty(strBrandCode) && await _db.Set<Mst_CarBrand>().AnyAsync(x =>
+                EF.Functions.Like((x.BrandCode ?? "").ToLower(), PortQuery.Equal(strBrandCode), PortQuery.Esc));
+
+            if (!brandExists)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_CarBrand_CheckDB_BrandNotFound", "Check.BrandCode", strBrandCode);
+            }
+
+            // 5. Cập nhật 4 cột cố định từ Ft_Cols_Upd ở gate + log (Master.Loyalty.cs:2576-2582):
+            // ModelCode và NetworkID KHÔNG đổi.
+            entity.ModelName = strModelName;
+            entity.BrandCode = strBrandCode;
+            entity.Remark = strRemark;
+            entity.FlagActive = strFlagActive;
+            entity.LogLUDTimeUTC = DateTime.UtcNow;
+            entity.LogLUBy = "port";
+
+            await _db.SaveChangesAsync();
+
+            // 6. Commit transaction (Master.Loyalty.cs:2455 CommitSafety).
+            await tx.CommitAsync();
+
+            // 7. Thành công: gate :471-472 SetSuccess + Data = null.
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+        catch (Exception)
+        {
+            await tx.RollbackAsync();
+            throw;
+        }
+    }
+
     /// <summary>
     /// Lọc + đếm + chia trang theo ModelCode asc — dùng cho Search, GetAllActive, GetByModelCode.
     /// Trả (itemCount, rows): itemCount = tổng số dòng sau lọc (MyCount, SQL :1752); rows = trang đã cắt kèm MyIdxSeq 0-based (:1783).
@@ -390,6 +513,18 @@ public class Mst_CarModelControllerPort : ControllerBase
         var s = val.ToString()?.Trim();
         if (string.IsNullOrEmpty(s)) return null;
         return s.Normalize();
+    }
+
+    /// <summary>
+    /// Chuẩn hoá cờ: "1" nếu đúng "1", mọi giá trị khác (kể cả null/thiếu/rỗng) -> "0".
+    /// Dùng cho cờ (FlagActive...).
+    /// Nguồn tham chiếu: 05.Refs.Biz\Biz\Loyalty.TVO\Loyalty.TVO.Utils\Utils.cs
+    /// </summary>
+    private static string StdFlag(object? val)
+    {
+        if (val == null) return "0";
+        var s = val.ToString()?.Trim();
+        return s == "1" ? "1" : "0";
     }
     #endregion
 }
