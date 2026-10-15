@@ -73,6 +73,9 @@ public class Mst_NNT
 
     /// <summary>Người dùng thực hiện cập nhật cuối cùng</summary>
     public string? LogLUBy { get; set; }
+
+    /// <summary>Email liên hệ của người nộp thuế (Master.Loyalty.cs:4335 mnnt.ContactEmail mnnt_ContactEmail)</summary>
+    public string? ContactEmail { get; set; }
 }
 
 /// <summary>Cấu hình ánh xạ EntityType cho bảng Mst_Org (khoá chính OrgID).</summary>
@@ -184,7 +187,8 @@ public class Mst_OrgSeeder : IPortSeeder
                 NetworkID = "1001",
                 FlagActive = "1",
                 LogLUDTimeUTC = now,
-                LogLUBy = "admin"
+                LogLUBy = "admin",
+                ContactEmail = "tapdoan01@demo.vn"
             },
             new Mst_NNT
             {
