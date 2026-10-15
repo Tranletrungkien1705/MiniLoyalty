@@ -4,7 +4,7 @@ Nguồn mẫu số: `D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.Web
 
 **Mẫu số (N)**: 337
 
-**Tiến độ hiện tại**: 67/337 (19.88%)
+**Tiến độ hiện tại**: 68/337 (20.18%)
 
 Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã có` (đã port từ trước, có bằng chứng) · `Bỏ` (scaffold/không nghiệp vụ, ghi lý do) · `Cần xem tay`.
 
@@ -75,7 +75,7 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 63 | InvF_TempPrintController/GetByTempPrintType | Chưa làm | - |
 | 64 | InvF_TempPrintController/GetAllActive | Chưa làm | - |
 | 65 | Map_DealerCP_OrgController/GetByDLCPCode | Đã làm | b6bc9a4 |
-| 66 | Map_QueryDealer_MemberController/Search | Chưa làm | - |
+| 66 | Map_QueryDealer_MemberController/Search | Đã làm | 904a579 |
 | 67 | Map_QueryDealer_MemberController/SearchForRePort | Chưa làm | - |
 | 68 | Map_QueryDealer_MemberController/Create | Chưa làm | - |
 | 69 | Map_QueryDealer_MemberController/ExportExcel | Chưa làm | - |
