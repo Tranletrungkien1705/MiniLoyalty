@@ -16,7 +16,7 @@ namespace MiniLoyalty.Controllers.Port;
 /// <summary>
 /// Port 1:1 Mst_DealerCPController.cs — Mst_DealerCP
 /// Chuỗi gọi nguồn:
-///   gate: Mst_DealerCPController.cs:26-106 (Search) + :107-230 (GetAllActive) + :231-296 (GetByDLCPCode) + :297-360 (GetByOrgID) + :364-389 (strWhereClause_Mst_DealerCP) + :390-406 (strWhereClause_Mst_DealerCP_By_DLCPCode) + :407-419 (strWhereClause_Mst_DealerCP_By_OrgID) + :436-521 (CreateOld) + :700-770 (Update) + :774-837 (Delete) + :839-903 (DeleteMultiple) + :1175-1253 (Export)
+///   gate: Mst_DealerCPController.cs:26-106 (Search) + :107-230 (GetAllActive) + :231-296 (GetByDLCPCode) + :297-360 (GetByOrgID) + :364-389 (strWhereClause_Mst_DealerCP) + :390-406 (strWhereClause_Mst_DealerCP_By_DLCPCode) + :407-419 (strWhereClause_Mst_DealerCP_By_OrgID) + :436-521 (CreateOld) + :700-770 (Update) + :774-837 (Delete) + :839-903 (DeleteMultiple) + :1175-1253 (Export) + :1256-1288 (ExportTemplate)
 ///   API:  MstDealerCPController.cs:21-90 (WA_Mst_DealerCP_Get) + :93-162 (WA_Mst_DealerCP_Create) + :165-234 (WA_Mst_DealerCP_Update) + :236-305 (WA_Mst_DealerCP_Delete)
 ///   biz:  Master.Loyalty.cs:3937-4050 (WAS_Mst_DealerCP_Get) -> :4051-4206 (Mst_DealerCP_Get) -> :4209-4433 (Mst_DealerCP_GetX)
 ///         Master.Loyalty.cs:2973-3055 (WAS_Mst_DealerCP_Create) -> :3056-3202 (Mst_DealerCP_Create) -> :3205-3322 (Mst_DealerCP_CreateX) -> :2870-2934 (Mst_DealerCP_CheckDB) -> :2935-2971 (Mst_DealerCP_UpdBU)
@@ -300,6 +300,69 @@ public class Mst_DealerCPControllerPort : ControllerBase
             { "mnnt_NNTFullName", "Tên công ty" },
             { "mnnt_ContactEmail", "Email" },
             { "FlagActive", "Trạng thái" }
+        };
+    }
+
+    /// <summary>
+    /// Port 1:1 ExportTemplate action từ gate Mst_DealerCPController.cs:1256-1288.
+    /// Action này KHÔNG kiểm quyền ở nguồn (không có CheckGatewayAuthentication và không có CheckAuthorize).
+    /// Không gọi tầng service, không truy vấn cơ sở dữ liệu.
+    /// Khởi tạo danh sách rỗng kiểu Mst_DealerCP (:1264).
+    /// Lấy từ điển cột mẫu từ GetImportDicColumsTemplate (:1266) gồm 7 cột.
+    /// Sinh đường dẫn file mẫu qua PortExcel.GenExcelExportFilePath(webRoot, "Mst_DealerCP") (:1268).
+    /// Xuất file Excel qua PortExcel.ExportToExcelFromList(list, dicColNames, physicalPath, "Mst_DealerCP") (:1269).
+    /// Trả về Success = true, Data = { Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath } (:1270-1274).
+    /// Không có nhánh báo lỗi khi danh sách rỗng (khác với Export).
+    /// </summary>
+    [HttpPost("exporttemplate")]
+    public IActionResult ExportTemplate()
+    {
+        // Khởi tạo danh sách rỗng kiểu Mst_DealerCP (gate :1264)
+        var list = new List<Mst_DealerCP>();
+
+        // Lấy từ điển 7 cột mẫu import (gate :1266)
+        var dicColNames = GetImportDicColumsTemplate();
+
+        // Xác định thư mục webRoot và sinh đường dẫn file (gate :1268)
+        var webRoot = _env.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = Path.Combine(_env.ContentRootPath, "wwwroot");
+        }
+
+        var (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Mst_DealerCP");
+
+        // Ghi danh sách rỗng ra file Excel với tên sheet Mst_DealerCP (gate :1269)
+        PortExcel.ExportToExcelFromList(list, dicColNames, physicalPath, "Mst_DealerCP");
+
+        // Trả URL tải file với Success = true (gate :1270-1274)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+            }
+        });
+    }
+
+    /// <summary>
+    /// Từ điển cột mẫu Import Excel: Mst_DealerCPController.cs GetImportDicColumsTemplate().
+    /// Giữ đúng thứ tự 7 cột mẫu từ nguồn:
+    /// DLCPCode ("Mã đại lý (*)"), DLCPCodeParent ("Mã đại lý cha (*)"), DLCPName ("Tên đại lý (*)"),
+    /// DLCPPhoneNo ("Số điện thoại"), mnnt_MST ("MST (*)"), mnnt_NNTFullName ("Tên công ty (*)"), mnnt_ContactEmail ("Email (*)").
+    /// </summary>
+    private static Dictionary<string, string> GetImportDicColumsTemplate()
+    {
+        return new Dictionary<string, string>
+        {
+            { "DLCPCode", "Mã đại lý (*)" },
+            { "DLCPCodeParent", "Mã đại lý cha (*)" },
+            { "DLCPName", "Tên đại lý (*)" },
+            { "DLCPPhoneNo", "Số điện thoại" },
+            { "mnnt_MST", "MST (*)" },
+            { "mnnt_NNTFullName", "Tên công ty (*)" },
+            { "mnnt_ContactEmail", "Email (*)" }
         };
     }
 
