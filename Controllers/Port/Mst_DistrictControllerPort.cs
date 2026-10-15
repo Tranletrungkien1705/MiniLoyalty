@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -13,7 +14,7 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục quận/huyện (Mst_District) của dự án nguồn 2022.7.Loyalty (#139, #140, #141, #142, #143, #144, #145, #146).
+// PORT 1:1 — màn danh mục quận/huyện (Mst_District) của dự án nguồn 2022.7.Loyalty (#139, #140, #141, #142, #143, #144, #145, #146, #147).
 //
 // Nguồn controller (tầng gate):
 //   Mst_DistrictController.cs:31-111   Search              -> WA_Mst_District_Get
@@ -24,7 +25,8 @@ namespace MiniLoyalty.Controllers.Port;
 //   Mst_DistrictController.cs:380-447  Update              -> WA_Mst_District_Update
 //   Mst_DistrictController.cs:449-513  Delete              -> WA_Mst_District_Delete (#145)
 //   Mst_DistrictController.cs:517-673  Import              -> WA_Mst_District_Create (#146)
-//   Mst_DistrictController.cs:818-833  strWhereClause_Mst_District (mệnh đề lọc Search, GetAllActive)
+//   Mst_DistrictController.cs:678-756  Export              -> WA_Mst_District_Get (#147)
+//   Mst_DistrictController.cs:818-833  strWhereClause_Mst_District (mệnh đề lọc Search, GetAllActive, Export)
 //   Mst_DistrictController.cs:835-863  strWhereClause_Mst_District_Detail (mệnh đề lọc GetDetail, GetByProvinceCode)
 // Nguồn API:
 //   MstDistrictController.cs:20-91     WA_Mst_District_Get
@@ -68,6 +70,13 @@ namespace MiniLoyalty.Controllers.Port;
 //         kiểm tra tồn tại theo cặp (ProvinceCode, DistrictCode), không tìm thấy -> ném Mst_District_CheckDB_DistrictNotFound -> 400 ErridnLoyalty.Mst_District_CheckDB_DistrictNotFound;
 //         FK duy nhất tới Mst_District là Mst_Agent (20191203.z11.CreateTable.Mst_Agent.sql:27) CHƯA port -> GAP, không giả lập FK;
 //         xoá dòng Mst_District (:2427-2434); thành công trả về Success = true, Data = null (:493-494).
+//   * Export (#147): nhận { OrgID, KeyWord, FlagActive } (:678); OrgID gate nhận (:702) nhưng strWhereClause_Mst_District (:818-833) KHÔNG sử dụng để lọc;
+//     Gọi GetXAsync(KeyWord, FlagActive, 0, 123456000) (:717-718);
+//     Nếu danh sách rỗng -> throw ServiceException("Không có dữ liệu") (:742) -> trả 400 ErridnLoyalty.Mst_District_Export, Message = "Không có dữ liệu";
+//     Nếu có dữ liệu -> từ điển cột GetImportDicColums() (:729, :795-804: dùng từ điển Import cho Export là của nguồn) gồm 4 cột:
+//     DistrictCode ("Mã quận/huyện (*)"), ProvinceCode ("Mã tỉnh/thành (*)"), DistrictName ("Tên quận/huyện"), FlagActive ("Trạng thái");
+//     Sinh đường dẫn file qua PortExcel.GenExcelExportFilePath(webRoot, "Mst_District") (:731), sheet "Mst_District" (:732);
+//     Ghi file qua PortExcel.ExportToExcelFromList; trả về Success = true, Data = { Url = baseAddress + virtualPath } (:733-737).
 //   * Lọc KeyWord: like '%x%' trên DistrictName (:823-826).
 //   * Lọc FlagActive: toán tử = (:827-830) — KHÁC Province dùng IN ('a','b').
 //   * OrgID: gate nhận (:31, :61, :125, :149, :264, :285) nhưng strWhereClause_Mst_District (:818-833) và strWhereClause_Mst_District_Detail (:835-863) KHÔNG lọc OrgID.
@@ -77,8 +86,8 @@ namespace MiniLoyalty.Controllers.Port;
 //   * PageSize = 0 -> DataList rỗng, PageCount = 0 (gate :86-94).
 //
 // Bỏ qua có chủ đích (loại Đ):
-//   - CheckGatewayAuthentication: gate Mst_DistrictController.cs:40, 122, 188, 335, 458; API MstDistrictController.cs:42-49, 117-122, 265-270
-//   - CheckAuthorize: gate Mst_DistrictController.cs:41, 123, 189, 336, 459 (hệ thống đích chưa có hệ phân quyền)
+//   - CheckGatewayAuthentication: gate Mst_DistrictController.cs:40, 122, 188, 335, 458, 688; API MstDistrictController.cs:42-49, 117-122, 265-270
+//   - CheckAuthorize: gate Mst_DistrictController.cs:41, 123, 189, 336, 459, 689 (hệ thống đích chưa có hệ phân quyền)
 //   - Nguồn gọi bằng tài khoản hệ thống viết cứng tại MstDistrictController.cs:268-269 — không chép giá trị
 //   - Ghi RequestLog/ReturnLog: Master.cs:1841-1849, 2063-2070, 2183-2190, 2394-2401, 2465-2472, 2700-2705, 2960-2966
 //   - Sys_User_CheckAuthorize: Master.cs:2623-2636
@@ -134,10 +143,18 @@ public class MstDistrictDeleteReq
     public string? ProvinceCode { get; set; }        // Mã tỉnh/thành — Mst_DistrictController.cs:449
 }
 
+/// <summary>Port 1:1 <c>Export</c> — body nhận OrgID, KeyWord, FlagActive (Mst_DistrictController.cs:678, 699-704).</summary>
+public class MstDistrictExportReq
+{
+    public string? OrgID { get; set; }               // Tổ chức — gate nhận (:678, :702) nhưng strWhereClause_Mst_District (:818-833) KHÔNG lọc OrgID
+    public string? KeyWord { get; set; }             // Từ khoá tìm theo tên quận/huyện (DistrictName) — :678, :701, :823-826
+    public string? FlagActive { get; set; }          // Cờ hoạt động — :678, :703, :827-830 (toán tử =)
+}
+
 [ApiController]
 [Route("api/mst_district")]
 [Produces("application/json")]
-public class Mst_DistrictControllerPort(AppDbContext db, IConfiguration config) : ControllerBase
+public class Mst_DistrictControllerPort(AppDbContext db, IConfiguration config, IWebHostEnvironment env) : ControllerBase
 {
     [HttpPost("search")]
     public async Task<IActionResult> Search([FromBody] MstDistrictSearchReq? req)
@@ -782,6 +799,102 @@ public class Mst_DistrictControllerPort(AppDbContext db, IConfiguration config) 
             Success = true,
             Data = (object?)null
         });
+    }
+
+    // ============================================================================================
+    // Export (#147) — nguồn gate Mst_DistrictController.cs:678-756 -> API WA_Mst_District_Get
+    // (MstDistrictController.cs:20-91) -> biz WAS_Mst_District_Get (Master.cs:2584-2708)
+    // -> Mst_District_Get (Master.cs:1801-2023).
+    //
+    // Quy trình và thứ tự xử lý:
+    //   1. Body JSON: { OrgID, KeyWord, FlagActive } (gate :678, :699-704).
+    //   2. Gọi GetXAsync(req.KeyWord, req.FlagActive, 0, 123456000).
+    //      Nguồn: OrgID nhận từ client (:702) nhưng hàm strWhereClause_Mst_District (:818-833) KHÔNG sử dụng OrgID để lọc,
+    //      giữ đúng hành vi nguồn (không lọc OrgID).
+    //      Toán tử lọc: KeyWord like '%DistrictName%', FlagActive '=' (KHÁC Province dùng IN).
+    //      Ft_RecordStart = "0", Ft_RecordCount = "123456000" (:717-718).
+    //   3. Kiểm tra danh sách kết quả: gate :725, :740-743
+    //      Nếu danh sách rỗng (rows == null || rows.Count == 0) -> ném ServiceException("Không có dữ liệu") (:742)
+    //      -> trả về 400 ErridnLoyalty.Mst_District_Export kèm Params Message = "Không có dữ liệu".
+    //   4. Từ điển cột xuất Excel: gate :729 -> GetImportDicColums() (:795-804).
+    //      ĐẶC BIỆT LƯU Ý: dùng từ điển Import cho Export là của nguồn (nguồn gọi GetImportDicColums(), KHÔNG phải GetExportDicColums).
+    //      Gồm đúng 4 cột theo thứ tự:
+    //      - DistrictCode: "Mã quận/huyện (*)"
+    //      - ProvinceCode: "Mã tỉnh/thành (*)"
+    //      - DistrictName: "Tên quận/huyện"
+    //      - FlagActive: "Trạng thái"
+    //   5. Sinh đường dẫn file xuất: BaseController.GenExcelExportFilePath (:731) -> PortExcel.GenExcelExportFilePath(webRoot, "Mst_District").
+    //      Tên sheet: "Mst_District" (:732).
+    //      Ghi file qua PortExcel.ExportToExcelFromList(rows, dicColNames, physicalPath, "Mst_District") (:732).
+    //   6. Trả URL tải file với Success = true, Data = { Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath } (:733-737).
+    //
+    // Bỏ qua có chủ đích (loại Đ):
+    //   - CheckGatewayAuthentication: gate Mst_DistrictController.cs:688; API MstDistrictController.cs:42-49
+    //   - CheckAuthorize: gate Mst_DistrictController.cs:689 (hệ thống đích chưa có hệ phân quyền)
+    //   - Sys_User_CheckAuthorize: Master.cs:2623-2636
+    //   - Ghi RequestLog/ReturnLog: Master.cs:1841-1849, 2700-2705
+    // ============================================================================================
+    [HttpPost("export")]
+    public async Task<IActionResult> Export([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] MstDistrictExportReq? req)
+    {
+        req ??= new MstDistrictExportReq();
+
+        // Nguồn: strWhereClause_Mst_District (:818-833) chỉ lọc theo KeyWord và FlagActive (toán tử =),
+        // OrgID truyền vào (:702) nhưng KHÔNG được sử dụng trong hàm tạo WHERE clause -> không lọc OrgID.
+        // Ft_RecordStart = "0", Ft_RecordCount = 123456000, Rt_Cols_Mst_District = "*" (:717-721).
+        var (_, rows) = await GetXAsync(req.KeyWord, req.FlagActive, 0, 123456000);
+
+        // Nguồn Mst_DistrictController.cs:725, :740-743: nếu danh sách rỗng -> throw ServiceException("Không có dữ liệu")
+        if (rows == null || rows.Count == 0)
+        {
+            return PortResult.Fail("Mst_District_Export", "Message", "Không có dữ liệu");
+        }
+
+        // Tạo thư mục và đường dẫn file Excel xuất: BaseController.GenExcelExportFilePath (:731)
+        var webRoot = env.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = Path.Combine(env.ContentRootPath, "wwwroot");
+        }
+
+        // Lấy từ điển cột: Mst_DistrictController.cs:729 gọi GetImportDicColums()
+        // Ghi chú: dùng từ điển Import cho Export là của nguồn (4 cột)
+        var dicColNames = GetImportDicColums();
+        var (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Mst_District");
+
+        // Ghi danh sách ra file Excel: ExcelExport.ExportToExcelFromList (:732) với sheet "Mst_District"
+        PortExcel.ExportToExcelFromList(rows, dicColNames, physicalPath, "Mst_District");
+
+        // Trả URL tải file: Data = { Url = GetRequestBaseAddress() + url } (:733-737)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+            }
+        });
+    }
+
+    /// <summary>
+    /// Từ điển cột xuất Excel: gate Mst_DistrictController.cs:795-804 (GetImportDicColums).
+    /// ĐẶC BIỆT LƯU Ý THEO NGUỒN: Nguồn tại Mst_DistrictController.cs:729 sử dụng GetImportDicColums()
+    /// (dùng từ điển Import cho Export là của nguồn, KHÔNG phải GetExportDicColums).
+    /// Giữ đúng thứ tự 4 cột từ nguồn:
+    /// 1. DistrictCode ("Mã quận/huyện (*)")
+    /// 2. ProvinceCode ("Mã tỉnh/thành (*)")
+    /// 3. DistrictName ("Tên quận/huyện")
+    /// 4. FlagActive ("Trạng thái")
+    /// </summary>
+    private static Dictionary<string, string> GetImportDicColums()
+    {
+        return new Dictionary<string, string>
+        {
+            { "DistrictCode", "Mã quận/huyện (*)" },
+            { "ProvinceCode", "Mã tỉnh/thành (*)" },
+            { "DistrictName", "Tên quận/huyện" },
+            { "FlagActive", "Trạng thái" }
+        };
     }
 
     /// <summary>
