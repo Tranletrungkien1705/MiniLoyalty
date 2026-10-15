@@ -554,7 +554,7 @@ public class Mst_CardTypeControllerPort(AppDbContext db, IConfiguration config, 
     // GAP:
     //   * Các bảng FK còn lại trong DDL nguồn chưa có ở đích -> thêm kiểm tra khi port các bảng đó:
     //     - Mst_BirthPolicyDtl.CardType (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
-    //     - Mst_PromotionProgramSpec.CardType (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
+    //     - Mst_PromotionProgramSpec.CardType (DDL nguồn khai FK_MstCartType_Mst_PromotionPrDtl trên Spec(CardType) nhưng Spec KHÔNG có cột CardType — DDL lỗi, tên gợi ý Mst_PromotionProgramDtl.CardType; CHƯA giả lập, cần xác nhận DB thật)
     //
     // Bỏ qua có chủ đích (loại Đ):
     //   * CheckGatewayAuthentication/CheckAuthorize (gate :498-499), Sys_User_CheckAuthorize (:6562-6576):
@@ -739,7 +739,7 @@ public class Mst_CardTypeControllerPort(AppDbContext db, IConfiguration config, 
 
             // GAP: Các bảng FK còn lại trong DDL nguồn chưa có ở đích -> thêm kiểm tra khi port các bảng đó:
             // - Mst_BirthPolicyDtl.CardType (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
-            // - Mst_PromotionProgramSpec.CardType (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
+            // - Mst_PromotionProgramSpec.CardType (DDL nguồn khai FK_MstCartType_Mst_PromotionPrDtl trên Spec(CardType) nhưng Spec KHÔNG có cột CardType — DDL lỗi, tên gợi ý Mst_PromotionProgramDtl.CardType; CHƯA giả lập, cần xác nhận DB thật)
 
             // 5. Xoá dòng Mst_CardType (Master.Loyalty.cs:6692-6695 DeleteX)
             db.Set<Mst_CardType>().Remove(entity);

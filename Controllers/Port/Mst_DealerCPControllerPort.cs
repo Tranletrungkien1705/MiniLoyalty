@@ -1101,11 +1101,27 @@ public class Mst_DealerCPControllerPort : ControllerBase
                 return PortResult.Fail("Mst_DealerCP_Delete", "Check.DLCPCode", strDLCPCode, "FK", "Crd_Member.DLCodeRegis");
             }
 
+            // Map_QueryDealer_Member.DLCPCode (FK_MstDealerCP_MapQueryDealerMember — 20221108.z11.Crd_Member.Crd_Card.sql; bảng port ở #66)
+            var hasQueryDealer = await _db.Set<Map_QueryDealer_Member>().AnyAsync(m =>
+                EF.Functions.Like((m.DLCPCode ?? "").ToLower(), PortQuery.Equal(strDLCPCode), PortQuery.Esc));
+            if (hasQueryDealer)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_DealerCP_Delete", "Check.DLCPCode", strDLCPCode, "FK", "Map_QueryDealer_Member.DLCPCode");
+            }
+
+            // Mst_PromotionProgramSpec.DLCode (FK_MstDealerCp_Mst_ProPrSpec — 20221026.CreateDatabase.sql; bảng port ở #205)
+            var hasPromotionSpec = await _db.Set<Mst_PromotionProgramSpec>().AnyAsync(s =>
+                EF.Functions.Like((s.DLCode ?? "").ToLower(), PortQuery.Equal(strDLCPCode), PortQuery.Esc));
+            if (hasPromotionSpec)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_DealerCP_Delete", "Check.DLCPCode", strDLCPCode, "FK", "Mst_PromotionProgramSpec.DLCode");
+            }
+
             // GAP: Các bảng FK còn lại trong DDL nguồn chưa có ở đích -> thêm kiểm tra khi port bảng đó:
-            // - Map_QueryDealer_Member.DLCPCode (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
             // - Prm_CarNew.DLCPCode (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
             // - Prm_CarRecommend.DLCPCode (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
-            // - Mst_PromotionProgramSpec.DLCode (chưa có ở đích -> GAP: thêm kiểm tra khi port bảng đó)
             // Bảng Map_DealerCP_Org KHÔNG có FK -> nguồn xóa đại lý vẫn để lại dòng map (giữ nguyên theo nguồn, KHÔNG tự xóa map).
 
             // 5. Xóa dòng Mst_DealerCP: Master.Loyalty.cs:3926-3932 (DeleteX)
