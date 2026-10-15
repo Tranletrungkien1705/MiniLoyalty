@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -11,7 +13,7 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục quận/huyện (Mst_District) của dự án nguồn 2022.7.Loyalty (#139, #140, #141, #142, #143, #144, #145).
+// PORT 1:1 — màn danh mục quận/huyện (Mst_District) của dự án nguồn 2022.7.Loyalty (#139, #140, #141, #142, #143, #144, #145, #146).
 //
 // Nguồn controller (tầng gate):
 //   Mst_DistrictController.cs:31-111   Search              -> WA_Mst_District_Get
@@ -21,6 +23,7 @@ namespace MiniLoyalty.Controllers.Port;
 //   Mst_DistrictController.cs:316-376  Create              -> WA_Mst_District_Create
 //   Mst_DistrictController.cs:380-447  Update              -> WA_Mst_District_Update
 //   Mst_DistrictController.cs:449-513  Delete              -> WA_Mst_District_Delete (#145)
+//   Mst_DistrictController.cs:517-673  Import              -> WA_Mst_District_Create (#146)
 //   Mst_DistrictController.cs:818-833  strWhereClause_Mst_District (mệnh đề lọc Search, GetAllActive)
 //   Mst_DistrictController.cs:835-863  strWhereClause_Mst_District_Detail (mệnh đề lọc GetDetail, GetByProvinceCode)
 // Nguồn API:
@@ -280,6 +283,37 @@ public class Mst_DistrictControllerPort(AppDbContext db, IConfiguration config) 
             return PortResult.Fail("Mst_District_Create", "Check.strJson", null);
         }
 
+        // Gọi CreateXAsync thực hiện nghiệp vụ tạo (1 transaction / lần)
+        var err = await CreateXAsync(req.DistrictCode, req.ProvinceCode, req.DistrictName);
+        if (err != null)
+        {
+            return err;
+        }
+
+        // Thành công trả về Success = true, Data = null: gate Mst_DistrictController.cs:362-363
+        return Ok(new
+        {
+            Success = true,
+            Data = (object?)null
+        });
+    }
+
+    /// <summary>
+    /// Nghiệp vụ tạo 1 quận/huyện — 1 transaction riêng biệt. Dùng chung cho Create (#143) và Import (#146, gọi từng dòng).
+    /// Nguồn: WA_Mst_District_Create (MstDistrictController.cs:94-165) -> WAS_Mst_District_Create (Master.cs:2710-2794)
+    /// -> Mst_District_Create (Master.cs:2024-2193) -> Mst_District_CheckDB (Master.cs:1729-1799)
+    /// -> Mst_Province_CheckDB (Master.cs:27-91).
+    /// Thứ tự kiểm tra:
+    ///   1. Chuẩn hoá: strDistrictCode = StdParam(districtCode), strProvinceCode = StdParam(provinceCode), strDistrictName = string.Format("{0}", name).Trim() (:2076-2078)
+    ///   2. Mã quận/huyện rỗng -> ErridnLoyalty.Mst_District_Create_InvalidDistrictCode (:2086-2095)
+    ///   3. Trùng theo CẶP (ProvinceCode, DistrictCode) -> ErridnLoyalty.Mst_District_CheckDB_DistrictExist (:2097-2104)
+    ///   4. Tỉnh/thành: không tìm thấy -> ErridnLoyalty.Mst_Province_CheckDB_ProvinceNotFound (:2108-2114, :53-63), cờ khác '1' -> ErridnLoyalty.Mst_Province_CheckDB_FlagActiveNotMatched (:78-89)
+    ///   5. Tên quận/huyện rỗng -> ErridnLoyalty.Mst_District_Create_InvalidDistrictName (:2116-2126)
+    ///   6. Lưu 7 cột Mst_District, commit transaction (:2136-2156).
+    /// Trả null nếu thành công; trả IActionResult lỗi (400) nếu thất bại.
+    /// </summary>
+    private async Task<IActionResult?> CreateXAsync(string? districtCode, string? provinceCode, string? name)
+    {
         // Bắt đầu Transaction toàn bộ quá trình tạo (Master.cs:2060 _cf.db.BeginTransaction())
         await using var tx = await db.Database.BeginTransactionAsync();
         try
@@ -288,9 +322,9 @@ public class Mst_DistrictControllerPort(AppDbContext db, IConfiguration config) 
             // strDistrictCode = StdParam(objDistrictCode) (Trim + ToUpper, rỗng -> null)
             // strProvinceCode = StdParam(objProvinceCode) (Trim + ToUpper, rỗng -> null)
             // strDistrictName = string.Format("{0}", objDistrictName).Trim() (CHỈ Trim, KHÔNG Normalize; null -> "")
-            var strDistrictCode = StdParam(req.DistrictCode);
-            var strProvinceCode = StdParam(req.ProvinceCode);
-            var strDistrictName = string.Format("{0}", req.DistrictName).Trim();
+            var strDistrictCode = StdParam(districtCode);
+            var strProvinceCode = StdParam(provinceCode);
+            var strDistrictName = string.Format("{0}", name).Trim();
 
             // 3. Kiểm tra mã quận/huyện: Master.cs:2086-2095
             if (string.IsNullOrEmpty(strDistrictCode))
@@ -359,12 +393,7 @@ public class Mst_DistrictControllerPort(AppDbContext db, IConfiguration config) 
             // Commit Transaction (Master.cs:2156 TDALUtils.DBUtils.CommitSafety)
             await tx.CommitAsync();
 
-            // Thành công trả về Success = true, Data = null: gate Mst_DistrictController.cs:362-363
-            return Ok(new
-            {
-                Success = true,
-                Data = (object?)null
-            });
+            return null; // Thành công
         }
         catch (Exception)
         {
@@ -632,6 +661,144 @@ public class Mst_DistrictControllerPort(AppDbContext db, IConfiguration config) 
                 "Check.DistrictCode", req?.DistrictCode,
                 "Check.ProvinceCode", req?.ProvinceCode);
         }
+    }
+
+    // ============================================================================================
+    // Import — nguồn gate Mst_DistrictController.cs:517-673 -> API WA_Mst_District_Create
+    // (MstDistrictController.cs:94-165) -> biz WAS_Mst_District_Create (Master.cs:2710-2794)
+    // -> Mst_District_Create (Master.cs:2024-2193).
+    //
+    // GIẢ ĐỊNH (kế thừa từ Data/PortExcel.cs, commit f9de190):
+    //   - Định dạng file Excel: dòng 1 = tiêu đề (đúng file ExportTemplate sinh ra), dữ liệu bắt đầu từ ô A2 (firstDataRow = 2).
+    //   - Cột ánh xạ theo vị trí: cột 1 = DistrictCode, cột 2 = ProvinceCode, cột 3 = DistrictName
+    //     (GetImportDicColumsTemplate có 3 cột:
+    //      DistrictCode -> "Mã quận/huyện (*)", ProvinceCode -> "Mã tỉnh/thành (*)", DistrictName -> "Tên quận/huyện").
+    //
+    // Quy trình và thứ tự kiểm tra:
+    //   1. Kiểm tra file upload: gate Mst_DistrictController.cs:541-546
+    //      - Thiếu file hoặc file rỗng hoặc đuôi file != ".xlsx" -> Fail("Mst_District_Import", "Message", "File excel import không hợp lệ")
+    //   2. Đọc file bằng PortExcel.ReadSheet(stream, new[] { "DistrictCode", "ProvinceCode", "DistrictName" }):
+    //      - Bảng không có dòng dữ liệu (table == null || table.Rows.Count == 0) -> Fail("Mst_District_Import", "Message", "File excel import không có dữ liệu") (:558, :658)
+    //      - Số cột tiêu đề != GetImportDicColumsTemplate().Count (3 cột) -> Fail("Mst_District_Import", "Message", "File excel import không hợp lệ") (:560-563)
+    //   3. Kiểm tra TẤT CẢ các dòng TRƯỚC khi tạo (#region["Check null"] :567-603):
+    //      - DistrictCode rỗng / khoảng trắng -> Fail("Mst_District_Import", "Message", "Mã quận/huyện không được trống") (:570-573)
+    //      - ProvinceCode rỗng / khoảng trắng -> Fail("Mst_District_Import", "Message", "Mã tỉnh/thành không được trống") (:575-578)
+    //      - DistrictName rỗng / khoảng trắng -> Fail("Mst_District_Import", "Message", "Tên quận/huyện không được trống") (:580-583)
+    //      Nếu có bất kỳ dòng nào vi phạm, dừng ngay và KHÔNG có dòng nào được tạo vào CSDL.
+    //   4. Lưu từng dòng (hành vi "import một phần"):
+    //      - Duyệt từng dòng theo thứ tự, gọi CreateXAsync(districtCode, provinceCode, name) riêng cho mỗi dòng (mỗi dòng 1 transaction biz riêng biệt: gate :630-651).
+    //      - Nếu dòng thứ k gặp lỗi (vd trùng mã Mst_District_CheckDB_DistrictExist hoặc tỉnh ngưng Mst_Province_CheckDB_FlagActiveNotMatched),
+    //        vòng lặp dừng ngay lập tức, trả về đúng lỗi của CreateXAsync cho dòng k.
+    //      - CÁC DÒNG TRƯỚC k ĐÃ ĐƯỢC COMMIT VÀO DB (không rollback các dòng đã tạo trước đó).
+    //      - Các dòng sau k không được duyệt.
+    //   5. Thành công: trả Ok({ Success = true, Data = null }) (:653-654).
+    //
+    // Bỏ qua có chủ đích (loại Đ):
+    //   - CheckGatewayAuthentication, CheckAuthorize (:528-529)
+    //   - Nguồn lưu file tạm xuống đĩa (FileUtils.SaveTempFile :549) -> ở đây đọc trực tiếp từ stream qua ClosedXML
+    //   - Session người dùng orgUserUI (:527, :633, :641-645).
+    // ============================================================================================
+    [HttpPost("import")]
+    [Consumes("multipart/form-data")]
+    public async Task<IActionResult> Import(IFormFile? file)
+    {
+        // 1. Kiểm tra file upload: gate Mst_DistrictController.cs:541-546
+        if (file == null || file.Length == 0)
+        {
+            return PortResult.Fail("Mst_District_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+        if (ext != ".xlsx")
+        {
+            return PortResult.Fail("Mst_District_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        // 2. Đọc bảng tính bằng PortExcel.ReadSheet (giả định định dạng file Excel từ PortExcel)
+        int columnCount;
+        List<Dictionary<string, string?>> rows;
+        try
+        {
+            using var stream = file.OpenReadStream();
+            (columnCount, rows) = PortExcel.ReadSheet(stream, new[] { "DistrictCode", "ProvinceCode", "DistrictName" });
+        }
+        catch
+        {
+            return PortResult.Fail("Mst_District_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        // Kiểm tra có dữ liệu hay không: gate :558, :658 (table == null || table.Rows.Count == 0)
+        if (rows.Count == 0)
+        {
+            return PortResult.Fail("Mst_District_Import", "Message", "File excel import không có dữ liệu");
+        }
+
+        // Kiểm tra số cột dòng tiêu đề so với GetImportDicColumsTemplate().Count (3 cột): gate :560-563
+        if (columnCount != GetImportDicColumsTemplate().Count)
+        {
+            return PortResult.Fail("Mst_District_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        // 3. Kiểm tra TẤT CẢ các dòng TRƯỚC khi tạo (Check null: gate Mst_DistrictController.cs:567-603)
+        foreach (var r in rows)
+        {
+            var districtCode = r.GetValueOrDefault("DistrictCode");
+            if (string.IsNullOrWhiteSpace(districtCode))
+            {
+                return PortResult.Fail("Mst_District_Import", "Message", "Mã quận/huyện không được trống");
+            }
+
+            var provinceCode = r.GetValueOrDefault("ProvinceCode");
+            if (string.IsNullOrWhiteSpace(provinceCode))
+            {
+                return PortResult.Fail("Mst_District_Import", "Message", "Mã tỉnh/thành không được trống");
+            }
+
+            var districtName = r.GetValueOrDefault("DistrictName");
+            if (string.IsNullOrWhiteSpace(districtName))
+            {
+                return PortResult.Fail("Mst_District_Import", "Message", "Tên quận/huyện không được trống");
+            }
+        }
+
+        // 4. Lưu từng dòng tuần tự: mỗi dòng 1 transaction riêng (hành vi "import một phần": gate :630-651)
+        foreach (var r in rows)
+        {
+            var districtCode = r.GetValueOrDefault("DistrictCode");
+            var provinceCode = r.GetValueOrDefault("ProvinceCode");
+            var districtName = r.GetValueOrDefault("DistrictName");
+
+            var err = await CreateXAsync(districtCode, provinceCode, districtName);
+            if (err != null)
+            {
+                // Lỗi ở dòng k -> thoát ngay, trả đúng lỗi của Create, các dòng trước k đã tạo thành công
+                return err;
+            }
+        }
+
+        // Thành công: gate :653-654
+        return Ok(new
+        {
+            Success = true,
+            Data = (object?)null
+        });
+    }
+
+    /// <summary>
+    /// Từ điển cột mẫu Import Excel: gate Mst_DistrictController.cs (GetImportDicColumsTemplate).
+    /// Giữ đúng thứ tự 3 cột từ nguồn:
+    /// 1. DistrictCode ("Mã quận/huyện (*)")
+    /// 2. ProvinceCode ("Mã tỉnh/thành (*)")
+    /// 3. DistrictName ("Tên quận/huyện")
+    /// </summary>
+    private static Dictionary<string, string> GetImportDicColumsTemplate()
+    {
+        return new Dictionary<string, string>
+        {
+            { "DistrictCode", "Mã quận/huyện (*)" },
+            { "ProvinceCode", "Mã tỉnh/thành (*)" },
+            { "DistrictName", "Tên quận/huyện" }
+        };
     }
 
     /// <summary>
