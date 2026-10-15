@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -13,7 +14,7 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục tỉnh/thành (Mst_Province) của dự án nguồn 2022.7.Loyalty (#213, #214, #215, #216, #217, #218, #219).
+// PORT 1:1 — màn danh mục tỉnh/thành (Mst_Province) của dự án nguồn 2022.7.Loyalty (#213, #214, #215, #216, #217, #218, #219, #220).
 //
 // Nguồn controller (tầng gate):
 //   Mst_ProvinceController.cs:31-111   Search              -> WA_Mst_Province_Get
@@ -23,7 +24,8 @@ namespace MiniLoyalty.Controllers.Port;
 //   Mst_ProvinceController.cs:309-373  Update              -> WA_Mst_Province_Update
 //   Mst_ProvinceController.cs:377-437  Delete              -> WA_Mst_Province_Delete
 //   Mst_ProvinceController.cs:441-592  Import              -> WA_Mst_Province_Create
-//   Mst_ProvinceController.cs:735-759  strWhereClause_Mst_Province (mệnh đề lọc Search, GetAllActive)
+//   Mst_ProvinceController.cs:597-675  Export              -> WA_Mst_Province_Get
+//   Mst_ProvinceController.cs:735-759  strWhereClause_Mst_Province (mệnh đề lọc Search, GetAllActive, Export)
 //   Mst_ProvinceController.cs:761-776  strWhereClause_Mst_Province_By_ProvinceCode (mệnh đề lọc By ProvinceCode)
 // Nguồn API:
 //   MstProvinceController.cs:20-91     WA_Mst_Province_Get
@@ -63,13 +65,21 @@ namespace MiniLoyalty.Controllers.Port;
 //     Kiểm tra TẤT CẢ dòng trước khi tạo: mã rỗng -> "Mã tỉnh/thành không được trống", tên rỗng -> "Tên quận/huyện không được trống" (nguồn viết nhầm "quận/huyện" cho tỉnh — giữ nguyên);
 //     Duyệt từng dòng: gọi CreateXAsync độc lập (mỗi dòng 1 transaction riêng); lỗi dòng k dừng ngay và trả lỗi dòng đó (import một phần, các dòng trước k đã lưu);
 //     Thành công Data = null (:572-573).
+//   * Export: nhận { OrgID, KeyWord, FlagActive } (:597); OrgID gate nhận (:621) nhưng strWhereClause_Mst_Province (:735-759) KHÔNG sử dụng để lọc;
+//     Gọi GetXAsync(KeyWord, FlagActive, 0, 123456000, null) (:636-637);
+//     Nếu danh sách rỗng -> throw ServiceException("Không có dữ liệu") (:661) -> trả 400 ErridnLoyalty.Mst_Province_Export, Message = "Không có dữ liệu";
+//     Nếu có dữ liệu -> từ điển cột GetImportDicColums() (:647, :714-722: dùng từ điển Import cho Export là của nguồn) gồm 3 cột:
+//     ProvinceCode ("Mã tỉnh/thành (*)"), ProvinceName ("Tên quận/huyện"), FlagActive ("Trạng thái");
+//     Sinh đường dẫn file qua PortExcel.GenExcelExportFilePath(webRoot, "Mst_Province") (:650), sheet "Mst_Province" (:651);
+//     Ghi file qua PortExcel.ExportToExcelFromList; trả về Success = true, Data = { Url = baseAddress + virtualPath } (:652-656).
 //
 // Bỏ qua có chủ đích (loại Đ):
-//   - CheckGatewayAuthentication: gate Mst_ProvinceController.cs:264, 386; API MstProvinceController.cs:117-122, 265-270
-//   - CheckAuthorize: gate Mst_ProvinceController.cs:265, 387 (hệ thống đích chưa có hệ phân quyền)
+//   - CheckGatewayAuthentication: gate Mst_ProvinceController.cs:264, 386, 607; API MstProvinceController.cs:42-49, 117-122, 265-270
+//   - CheckAuthorize: gate Mst_ProvinceController.cs:265, 387, 608 (hệ thống đích chưa có hệ phân quyền)
 //   - Nguồn gọi bằng tài khoản hệ thống viết cứng (tài khoản + mật khẩu viết cứng tại :279-282 — KHÔNG chép giá trị),
 //     đích chưa có phân quyền; KHÔNG chép thông tin đăng nhập vào mã
-//   - Ghi RequestLog/ReturnLog: Master.cs:628-635, 733-740, 927-934, 996-1003
+//   - Ghi RequestLog/ReturnLog: Master.cs:390-397, 593-601, 628-635, 733-740, 927-934, 996-1003
+//   - Sys_User_CheckAuthorize: Master.cs:409-423
 //   - LogLUBy gán cố định "port" do hệ thống đích chưa có session người dùng (Master.cs:693, 845)
 //   - Biz_NetworkID lấy từ cấu hình IConfiguration, mặc định "1001" nếu thiếu (Common.cs:39, 124; Master.cs:689)
 // ============================================================================================
@@ -111,10 +121,18 @@ public class MstProvinceDeleteReq
     public string? ProvinceCode { get; set; }         // Mã tỉnh/thành cần xoá — Mst_Province.cs:11, Gate :377, Master.cs:939
 }
 
+/// <summary>Port 1:1 <c>Export</c> — body nhận OrgID, KeyWord, FlagActive (Mst_ProvinceController.cs:597, 618-622).</summary>
+public class MstProvinceExportReq
+{
+    public string? OrgID { get; set; }               // Tổ chức — gate nhận (:597, :621) nhưng strWhereClause_Mst_Province (:735-759) KHÔNG lọc OrgID
+    public string? KeyWord { get; set; }             // Từ khoá tìm theo tên tỉnh/thành (ProvinceName) — :597, :620, :740-743
+    public string? FlagActive { get; set; }          // Cờ hoạt động, danh sách phân cách dấu phẩy — :597, :622, :748-756
+}
+
 [ApiController]
 [Route("api/mst_province")]
 [Produces("application/json")]
-public class Mst_ProvinceControllerPort(AppDbContext db, IConfiguration config) : ControllerBase
+public class Mst_ProvinceControllerPort(AppDbContext db, IConfiguration config, IWebHostEnvironment env) : ControllerBase
 {
     [HttpPost("search")]
     public async Task<IActionResult> Search([FromBody] MstProvinceSearchReq? req)
@@ -618,8 +636,100 @@ public class Mst_ProvinceControllerPort(AppDbContext db, IConfiguration config) 
         });
     }
 
+    // ============================================================================================
+    // Export — nguồn gate Mst_ProvinceController.cs:597-675 -> API WA_Mst_Province_Get
+    // (MstProvinceController.cs:20-91) -> biz WAS_Mst_Province_Get (Master.cs:1109-1213)
+    // -> Mst_Province_Get (Master.cs:321-590).
+    //
+    // Quy trình và thứ tự xử lý:
+    //   1. Body JSON: { OrgID, KeyWord, FlagActive } (gate :597, :618-623).
+    //   2. Gọi GetXAsync(req.KeyWord, req.FlagActive, 0, 123456000, null).
+    //      Nguồn: OrgID nhận từ client (:621) nhưng hàm strWhereClause_Mst_Province (:735-759) KHÔNG sử dụng OrgID để lọc,
+    //      giữ đúng hành vi nguồn (không lọc OrgID).
+    //      Ft_RecordStart = "0", Ft_RecordCount = "123456000" (:636-637).
+    //   3. Kiểm tra danh sách kết quả: gate :644, :659-662
+    //      Nếu danh sách rỗng (rows == null || rows.Count == 0) -> ném ServiceException("Không có dữ liệu") (:661)
+    //      -> trả về 400 ErridnLoyalty.Mst_Province_Export kèm Params Message = "Không có dữ liệu".
+    //   4. Từ điển cột xuất Excel: gate :647 -> GetImportDicColums() (:714-722).
+    //      ĐẶC BIỆT LƯU Ý: dùng từ điển Import cho Export là của nguồn (nguồn gọi GetImportDicColums(), KHÔNG phải GetExportDicColums).
+    //      Gồm đúng 3 cột theo thứ tự:
+    //      - ProvinceCode: "Mã tỉnh/thành (*)"
+    //      - ProvinceName: "Tên quận/huyện" (nguồn viết nhầm "quận/huyện" cho tỉnh — giữ đúng nguyên văn)
+    //      - FlagActive: "Trạng thái"
+    //   5. Sinh đường dẫn file xuất: BaseController.GenExcelExportFilePath (:650) -> PortExcel.GenExcelExportFilePath(webRoot, "Mst_Province").
+    //      Tên sheet: "Mst_Province" (:651).
+    //      Ghi file qua PortExcel.ExportToExcelFromList(rows, dicColNames, physicalPath, "Mst_Province") (:651).
+    //   6. Trả URL tải file với Success = true, Data = { Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath } (:652-656).
+    //
+    // Bỏ qua có chủ đích (loại Đ):
+    //   - CheckGatewayAuthentication: gate Mst_ProvinceController.cs:607; API MstProvinceController.cs:42-49
+    //   - CheckAuthorize: gate Mst_ProvinceController.cs:608 (hệ thống đích chưa có hệ phân quyền)
+    //   - Sys_User_CheckAuthorize: Master.cs:409-423
+    //   - Ghi RequestLog/ReturnLog: Master.cs:390-397, 593-601
+    // ============================================================================================
+    [HttpPost("export")]
+    public async Task<IActionResult> Export([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] MstProvinceExportReq? req)
+    {
+        req ??= new MstProvinceExportReq();
+
+        // Nguồn: strWhereClause_Mst_Province (:735-759) chỉ lọc theo KeyWord và FlagActive,
+        // OrgID truyền vào (:621) nhưng KHÔNG được sử dụng trong hàm tạo WHERE clause -> không lọc OrgID.
+        // Ft_RecordStart = "0", Ft_RecordCount = 123456000, Rt_Cols_Mst_Province = "*" (:636-640).
+        var (_, rows) = await GetXAsync(req.KeyWord, req.FlagActive, 0, 123456000, null);
+
+        // Nguồn :644, :659-662: nếu danh sách rỗng -> throw ServiceException("Không có dữ liệu")
+        if (rows == null || rows.Count == 0)
+        {
+            return PortResult.Fail("Mst_Province_Export", "Message", "Không có dữ liệu");
+        }
+
+        // Tạo thư mục và đường dẫn file Excel xuất: BaseController.GenExcelExportFilePath (:650)
+        var webRoot = env.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = Path.Combine(env.ContentRootPath, "wwwroot");
+        }
+
+        // Lấy từ điển cột: Mst_ProvinceController.cs:647 gọi GetImportDicColums()
+        // Ghi chú: dùng từ điển Import cho Export là của nguồn
+        var dicColNames = GetImportDicColums();
+        var (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Mst_Province");
+
+        // Ghi danh sách ra file Excel: ExcelExport.ExportToExcelFromList (:651) với sheet "Mst_Province"
+        PortExcel.ExportToExcelFromList(rows, dicColNames, physicalPath, "Mst_Province");
+
+        // Trả URL tải file: Data = { Url = GetRequestBaseAddress() + url } (:652-656)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+            }
+        });
+    }
+
     /// <summary>
-    /// Lọc + đếm + chia trang theo ProvinceCode asc — dùng chung cho Search, GetByProvinceCode và GetAllActive.
+    /// Từ điển cột xuất Excel: gate Mst_ProvinceController.cs:714-722 (GetImportDicColums).
+    /// ĐẶC BIỆT LƯU Ý THEO NGUỒN: Nguồn tại Mst_ProvinceController.cs:647 sử dụng GetImportDicColums()
+    /// (dùng từ điển Import cho Export là của nguồn, KHÔNG phải GetExportDicColums).
+    /// Giữ đúng thứ tự 3 cột từ nguồn:
+    /// 1. ProvinceCode ("Mã tỉnh/thành (*)")
+    /// 2. ProvinceName ("Tên quận/huyện" — nguồn viết nhầm "quận/huyện" cho danh mục tỉnh, giữ nguyên)
+    /// 3. FlagActive ("Trạng thái")
+    /// </summary>
+    private static Dictionary<string, string> GetImportDicColums()
+    {
+        return new Dictionary<string, string>
+        {
+            { "ProvinceCode", "Mã tỉnh/thành (*)" },
+            { "ProvinceName", "Tên quận/huyện" },
+            { "FlagActive", "Trạng thái" }
+        };
+    }
+
+    /// <summary>
+    /// Lọc + đếm + chia trang theo ProvinceCode asc — dùng chung cho Search, GetByProvinceCode, GetAllActive và Export.
     /// Trả (itemCount, rows): itemCount = tổng số dòng sau lọc (MyCount, SQL :453); rows = trang đã cắt kèm MyIdxSeq 0-based (:443).
     /// </summary>
     private async Task<(int itemCount, List<object> rows)> GetXAsync(string? keyWord, string? flagActiveCsv, long recordStart, long recordCount, string? provinceCodeEqual)
