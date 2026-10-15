@@ -80,6 +80,26 @@ public class Mst_CarBrandControllerPort : ControllerBase
     }
 
     /// <summary>
+    /// Port 1:1 <c>Mst_CarBrandController.GetAllActive</c> (nguồn gate :106-215).
+    /// Nguồn gọi <c>strWhereClause_Mst_CarBrand</c> với <c>FlagActive = "1"</c> (:132-136) ⇒ lọc
+    /// <c>FlagActive IN ('1')</c> (:297-305). <c>OrgID</c> chỉ được GÁN vào request (:134, :146),
+    /// hàm lọc KHÔNG dùng OrgID ⇒ KHÔNG lọc theo OrgID.
+    /// Không body: RecordStart = "0", RecordCount = "123456000" (nguồn Ft_RecordStart/Ft_RecordCount).
+    /// Trả <c>Ok(new { Success = true, Data = ... })</c> — Data là MẢNG TRẦN, rỗng thì <c>null</c>
+    /// (nguồn :129 khởi tạo null, :155-157 chỉ gán khi có dòng, :195-199 trả thẳng listMst_CarBrand).
+    /// </summary>
+    [HttpPost("getallactive")]
+    public async Task<IActionResult> GetAllActive()
+    {
+        // Nguồn: Ft_RecordStart = "0", Ft_RecordCount = "123456000" (gate :148-149).
+        // FlagActive = "1" (gate :135) ⇒ lọc IN ('1'); OrgID không lọc.
+        var (_, rows) = await GetXAsync(null, "1", 0, 123456000);
+
+        // Nguồn :195-199: Data = listMst_CarBrand (mảng trần); rỗng ⇒ null (:129, :155-157).
+        return Ok(new { Success = true, Data = rows.Count > 0 ? rows : null });
+    }
+
+    /// <summary>
     /// Lọc + đếm + chia trang theo BrandCode asc — dùng cho Search.
     /// Trả (itemCount, rows): itemCount = tổng số dòng sau lọc (MyCount, SQL :411); rows = trang đã cắt kèm MyIdxSeq 0-based (:443).
     /// </summary>
