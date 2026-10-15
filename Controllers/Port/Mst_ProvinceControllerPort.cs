@@ -11,7 +11,7 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục tỉnh/thành (Mst_Province) của dự án nguồn 2022.7.Loyalty (#213, #214, #215, #216, #217).
+// PORT 1:1 — màn danh mục tỉnh/thành (Mst_Province) của dự án nguồn 2022.7.Loyalty (#213, #214, #215, #216, #217, #218).
 //
 // Nguồn controller (tầng gate):
 //   Mst_ProvinceController.cs:31-111   Search              -> WA_Mst_Province_Get
@@ -19,16 +19,19 @@ namespace MiniLoyalty.Controllers.Port;
 //   Mst_ProvinceController.cs:178-241  GetAllActive        -> WA_Mst_Province_Get
 //   Mst_ProvinceController.cs:245-305  Create              -> WA_Mst_Province_Create
 //   Mst_ProvinceController.cs:309-373  Update              -> WA_Mst_Province_Update
+//   Mst_ProvinceController.cs:377-437  Delete              -> WA_Mst_Province_Delete
 //   Mst_ProvinceController.cs:735-759  strWhereClause_Mst_Province (mệnh đề lọc Search, GetAllActive)
 //   Mst_ProvinceController.cs:761-776  strWhereClause_Mst_Province_By_ProvinceCode (mệnh đề lọc By ProvinceCode)
 // Nguồn API:
 //   MstProvinceController.cs:20-91     WA_Mst_Province_Get
 //   MstProvinceController.cs:94-165    WA_Mst_Province_Create
 //   MstProvinceController.cs:168-239   WA_Mst_Province_Update
+//   MstProvinceController.cs:242-313   WA_Mst_Province_Delete
 // Nguồn biz:
 //   Master.Loyalty.cs (WAS_Mst_Province_Get -> Mst_Province_Get -> Mst_Province_Get SQL: :442-488)
 //   Master.cs:1215-1297 (WAS_Mst_Province_Create) -> Master.cs:591-743 (Mst_Province_Create) -> Master.cs:27-91 (Mst_Province_CheckDB)
 //   Master.cs:1299-1385 (WAS_Mst_Province_Update) -> Master.cs:744-894 (Mst_Province_Update) -> Master.cs:27-91 (Mst_Province_CheckDB)
+//   Master.cs:1387-1468 (WAS_Mst_Province_Delete) -> Master.cs:895-1006 (Mst_Province_Delete) -> Master.cs:27-91 (Mst_Province_CheckDB)
 //
 // GIỮ ĐÚNG NGUỒN:
 //   * Endpoint là POST (nguồn [AcceptVerbs("POST")]).
@@ -49,14 +52,17 @@ namespace MiniLoyalty.Controllers.Port;
 //     (2) CheckDB(Flag.Yes) không thấy -> ProvinceNotFound, (3) bUpd_ProvinceName && tên rỗng -> InvalidProvinceName;
 //     mã qua StdParam (Trim + ToUpper), tên chỉ Trim; StdFlag: thiếu/không phải "1" -> "0" (cảnh báo: thiếu FlagActive cập nhật về "0");
 //     LogLUBy "port", LogLUDTimeUTC = UtcNow; 1 transaction, lỗi -> rollback.
+//   * Delete: kiểm tra thứ tự: (1) mã rỗng -> ServiceException("invalid_provincecode", "invalid_provincecode") chữ thường (:421-423),
+//     (2) CheckDB(Flag.Yes) không thấy -> ProvinceNotFound (:944-949, :53-63); không có FK tham chiếu Mst_Province -> không kiểm bảng con;
+//     xoá dòng Mst_Province (:958-964); 1 transaction, lỗi -> rollback; thành công Data = null (:418-419).
 //
 // Bỏ qua có chủ đích (loại Đ):
-//   - CheckGatewayAuthentication: gate Mst_ProvinceController.cs:264; API MstProvinceController.cs:117-122
-//   - CheckAuthorize: gate Mst_ProvinceController.cs:265 (hệ thống đích chưa có hệ phân quyền)
+//   - CheckGatewayAuthentication: gate Mst_ProvinceController.cs:264, 386; API MstProvinceController.cs:117-122, 265-270
+//   - CheckAuthorize: gate Mst_ProvinceController.cs:265, 387 (hệ thống đích chưa có hệ phân quyền)
 //   - Nguồn gọi bằng tài khoản hệ thống viết cứng (tài khoản + mật khẩu viết cứng tại :279-282 — KHÔNG chép giá trị),
 //     đích chưa có phân quyền; KHÔNG chép thông tin đăng nhập vào mã
-//   - Ghi RequestLog/ReturnLog: Master.cs:628-635, 733-740
-//   - LogLUBy gán cố định "port" do hệ thống đích chưa có session người dùng (Master.cs:693)
+//   - Ghi RequestLog/ReturnLog: Master.cs:628-635, 733-740, 927-934, 996-1003
+//   - LogLUBy gán cố định "port" do hệ thống đích chưa có session người dùng (Master.cs:693, 845)
 //   - Biz_NetworkID lấy từ cấu hình IConfiguration, mặc định "1001" nếu thiếu (Common.cs:39, 124; Master.cs:689)
 // ============================================================================================
 
@@ -89,6 +95,12 @@ public class MstProvinceUpdateReq
     public string? ProvinceCode { get; set; }         // Mã tỉnh/thành — Mst_Province.cs:11, Master.cs:802
     public string? ProvinceName { get; set; }         // Tên tỉnh/thành — Mst_Province.cs:15, Master.cs:803
     public object? FlagActive { get; set; }           // Cờ hoạt động — Mst_Province.cs:17, Master.cs:804
+}
+
+/// <summary>Port 1:1 <c>Delete</c> — body nhận ProvinceCode (Mst_ProvinceController.cs:377-437).</summary>
+public class MstProvinceDeleteReq
+{
+    public string? ProvinceCode { get; set; }         // Mã tỉnh/thành cần xoá — Mst_Province.cs:11, Gate :377, Master.cs:939
 }
 
 [ApiController]
@@ -364,6 +376,89 @@ public class Mst_ProvinceControllerPort(AppDbContext db, IConfiguration config) 
             await tx.CommitAsync();
 
             // Thành công trả về Success = true, Data = null: gate Mst_ProvinceController.cs:359-360
+            return Ok(new
+            {
+                Success = true,
+                Data = (object?)null
+            });
+        }
+        catch (Exception)
+        {
+            await tx.RollbackAsync();
+            throw;
+        }
+    }
+
+    // ============================================================================================
+    // Delete — nguồn gate Mst_ProvinceController.cs:377-437 -> API WA_Mst_Province_Delete
+    // (MstProvinceController.cs:242-313) -> biz WAS_Mst_Province_Delete (Master.cs:1387-1468)
+    // -> Mst_Province_Delete (Master.cs:895-1006) -> Mst_Province_CheckDB (Master.cs:27-91).
+    //
+    // Quy trình và thứ tự kiểm tra:
+    //   1. Kiểm tra mã rỗng: Gate Mst_ProvinceController.cs:396, 421-423
+    //      if (!TUtils.CUtils.IsNullOrEmpty(ProvinceCode)) { ... }
+    //      else { throw new ServiceException("invalid_provincecode", "invalid_provincecode"); }
+    //      Khi ProvinceCode null/rỗng/khoảng trắng -> trả về 400 ErridnLoyalty.invalid_provincecode (chữ thường đúng nguồn).
+    //   2. Bắt đầu 1 Transaction: Master.cs:924 _cf.db.BeginTransaction()
+    //   3. Chuẩn hoá dữ liệu input:
+    //      strProvinceCode = StdParam(objProvinceCode) (:939: Trim + ToUpper, rỗng -> null)
+    //   4. Kiểm tra tồn tại trong DB: Master.cs:944-950 -> Mst_Province_CheckDB (Master.cs:27-91)
+    //      strFlagExistToCheck = "1" (TConst.Flag.Yes / Active), strFlagActiveListToCheck = ""
+    //      Nếu không tìm thấy -> Fail("Mst_Province_CheckDB_ProvinceNotFound", "Check.ProvinceCode", strProvinceCode) (:53-63)
+    //   5. Xoá dòng Mst_Province trong DB: Master.cs:958-964
+    //      DDL không có FK nào REFERENCES Mst_Province -> không có FK -> không kiểm bảng con (khác DealerCP #117, không giả lập FK).
+    //   6. Commit và trả Ok({ Success = true, Data = null }) (:418-419).
+    //
+    // Bỏ qua có chủ đích (loại Đ):
+    //   - CheckGatewayAuthentication: gate Mst_ProvinceController.cs:386; API MstProvinceController.cs:265-270
+    //   - CheckAuthorize: gate Mst_ProvinceController.cs:387 (hệ thống đích chưa có hệ phân quyền)
+    //   - Nguồn gọi bằng tài khoản hệ thống viết cứng, không chép thông tin đăng nhập vào mã
+    //   - Ghi RequestLog/ReturnLog: Master.cs:927-934, 996-1003
+    // ============================================================================================
+    [HttpPost("delete")]
+    public async Task<IActionResult> Delete([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] MstProvinceDeleteReq? req)
+    {
+        // 1. Kiểm tra mã rỗng: Gate Mst_ProvinceController.cs:396, 421-423
+        // Nguồn ném ServiceException("invalid_provincecode", "invalid_provincecode") viết chữ thường
+        if (string.IsNullOrWhiteSpace(req?.ProvinceCode))
+        {
+            return PortResult.Fail("invalid_provincecode", "Check.ProvinceCode", req?.ProvinceCode);
+        }
+
+        // Bắt đầu 1 Transaction toàn bộ quá trình xoá (Master.cs:924 _cf.db.BeginTransaction())
+        await using var tx = await db.Database.BeginTransactionAsync();
+        try
+        {
+            // 2. Chuẩn hoá dữ liệu input: Master.cs:939
+            // strProvinceCode = StdParam(objProvinceCode) (Trim + ToUpper, rỗng -> null)
+            var strProvinceCode = StdParam(req.ProvinceCode);
+            if (string.IsNullOrEmpty(strProvinceCode))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("invalid_provincecode", "Check.ProvinceCode", req.ProvinceCode);
+            }
+
+            // 3. Kiểm tra tồn tại trong DB: Master.cs:944-950 -> Mst_Province_CheckDB (Master.cs:27-91)
+            // strFlagExistToCheck = "1" (TConst.Flag.Yes / Active). So mã qua PortQuery.Equal + Like (không phân biệt hoa/thường)
+            var province = await db.Set<Mst_Province>().FirstOrDefaultAsync(x =>
+                EF.Functions.Like((x.ProvinceCode ?? "").ToLower(), PortQuery.Equal(strProvinceCode), PortQuery.Esc));
+
+            if (province == null)
+            {
+                // Không tìm thấy tỉnh/thành (:53-63) -> ErridnLoyalty.Mst_Province_CheckDB_ProvinceNotFound
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_Province_CheckDB_ProvinceNotFound", "Check.ProvinceCode", strProvinceCode);
+            }
+
+            // 4. Xoá dòng Mst_Province: Master.cs:958-964
+            // DDL không có FK nào REFERENCES Mst_Province -> không có FK -> không kiểm bảng con (khác DealerCP #117, không giả lập FK).
+            db.Set<Mst_Province>().Remove(province);
+            await db.SaveChangesAsync();
+
+            // Commit Transaction (Master.cs:969 TDALUtils.DBUtils.CommitSafety)
+            await tx.CommitAsync();
+
+            // Thành công trả về Success = true, Data = null: gate Mst_ProvinceController.cs:418-419
             return Ok(new
             {
                 Success = true,
