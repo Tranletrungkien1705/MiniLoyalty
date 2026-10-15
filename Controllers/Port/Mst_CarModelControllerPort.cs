@@ -10,20 +10,27 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục dòng xe (Mst_CarModel) của dự án nguồn 2022.7.Loyalty (#97, #98, #99).
+// PORT 1:1 — màn danh mục dòng xe (Mst_CarModel) của dự án nguồn 2022.7.Loyalty (#97, #98, #99, #100).
 //
 // Nguồn controller (tầng gate):
 //   Mst_CarModelController.cs:25-105   Search              -> WA_Mst_CarModel_Get
 //   Mst_CarModelController.cs:106-216  GetAllActive        -> WA_Mst_CarModel_Get
 //   Mst_CarModelController.cs:217-280  GetByModelCode      -> WA_Mst_CarModel_Get
+//   Mst_CarModelController.cs:329-414  Create              -> WA_Mst_CarModel_Create
 //   Mst_CarModelController.cs:284-305  strWhereClause_Mst_CarModel (mệnh đề lọc Search)
 //   Mst_CarModelController.cs:306-325  strWhereClause_Mst_CarModel_By_ModelCode (mệnh đề lọc GetByModelCode)
 // Nguồn API:
+//   MstCarModelController.cs:20-90     WA_Mst_CarModel_Create
 //   MstCarModelController.cs:238-307   WA_Mst_CarModel_Get
 // Nguồn biz:
 //   Master.Loyalty.cs:1434-1534        WAS_Mst_CarModel_Get
 //   Master.Loyalty.cs:1535-1687        Mst_CarModel_Get
 //   Master.Loyalty.cs:1688-1842        Mst_CarModel_GetX (SQL :1739-1791)
+//   Master.Loyalty.cs:1908-1991        WAS_Mst_CarModel_Create
+//   Master.Loyalty.cs:1992-2141        Mst_CarModel_Create
+//   Master.Loyalty.cs:2142-2250        Mst_CarModel_CreateX
+//   Master.Loyalty.cs:1843-1906        Mst_CarModel_CheckDB
+//   Master.Loyalty.cs:28-91            Mst_CarBrand_CheckDB
 //
 // GIỮ ĐÚNG NGUỒN:
 //   * Endpoint là POST (nguồn [AcceptVerbs("POST")]).
@@ -65,6 +72,20 @@ public class MstCarModelSearchReq
 public class MstCarModelGetByModelCodeReq
 {
     public string? ModelCode { get; set; }            // Mã dòng xe cần lấy — :237-241
+}
+
+/// <summary>
+/// Port 1:1 <c>Create</c> — body JSON 5 trường của model nguồn (Mst_CarModelController.cs:329-414).
+/// Nguồn deserialize vào TModelLoyaltys.Mst_CarModel rồi truyền ModelCode/NetworkID/BrandCode/ModelName/Remark
+/// xuống biz (Master.Loyalty.cs:1957-1961, 2151-2155).
+/// </summary>
+public class MstCarModelCreateReq
+{
+    public string? ModelCode { get; set; }            // Mã dòng xe — :1957, :2179 (StdParam)
+    public string? NetworkID { get; set; }            // NetworkID lấy từ JSON, không từ cấu hình — :1958, :2177 (StdParam)
+    public string? BrandCode { get; set; }            // Mã hãng xe — :1959, :2175 (StdParam)
+    public string? ModelName { get; set; }            // Tên dòng xe — :1960, :2176 (StdStr — KHÔNG viết hoa)
+    public string? Remark { get; set; }               // Ghi chú — :1961, :2178 (StdStr)
 }
 
 [ApiController]
@@ -143,6 +164,145 @@ public class Mst_CarModelControllerPort : ControllerBase
         return Ok(new { Success = true, Data = rows.Count > 0 ? rows[0] : null });
     }
 
+    // ============================================================================================
+    // Create — nguồn Mst_CarModelController.cs:329-414 (gate) -> MstCarModelController.cs:20-90 (API)
+    //   -> Master.Loyalty.cs:1908-1991 (WAS_Mst_CarModel_Create) -> :1992-2141 (Mst_CarModel_Create)
+    //   -> :2142-2250 (Mst_CarModel_CreateX) -> :1843-1906 (Mst_CarModel_CheckDB)
+    //   -> :28-91 (Mst_CarBrand_CheckDB).
+    //
+    // GIỮ ĐÚNG NGUỒN:
+    //   * Body JSON nhận ModelCode, NetworkID, BrandCode, ModelName, Remark (:1957-1961).
+    //     ModelCode do người dùng nhập, khối sinh Seq (:360-381) bị comment trong nguồn (KHÔNG sinh tự động).
+    //   * Body rỗng/null: gate :339-346 ném ServiceException("strJson null") -> mã mặc định Mst_CarModel_Create (:2016).
+    //   * Chuẩn hoá (:2175-2179):
+    //     - BrandCode = StdParam (Trim+ToUpper, rỗng->null)
+    //     - ModelName = StdStr (Trim+Normalize, rỗng->null — KHÔNG viết hoa, khác CarBrand)
+    //     - NetworkID = StdParam (Trim+ToUpper, rỗng->null)
+    //     - Remark    = StdStr (Trim+Normalize, rỗng->null)
+    //     - ModelCode = StdParam (Trim+ToUpper, rỗng->null)
+    //   * Kiểm tra ĐÚNG THỨ TỰ (:2188-2214):
+    //     1. ModelCode null/rỗng -> Mst_CarModel_Create_InvalidModelCode (:2188-2198).
+    //     2. Mst_CarModel_CheckDB(ModelCode, FlagExist "0", ""): đã tồn tại -> Mst_CarModel_CheckDB_CarModelExist (:2200-2206, :1886).
+    //     3. Mst_CarBrand_CheckDB(BrandCode, FlagExist "1", FlagActive "1"):
+    //        - Không có dòng (hoặc BrandCode rỗng/null -> t.BrandCode = NULL -> 0 dòng) -> Mst_CarBrand_CheckDB_BrandNotFound (:2208-2214, :55-63).
+    //        - Có dòng nhưng FlagActive khác "1" -> Mst_CarBrand_CheckDB_FlagActiveNotMatched (:79-90).
+    //   * Lưu (:2225-2241): ModelCode, NetworkID, BrandCode, ModelName, Remark, FlagActive = "1",
+    //     LogLUDTimeUTC = UtcNow, LogLUBy = user. Mã mặc định Mst_CarModel_Create (:2016).
+    //   * Thành công: gate :400-401 SetSuccess + Data = null.
+    //
+    // Bỏ qua có chủ đích (loại Đ):
+    //   * CheckGatewayAuthentication/CheckAuthorize (gate :349-350), Sys_User_CheckAuthorize (:2056-2069).
+    //   * Ghi RequestLog/ReturnLog (:2037-2044, :2131-2138).
+    //   * LogLUBy gán cố định "port" do đích chưa có session người dùng (:2233).
+    // ============================================================================================
+    [HttpPost("create")]
+    public async Task<IActionResult> Create([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] MstCarModelCreateReq? req)
+    {
+        // 1. Body rỗng/null: gate :339-346 ném ServiceException("strJson null") -> mã mặc định Mst_CarModel_Create (:2016).
+        if (req == null)
+        {
+            return PortResult.Fail("Mst_CarModel_Create", "Check.strJson", null);
+        }
+
+        // Gọi CreateXAsync thực hiện nghiệp vụ tạo (1 transaction / lần)
+        var err = await CreateXAsync(req.ModelCode, req.NetworkID, req.BrandCode, req.ModelName, req.Remark);
+        if (err != null)
+        {
+            return err;
+        }
+
+        // Thành công: gate :400-401 SetSuccess + Data = null.
+        return Ok(new { Success = true, Data = (object?)null });
+    }
+
+    /// <summary>
+    /// Nghiệp vụ tạo 1 dòng xe — 1 transaction riêng biệt.
+    /// Nguồn: WA_Mst_CarModel_Create (MstCarModelController.cs:20-90) -> WAS_Mst_CarModel_Create (Master.Loyalty.cs:1908-1991)
+    /// -> Mst_CarModel_Create (Master.Loyalty.cs:1992-2141) -> Mst_CarModel_CreateX (Master.Loyalty.cs:2142-2250)
+    /// -> Mst_CarModel_CheckDB (Master.Loyalty.cs:1843-1906) -> Mst_CarBrand_CheckDB (Master.Loyalty.cs:28-91).
+    /// </summary>
+    private async Task<IActionResult?> CreateXAsync(string? modelCode, string? networkId, string? brandCode, string? modelName, string? remark)
+    {
+        // 1 transaction cho toàn bộ nghiệp vụ tạo (Master.Loyalty.cs:2034 _cf.db.BeginTransaction()).
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // Chuẩn hoá input (Master.Loyalty.cs:2175-2179):
+            // BrandCode = StdParam, ModelName = StdStr (KHÔNG viết hoa), NetworkID = StdParam, Remark = StdStr, ModelCode = StdParam.
+            var strBrandCode = StdParam(brandCode);
+            var strModelName = StdStr(modelName);
+            var strNetworkID = StdParam(networkId);
+            var strRemark = StdStr(remark);
+            var strModelCode = StdParam(modelCode);
+
+            // Kiểm tra ĐÚNG THỨ TỰ:
+            // 1. ModelCode null/rỗng -> ErridnLoyalty.Mst_CarModel_Create_InvalidModelCode (:2188-2198).
+            if (string.IsNullOrEmpty(strModelCode))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_CarModel_Create_InvalidModelCode", "Check.strModelCode", strModelCode);
+            }
+
+            // 2. Mst_CarModel_CheckDB(ModelCode, FlagExist "0", "") (:2200-2206): đã tồn tại -> Mst_CarModel_CheckDB_CarModelExist (:1886).
+            var modelExists = await _db.Set<Mst_CarModel>().AnyAsync(x =>
+                EF.Functions.Like((x.ModelCode ?? "").ToLower(), PortQuery.Equal(strModelCode), PortQuery.Esc));
+            if (modelExists)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_CarModel_CheckDB_CarModelExist", "Check.ModelCode", strModelCode);
+            }
+
+            // 3. Mst_CarBrand_CheckDB(BrandCode, FlagExist "1", FlagActive "1") (:2208-2214):
+            // Nguồn so t.BrandCode = @objBrandCode. Nếu BrandCode null -> 0 dòng -> Mst_CarBrand_CheckDB_BrandNotFound (:55-63).
+            var brand = string.IsNullOrEmpty(strBrandCode)
+                ? null
+                : await _db.Set<Mst_CarBrand>().FirstOrDefaultAsync(x =>
+                    EF.Functions.Like((x.BrandCode ?? "").ToLower(), PortQuery.Equal(strBrandCode), PortQuery.Esc));
+
+            if (brand == null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_CarBrand_CheckDB_BrandNotFound", "Check.BrandCode", strBrandCode);
+            }
+
+            // Có dòng nhưng FlagActive không thuộc "1" -> Mst_CarBrand_CheckDB_FlagActiveNotMatched (:79-90).
+            // Nguồn :79 `!"1".Contains(Convert.ToString(FlagActive))` — FlagActive NULL/rỗng ⇒ "" ⇒ Contains("") = true ⇒ VẪN qua.
+            if (!"1".Contains(brand.FlagActive ?? ""))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_CarBrand_CheckDB_FlagActiveNotMatched",
+                    "Check.BrandCode", strBrandCode,
+                    "Check.strFlagActiveListToCheck", "1",
+                    "DB.FlagActive", brand.FlagActive);
+            }
+
+            // Lưu dòng mới (Master.Loyalty.cs:2225-2241).
+            var dtimeSys = DateTime.UtcNow; // :2014 dtimeSys = DateTime.UtcNow
+            var entity = new Mst_CarModel
+            {
+                ModelCode = strModelCode,
+                NetworkID = strNetworkID,
+                BrandCode = strBrandCode,
+                ModelName = strModelName,
+                Remark = strRemark,
+                FlagActive = "1", // TConst.Flag.Active (:2231)
+                LogLUDTimeUTC = dtimeSys,
+                LogLUBy = "port" // strWAUserCode (:2233) — loại Đ do đích chưa có session user
+            };
+
+            _db.Set<Mst_CarModel>().Add(entity);
+            await _db.SaveChangesAsync();
+
+            await tx.CommitAsync();
+            return null;
+        }
+        catch (Exception)
+        {
+            await tx.RollbackAsync();
+            throw;
+        }
+    }
+
     /// <summary>
     /// Lọc + đếm + chia trang theo ModelCode asc — dùng cho Search, GetAllActive, GetByModelCode.
     /// Trả (itemCount, rows): itemCount = tổng số dòng sau lọc (MyCount, SQL :1752); rows = trang đã cắt kèm MyIdxSeq 0-based (:1783).
@@ -205,4 +365,31 @@ public class Mst_CarModelControllerPort : ControllerBase
 
         return (itemCount, rows);
     }
+
+    #region Helper chuẩn hoá input (05.Refs.Biz\Biz\Loyalty.TVO\Loyalty.TVO.Utils\Utils.cs)
+    /// <summary>
+    /// Chuẩn hoá tham số mã: Trim, ToUpper, rỗng -> null.
+    /// Dùng cho mã (ModelCode, BrandCode, NetworkID...).
+    /// Nguồn tham chiếu: 05.Refs.Biz\Biz\Loyalty.TVO\Loyalty.TVO.Utils\Utils.cs:29
+    /// </summary>
+    private static string? StdParam(object? val)
+    {
+        if (val == null) return null;
+        var s = val.ToString()?.Trim();
+        return string.IsNullOrEmpty(s) ? null : s.ToUpperInvariant();
+    }
+
+    /// <summary>
+    /// Chuẩn hoá chuỗi: Trim, Normalize, rỗng -> null.
+    /// Dùng cho tên, ghi chú (ModelName, Remark...). KHÔNG viết hoa (khác CarBrand).
+    /// Nguồn tham chiếu: 05.Refs.Biz\Biz\Loyalty.TVO\Loyalty.TVO.Utils\Utils.cs:29
+    /// </summary>
+    private static string? StdStr(object? val)
+    {
+        if (val == null) return null;
+        var s = val.ToString()?.Trim();
+        if (string.IsNullOrEmpty(s)) return null;
+        return s.Normalize();
+    }
+    #endregion
 }
