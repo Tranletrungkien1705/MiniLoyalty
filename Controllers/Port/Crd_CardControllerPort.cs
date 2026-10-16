@@ -462,6 +462,135 @@ public class Crd_CardControllerPort : ControllerBase
     }
 
     /// <summary>
+    /// Lấy chi tiết thẻ hội viên mới — port 1:1 từ Crd_CardController.GetDetailMember_New (#003).
+    /// Nguồn tầng Gate:
+    ///   Crd_CardController.cs:205-284   GetDetailMember_New -> Crd_CardService.WA_Crd_Card_Calc
+    /// Nguồn tầng API:
+    ///   CrdCardController.cs:236-306    WA_Crd_Card_Calc -> _biz.WAS_Crd_Card_Calc
+    /// Nguồn tầng Biz:
+    ///   Card.cs:24547-24632             WAS_Crd_Card_Calc -> Crd_Card_Calc
+    ///   Card.cs:24634-24753             Crd_Card_Calc -> Crd_Card_CalcX
+    ///   Card.cs:24755-25059             Crd_Card_CalcX (kiểm tra CheckDB, tính toán hạng và dữ liệu liên quan)
+    /// </summary>
+    [HttpPost("getdetailmember_new")]
+    public async Task<IActionResult> GetDetailMember_New(
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_CardControllerGetDetailMemberReq? req,
+        [FromQuery] string? memberNo = null,
+        [FromQuery] string? cardNo = null)
+    {
+        var effCardNo = req?.CardNo ?? cardNo;
+        var effMemberNo = req?.MemberNo ?? memberNo;
+
+        // 1. Kiểm tra đầu vào ở tầng Gate theo đúng thứ tự nguồn (Crd_CardController.cs:227-271):
+        //    - Kiểm tra CardNo trước (:227, :268-271): nếu null hoặc rỗng -> ném ServiceException("invalid_CardNo", "invalid_CardNo")
+        //      -> 400 ErridnLoyalty.invalid_CardNo.
+        if (string.IsNullOrWhiteSpace(effCardNo))
+        {
+            return PortResult.Fail("invalid_CardNo", "Check.CardNo", effCardNo);
+        }
+
+        //    - Kiểm tra MemberNo sau (:229, :263-266): nếu null hoặc rỗng -> ném ServiceException("invalid_MemberNo", "invalid_MemberNo")
+        //      -> 400 ErridnLoyalty.invalid_MemberNo.
+        if (string.IsNullOrWhiteSpace(effMemberNo))
+        {
+            return PortResult.Fail("invalid_MemberNo", "Check.MemberNo", effMemberNo);
+        }
+
+        // 2. Chuẩn hoá tham số theo Biz Crd_Card_CalcX (Card.cs:24790-24791):
+        //    strCardNo = TUtils.CUtils.StdParam(objCardNo) (Trim và ToUpper);
+        //    strMemberNo = string.Format("{0}", objMemberNo).Trim() (Trim).
+        var strCardNo = effCardNo.Trim().ToUpperInvariant();
+        var strMemberNo = effMemberNo.Trim();
+
+        // 3. Kiểm tra DB theo Crd_Card_CheckDB (Card.cs:24800-24805 và Card.cs:21229-21300):
+        //    - Kiểm tra tồn tại thẻ (strFlagExistToCheck = Flag.Yes = "1"): không thấy -> Crd_Card_CheckDB_CardNotFound (:21261)
+        var cardPat = PortQuery.Equal(strCardNo);
+        var card = await _db.CrdCards.AsNoTracking()
+            .FirstOrDefaultAsync(c => EF.Functions.Like((c.CardNo ?? "").ToLower(), cardPat, PortQuery.Esc));
+        if (card == null)
+        {
+            return PortResult.Fail("Crd_Card_CheckDB_CardNotFound", "Check.CardNo", strCardNo);
+        }
+
+        //    - Kiểm tra trạng thái thẻ (strStatusListToCheck = CardStatus.Approve = "APPROVE"):
+        //      khác APPROVE -> Crd_Card_CheckDB_CardStatusNotMatched (:21288, :21297)
+        if (!string.Equals(card.CardStatus, "APPROVE", StringComparison.OrdinalIgnoreCase))
+        {
+            return PortResult.Fail("Crd_Card_CheckDB_CardStatusNotMatched",
+                "Check.CardNo", strCardNo,
+                "Check.strCardStatusListToCheck", "APPROVE",
+                "DB.CardStatus", card.CardStatus);
+        }
+
+        // 4. Kiểm tra DB theo Crd_Member_CheckDB (Card.cs:24810-24817 và Card.cs:29-85):
+        //    - Kiểm tra tồn tại hội viên (strFlagExistToCheck = Flag.Yes = "1"): không thấy -> Crd_Member_CheckDB_MemberNotFound (:62)
+        var memPat = PortQuery.Equal(strMemberNo);
+        var member = await _db.CrdMembers.AsNoTracking()
+            .FirstOrDefaultAsync(m => EF.Functions.Like((m.MemberNo ?? "").ToLower(), memPat, PortQuery.Esc));
+        if (member == null)
+        {
+            return PortResult.Fail("Crd_Member_CheckDB_MemberNotFound", "Check.MemberNo", strMemberNo);
+        }
+
+        // 5. SQL tính toán của Crd_Card_CalcX (Card.cs:24930-25027):
+        //    t = Crd_Card cc inner join (thẻ đầu vào: CardNo + MemberNo) inner join Mst_RankPolicy mrp on cc.CardTypeUse = mrp.CardType
+        //        inner join Mst_ParamSys mps (ParamCode = 'UNITPOINTTOMONEY')
+        //        PointAvailNow = isnull(AmountAvail * ParamValue, 0); ValueUpRank = mrp.Value; ParamValue = cast(mps.ParamValue as float)
+        //    f (RankUp) = top 1 Mst_RankPolicy mrp where mrp.CardType = t.CardTypeUse and mrp.Value > t.ValueUpRank order by mrp.Value asc
+        //    kết quả = t inner join f (1=1) inner join Crd_Member cm ... => không có chính sách nâng hạng thì KHÔNG có dòng (Crd_Card = null).
+        //    (Khối "Check RankPolicy" Card.cs:24878-24925 chỉ gán strCardTypeUse, biến này KHÔNG được SQL tính toán dùng; câu SQL đầu của khối tham chiếu alias mrp
+        //     không tồn tại -> GAP, bỏ qua.)
+        if (!string.Equals(card.MemberNo, member.MemberNo, StringComparison.OrdinalIgnoreCase))
+        {
+            return Ok(new { Success = true, Data = new { Crd_Card = (Crd_CardSearchItem?)null } });
+        }
+
+        var typeUsePat = PortQuery.Equal((card.CardTypeUse ?? "").Trim());
+        var policies = await _db.Set<Mst_RankPolicy>().AsNoTracking()
+            .Where(p => EF.Functions.Like((p.CardType ?? "").ToLower(), typeUsePat, PortQuery.Esc))
+            .OrderBy(p => p.RankPolicyCode)
+            .ToListAsync();
+        var paramSys = await _db.Set<Mst_ParamSys>().AsNoTracking().FirstOrDefaultAsync(x => x.ParamCode == "UNITPOINTTOMONEY");
+        if (policies.Count == 0 || paramSys == null || !double.TryParse(paramSys.ParamValue, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var paramValue))
+        {
+            return Ok(new { Success = true, Data = new { Crd_Card = (Crd_CardSearchItem?)null } });
+        }
+
+        // f: chính sách nâng hạng gần nhất: Value lớn hơn ValueUpRank của (bất kỳ) dòng t, nhỏ nhất theo Value
+        var allSameType = await _db.Set<Mst_RankPolicy>().AsNoTracking()
+            .Where(p => EF.Functions.Like((p.CardType ?? "").ToLower(), typeUsePat, PortQuery.Esc))
+            .ToListAsync();
+        var rankUp = allSameType
+            .Where(f => policies.Any(t => f.Value > t.Value))
+            .OrderBy(f => f.Value)
+            .FirstOrDefault();
+        if (rankUp == null)
+        {
+            return Ok(new { Success = true, Data = new { Crd_Card = (Crd_CardSearchItem?)null } });
+        }
+
+        // Dòng kết quả đầu tiên (một dòng cho mỗi chính sách mrp của hạng sử dụng của thẻ).
+        var pointAvailNow = (card.AmountAvail ?? 0) * paramValue;
+        var sameType = string.Equals(rankUp.CardType, card.CardTypeUse, StringComparison.OrdinalIgnoreCase);
+        double? revenueMiss = sameType ? 0 : (paramValue == 0 ? 0 : ((rankUp.PointUpBegin ?? 0) - pointAvailNow) / paramValue);
+        double? qtyVisitMiss = sameType ? 0 : ((rankUp.QtyVisitUpBegin ?? 0) - (card.QtyVisitAvail ?? 0));
+
+        // Chỉ các cột mà Crd_Card_CalcX chọn: t.* (cột thẻ) + cm.* (cột hội viên) + ProvinceName/ModelName/BrandName/DistrictName + RevenueMiss/QtyVisitMiss.
+        var full = (await BuildCrdCardItemsAsync(new List<CrdCardMemberPair> { new(member, card) })).First();
+        full.PointExpiry = null; full.AmountRef = null; full.ConvertValue = null; full.ConvertPoint = null;
+        full.PolicyAmountUnit = null; full.PolicyPointUnit = null; full.PolicyCode = null; full.ParamCode = null;
+        full.ParamPointUnit = null; full.ParamAmountUnit = null; full.PointAccumulated = null; full.PointUse = null;
+        full.cm_FlagShow = null; full.cc_FlagShow = null; full.mdcp_DLCPCode = null; full.mdcp_DLCPName = null;
+        full.mcm_ModelName = null; full.PurchaseTypeName = null;
+        full.EffDateStart = card.EffDateStart?.ToString("yyyy-MM-dd HH:mm:ss");   // cột thẻ thô (Search chuyển giờ VN)
+        full.RevenueMiss = revenueMiss;
+        full.QtyVisitMiss = qtyVisitMiss;
+
+        // 6. Gate Crd_CardController.cs:257-261: Success = true, Data = { Crd_Card = obj_Crd_Card }
+        return Ok(new { Success = true, Data = new { Crd_Card = full } });
+    }
+
+    /// <summary>
     /// Ánh xạ danh sách (Crd_Member, Crd_Card) sang model Crd_CardSearchItem kèm các phép tính của
     /// Crd_Card_GetX_New20251229 (Master.Loyalty.cs:19556-19794). Dùng chung cho Search và GetDetailMember.
     /// </summary>

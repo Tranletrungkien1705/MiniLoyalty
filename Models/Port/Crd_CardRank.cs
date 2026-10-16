@@ -62,7 +62,7 @@ public class Crd_CardRankConfig : IEntityTypeConfiguration<Crd_CardRank>
 /// </summary>
 public class Crd_CardRankSeeder : IPortSeeder
 {
-    public int Order => 52;
+    public int Order => 91;   // chạy SAU các seeder Crd_Member/Crd_Card (MB001 do Crd_CardSeeder/RptPE tạo) để không làm đổi dữ liệu mẫu của hạng mục khác (LESSONS A.24)
 
     public async Task SeedAsync(AppDbContext db)
     {
