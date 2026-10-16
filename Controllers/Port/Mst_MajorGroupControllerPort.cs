@@ -11,11 +11,13 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục chuyên ngành (Mst_MajorGroup) của dự án nguồn 2022.7.Loyalty (#170).
+// PORT 1:1 — màn danh mục chuyên ngành (Mst_MajorGroup) của dự án nguồn 2022.7.Loyalty (#170, #171).
 //
 // Nguồn controller (tầng gate):
-//   Mst_MajorGroupController.cs:25-105   Search              -> WA_Mst_MajorGroup_Get
+//   Mst_MajorGroupController.cs:25-105   Search              -> WA_Mst_MajorGroup_Get (#170)
+//   Mst_MajorGroupController.cs:107-167  GetAllActive        -> WA_Mst_MajorGroup_Get (#171)
 //   Mst_MajorGroupController.cs:171-186  strWhereClause_Mst_MajorGroup (mệnh đề lọc Search)
+//   Mst_MajorGroupController.cs:188-199  strWhereClause_Mst_MajorGroup_Active (mệnh đề lọc GetAllActive)
 // Nguồn API:
 //   MstMajorGroupController.cs:17-88     WA_Mst_MajorGroup_Get
 // Nguồn biz:
@@ -27,10 +29,12 @@ namespace MiniLoyalty.Controllers.Port;
 //   * Endpoint là POST (nguồn [AcceptVerbs("POST")]).
 //   * Lọc KeyWord: like '%kw%' trên MajorGroupName (Mst_MajorGroupController.cs:176-179),
 //     KHÔNG lọc MajorGroupCode hay MajorGroupDesc.
-//   * Lọc FlagActive: toán tử '=' nguyên chuỗi (Mst_MajorGroupController.cs:180-183),
-//     KHÔNG IN, KHÔNG tách dấu phẩy ("0,1" -> 0 dòng).
-//   * OrgID: gate nhận (Mst_MajorGroupController.cs:25, :55, :67) nhưng strWhereClause_Mst_MajorGroup
-//     và SQL biz KHÔNG dùng OrgID -> KHÔNG lọc.
+//   * Lọc FlagActive: toán tử '=' nguyên chuỗi (Mst_MajorGroupController.cs:180-183, :195),
+//     KHÔNG IN, KHÔNG tách dấu phẩy ("0,1" -> 0 dòng). GetAllActive lọc cứng FlagActive = "1" (:129).
+//   * OrgID: gate nhận (Mst_MajorGroupController.cs:25, :55, :67, :119, :140) nhưng strWhereClause_Mst_MajorGroup
+//     và strWhereClause_Mst_MajorGroup_Active và SQL biz KHÔNG dùng OrgID -> KHÔNG lọc.
+//   * GetAllActive trả Data là danh sách trần (không bọc PageInfo như Search); khi rỗng (0 dòng) thì Data = null (:126, :149-154).
+//   * Phân trang GetAllActive: Ft_RecordStart = 0, Ft_RecordCount = 123456000 (BaseController.cs:30-31, Mst_MajorGroupController.cs:142-143).
 //   * Draft sắp xếp theo mmg.MajorGroupCode asc (MasterData.cs:38949).
 //   * Select cuối sắp xếp theo t.MyIdxSeq asc (MasterData.cs:38988).
 //   * MyIdxSeq 0-based identity (MasterData.cs:38944).
@@ -38,9 +42,9 @@ namespace MiniLoyalty.Controllers.Port;
 //   * Chuẩn hoá input: gate chỉ gọi CUtils.StrValue, biz KHÔNG gọi StdParam/StdStr/StdFlag.
 //
 // Bỏ qua có chủ đích (loại Đ):
-//   * CheckGatewayAuthentication: gate :34, API :40 (hệ thống đích chưa có hệ gateway)
-//   * CheckAuthorize: gate :35 (hệ thống đích chưa có hệ phân quyền)
-//   * Tài khoản viết cứng tại Mst_MajorGroupController.cs:62-63 — không chép giá trị (cấm chép mật khẩu)
+//   * CheckGatewayAuthentication: gate :34, :116, API :40 (hệ thống đích chưa có hệ gateway)
+//   * CheckAuthorize: gate :35, :117 (hệ thống đích chưa có hệ phân quyền)
+//   * Tài khoản viết cứng tại Mst_MajorGroupController.cs:62-63, :135-136 — không chép giá trị (cấm chép mật khẩu)
 //   * Sys_User_CheckAuthentication (MasterData.cs:39095-39099) và Sys_Access_CheckDenyV30 (:39102-39106)
 //     đã bị comment ở nguồn.
 // ============================================================================================
@@ -87,7 +91,30 @@ public class Mst_MajorGroupControllerPort : ControllerBase
     }
 
     /// <summary>
-    /// Lọc + đếm + chia trang theo MajorGroupCode asc — dùng cho Search (và GetAllActive sau này).
+    /// Lấy danh sách chuyên ngành đang hoạt động (FlagActive = "1") — port 1:1 GetAllActive (#171).
+    /// Nguồn: Mst_MajorGroupController.cs:107-167.
+    /// Không nhận body. Lọc FlagActive = "1" với toán tử '=' (Mst_MajorGroupController.cs:127-130, :195); OrgID không lọc.
+    /// Ft_RecordStart = 0, Ft_RecordCount = 123456000 (BaseController.cs:30-31, Mst_MajorGroupController.cs:142-143).
+    /// Trả Data là danh sách trần List&lt;Mst_MajorGroup&gt;; khi rỗng (0 dòng) thì Data = null (:126, :149-154).
+    /// </summary>
+    [HttpPost("getallactive")]
+    public async Task<IActionResult> GetAllActive()
+    {
+        // GetAllActive gọi GetXAsync với KeyWord = null, FlagActive = "1", recordStart = 0, recordCount = 123456000
+        // (Mst_MajorGroupController.cs:126-146; BaseController.cs:30-31).
+        var (_, rows) = await GetXAsync(null, "1", 0, 123456000);
+
+        // Nguồn Mst_MajorGroupController.cs:126, 149-154:
+        // List<TModels.Mst_MajorGroup> lst_Mst_MajorGroup = null;
+        // if (objRT_Mst_MajorGroup.Lst_Mst_MajorGroup != null && objRT_Mst_MajorGroup.Lst_Mst_MajorGroup.Count > 0)
+        //     lst_Mst_MajorGroup = objRT_Mst_MajorGroup.Lst_Mst_MajorGroup;
+        // objJsonResultEntry.Data = lst_Mst_MajorGroup;
+        // Danh sách trần (không bọc PageInfo); khi rỗng (0 dòng) trả Data = null.
+        return Ok(new { Success = true, Data = rows.Count > 0 ? rows : null });
+    }
+
+    /// <summary>
+    /// Lọc + đếm + chia trang theo MajorGroupCode asc — dùng cho Search và GetAllActive.
     /// Trả (itemCount, rows): itemCount = tổng số dòng sau lọc (MyCount, SQL :38952); rows = trang đã cắt kèm MyIdxSeq 0-based (:38983).
     /// </summary>
     private async Task<(int itemCount, List<object> rows)> GetXAsync(string? keyWord, string? flagActive, long recordStart, long recordCount)
