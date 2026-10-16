@@ -296,6 +296,63 @@ public class Mst_ResignReasonControllerPort : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Port 1:1 Mst_ResignReasonController.Delete (gate :383-444) -> WA_Mst_ResignReason_Delete -> Mst_ResignReason_DeleteX (MasterData.cs:25704-25772).
+    /// </summary>
+    [HttpPost("delete")]
+    public async Task<IActionResult> Delete([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] Mst_ResignReason? req)
+    {
+        // Gate :402-431: Nếu ReasonID rỗng -> throw new ServiceException("invalid_ResignReason", "invalid_ResignReason")
+        if (string.IsNullOrWhiteSpace(req?.ReasonID))
+        {
+            return PortResult.Fail("invalid_ResignReason");
+        }
+
+        var strOrgID = string.IsNullOrWhiteSpace(req.OrgID) ? null : req.OrgID.Trim().ToUpper();
+        var strReasonID = req.ReasonID.Trim().ToUpper();
+
+        await using var tx = await _db.Database.BeginTransactionAsync(); // MasterData.cs:25805
+        try
+        {
+            // Mst_Org_CheckDB(OrgID, "1", "1") (:25740-25746)
+            var org = await _db.Set<Mst_Org>().AsNoTracking()
+                .FirstOrDefaultAsync(x => EF.Functions.Like((x.OrgID ?? "").ToLower(), PortQuery.Equal(strOrgID ?? ""), PortQuery.Esc));
+            if (org == null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_Org_CheckDB_OrgNotFound", "Check.OrgID", strOrgID);
+            }
+            if (!"1".Contains(org.FlagActive ?? ""))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_Org_CheckDB_FlagActiveNotMatched", "Check.OrgID", strOrgID,
+                    "Check.strFlagActiveListToCheck", "1", "DB.FlagActive", org.FlagActive);
+            }
+
+            // Mst_ResignReason_CheckDB(OrgID, ReasonID, "1", "") (:25748-25755)
+            var recordToDelete = await _db.Set<Mst_ResignReason>()
+                .FirstOrDefaultAsync(x => EF.Functions.Like((x.OrgID ?? "").ToLower(), PortQuery.Equal(strOrgID ?? ""), PortQuery.Esc)
+                                       && EF.Functions.Like((x.ReasonID ?? "").ToLower(), PortQuery.Equal(strReasonID), PortQuery.Esc));
+            if (recordToDelete == null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_ResignReason_CheckDB_ReasonIDNotFound", "Check.OrgID", strOrgID, "Check.ReasonID", strReasonID);
+            }
+
+            // Delete (:25763-25769)
+            _db.Set<Mst_ResignReason>().Remove(recordToDelete);
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+
+            return Ok(new { Success = true, Data = (object?)null }); // Gate :425-426
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return PortResult.Fail("Mst_ResignReason_Delete", "Exception", ex.Message); // (:25791, 25857-25869)
+        }
+    }
+
     private async Task<(int itemCount, List<object> rows)> GetXAsync(string? orgId, string? reasonId, string? keyWord, string? flagActive, long recordStart, long recordCount)
     {
         var q = _db.Set<Mst_ResignReason>().AsNoTracking().AsQueryable();
