@@ -11,18 +11,20 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục hình thức kỷ luật (Mst_Discipline) của dự án nguồn 2022.7.Loyalty (#132, #133, #134, #135).
+// PORT 1:1 — màn danh mục hình thức kỷ luật (Mst_Discipline) của dự án nguồn 2022.7.Loyalty (#132, #133, #134, #135, #136).
 //
 // Nguồn controller (tầng gate):
 //   Mst_DisciplineController.cs:26-106         Search -> WA_Mst_Discipline_Get (#132)
 //   Mst_DisciplineController.cs:108-171        GetByDisciplineCode -> WA_Mst_Discipline_Get (#133)
 //   Mst_DisciplineController.cs:173-233        GetAllActive -> WA_Mst_Discipline_Get (#134)
 //   Mst_DisciplineController.cs:237-320        Create -> WA_Mst_Discipline_Create (#135)
+//   Mst_DisciplineController.cs:324-389        Update -> WA_Mst_Discipline_Update (#136)
 //   Mst_DisciplineController.cs:523-538        strWhereClause_Mst_Discipline (mệnh đề lọc Search)
 //   Mst_DisciplineController.cs:540-555        strWhereClause_Mst_Discipline_By_DisciplineCode (mệnh đề lọc GetByDisciplineCode, GetAllActive)
 // Nguồn API:
 //   MstDisciplineController.cs:17-88          WA_Mst_Discipline_Get
 //   MstDisciplineController.cs:91-162         WA_Mst_Discipline_Create (#135)
+//   MstDisciplineController.cs:165-236        WA_Mst_Discipline_Update (#136)
 // Nguồn biz:
 //   MasterData.cs:34241-34331                 WAS_Mst_Discipline_Get
 //   MasterData.cs:34111-34239                 Mst_Discipline_Get
@@ -30,6 +32,9 @@ namespace MiniLoyalty.Controllers.Port;
 //   MasterData.cs:34555-34630                 WAS_Mst_Discipline_Create (#135)
 //   MasterData.cs:34434-34553                 Mst_Discipline_Create (#135)
 //   MasterData.cs:34333-34432                 Mst_Discipline_CreateX (#135)
+//   MasterData.cs:34861-34939                 WAS_Mst_Discipline_Update (#136)
+//   MasterData.cs:34731-34859                 Mst_Discipline_Update (#136)
+//   MasterData.cs:34632-34729                 Mst_Discipline_UpdateX (#136)
 //
 // GIỮ ĐÚNG NGUỒN:
 //   * Endpoint là POST (nguồn [AcceptVerbs("POST")]).
@@ -56,11 +61,26 @@ namespace MiniLoyalty.Controllers.Port;
 //     - Lưu 7 cột: DisciplineCode, NetworkID = config["Biz_NetworkID"] ?? "1001", DisciplineName, DisciplineDesc,
 //       FlagActive = '1', LogLUDTimeUTC = DateTime.UtcNow, LogLUBy = "port" (:34414-34429).
 //     - 1 transaction lưu DB (:34467), lỗi -> rollback + PortResult.Fail. Thành công -> Data = null (:306-307).
+//   * Update: [HttpPost("update")], body { DisciplineCode, DisciplineName, DisciplineDesc, FlagActive } (gate :324-389, #136).
+//     - Body rỗng hoàn toàn -> ServiceException("strJson null") (:333-340) -> mã mặc định Mst_Discipline_Update (400).
+//     - Ft_Cols_Upd cố định ở gate (:353-357): DisciplineName, DisciplineDesc, FlagActive -> luôn cập nhật 3 cột; thiếu FlagActive -> '0' (StdFlag).
+//     - Chuẩn hoá dữ liệu input (:34668-34674):
+//       DisciplineCode = StdParam (Trim+ToUpper, rỗng -> null);
+//       DisciplineName = StdStr (Trim+Normalize, rỗng -> null);
+//       DisciplineDesc = StdStr (Trim+Normalize, rỗng -> null);
+//       FlagActive = StdFlag ("1" -> "1", còn lại kể cả null/thiếu/rỗng -> "0").
+//     - Kiểm tra THEO THỨ TỰ:
+//       (1) Mst_Discipline_CheckDB(ma, "1") (:34684-34690): mã rỗng hoặc không tìm thấy trong DB -> ErridnLoyalty.Mst_Discipline_CheckDB_DisciplineCodeNotFound.
+//       (2) DisciplineName rỗng sau StdStr (:34694-34704) -> ErridnLoyalty.Mst_Discipline_UpdateX_InvalidDisciplineName.
+//     - Lưu (:34713-34726): DisciplineName, DisciplineDesc, FlagActive (3 cột trong Ft_Cols_Upd) + LogLUDTimeUTC (UtcNow) + LogLUBy ("port").
+//       NetworkID và DisciplineCode KHÔNG đổi.
+//     - 1 transaction lưu DB (:34770 _cf.db.BeginTransaction()), lỗi -> rollback + PortResult.Fail.
+//     - Thành công: gate :375-376 SetSuccess + Data = null.
 //
 // Bỏ qua có chủ đích (loại Đ):
-//   - CheckGatewayAuthentication: gate :35, :117, :182, :256, API :40-45, :114-119
-//   - CheckAuthorize: gate :36, :118, :183, :257 (hệ thống đích chưa có hệ phân quyền)
-//   - Ghi RequestLog/ReturnLog: MasterData.cs:34152-34159, 34229-34236, 34470-34477, 34543-34550
+//   - CheckGatewayAuthentication: gate :35, :117, :182, :256, :343, API :40-45, :114-119, :188-193
+//   - CheckAuthorize: gate :36, :118, :183, :257, :344 (hệ thống đích chưa có hệ phân quyền)
+//   - Ghi RequestLog/ReturnLog: MasterData.cs:34152-34159, 34229-34236, 34470-34477, 34543-34550, 34773-34780, 34849-34856
 //   - Sys_Access_CheckDenyV30, Sys_User_CheckAuthentication
 // ============================================================================================
 
@@ -86,6 +106,15 @@ public class MstDisciplineCreateReq
     public string? DisciplineCode { get; set; }       // Mã hình thức kỷ luật (client gửi nhưng bị ghi đè bởi seq)
     public string? DisciplineName { get; set; }       // Tên hình thức kỷ luật
     public string? DisciplineDesc { get; set; }       // Mô tả hình thức kỷ luật
+}
+
+/// <summary>Port 1:1 <c>Update</c> — body { DisciplineCode, DisciplineName, DisciplineDesc, FlagActive } (gate Mst_DisciplineController.cs:324-389, #136).</summary>
+public class MstDisciplineUpdateReq
+{
+    public string? DisciplineCode { get; set; }       // Mã hình thức kỷ luật — :34671
+    public string? DisciplineName { get; set; }       // Tên hình thức kỷ luật (StdStr) — :34672
+    public string? DisciplineDesc { get; set; }       // Mô tả (StdStr) — :34673
+    public string? FlagActive { get; set; }           // Cờ hoạt động (StdFlag, "1" -> "1", khác -> "0") — :34674
 }
 
 [ApiController]
@@ -291,8 +320,130 @@ public class Mst_DisciplineControllerPort : ControllerBase
         }
     }
 
+    // ============================================================================================
+    // Update — nguồn Mst_DisciplineController.cs:324-389 (gate) -> MstDisciplineController.cs:165-236 (API)
+    //   -> MasterData.cs:34861-34939 (WAS_Mst_Discipline_Update) -> :34731-34859 (Mst_Discipline_Update)
+    //   -> :34632-34729 (Mst_Discipline_UpdateX) -> Mst_Discipline_CheckDB.
+    //
+    // GIỮ ĐÚNG NGUỒN:
+    //   * Body JSON: { DisciplineCode, DisciplineName, DisciplineDesc, FlagActive } (gate :332-335, biz :34671-34674).
+    //   * Body rỗng / null: gate :333-340 ném Exception("strJson null") -> mã mặc định Mst_Discipline_Update (:34752).
+    //   * Gate dựng Ft_Cols_Upd CỐ ĐỊNH (:353-357):
+    //       "Mst_Discipline.DisciplineName,Mst_Discipline.DisciplineDesc,Mst_Discipline.FlagActive,"
+    //     -> Ft_Cols_Upd cố định ở gate -> luôn cập nhật 3 cột; thiếu FlagActive -> '0' (StdFlag).
+    //   * Chuẩn hoá dữ liệu input (:34668-34674):
+    //       DisciplineCode = StdParam (Trim + ToUpper, rỗng -> null);
+    //       DisciplineName = StdStr (Trim + Normalize, rỗng -> null);
+    //       DisciplineDesc = StdStr (Trim + Normalize, rỗng -> null);
+    //       FlagActive = StdFlag ("1" chỉ khi đúng "1", còn lại — kể cả thiếu/null/rỗng — là "0").
+    //   * Kiểm tra THEO THỨ TỰ:
+    //       (1) Mst_Discipline_CheckDB(ma, "1") (:34684-34690): mã rỗng hoặc không tìm thấy trong DB -> ErridnLoyalty.Mst_Discipline_CheckDB_DisciplineCodeNotFound.
+    //       (2) DisciplineName rỗng sau StdStr (:34694-34704) -> ErridnLoyalty.Mst_Discipline_UpdateX_InvalidDisciplineName.
+    //   * Lưu (:34713-34726): DisciplineName, DisciplineDesc, FlagActive (3 cột trong Ft_Cols_Upd) + LogLUDTimeUTC (UtcNow) + LogLUBy ("port").
+    //       NetworkID và DisciplineCode KHÔNG đổi.
+    //   * 1 transaction duy nhất cho toàn bộ nghiệp vụ (MasterData.cs:34770 _cf.db.BeginTransaction()), lỗi -> rollback + PortResult.Fail.
+    //   * Thành công: gate :375-376 SetSuccess + Data = null.
+    // ============================================================================================
+    [HttpPost("update")]
+    public async Task<IActionResult> Update([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] MstDisciplineUpdateReq? req)
+    {
+        // 1. Body rỗng/null: gate Mst_DisciplineController.cs:333-340 ném Exception("strJson null") -> mã mặc định Mst_Discipline_Update (:34752).
+        if (req == null)
+        {
+            return PortResult.Fail("Mst_Discipline_Update", "Check.strJson", null);
+        }
+
+        // 2. Mở 1 transaction cho toàn bộ nghiệp vụ cập nhật (MasterData.cs:34770 _cf.db.BeginTransaction()).
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // 3. Ft_Cols_Upd cố định ở gate (:353-357) rồi biz StdParam (ToUpper) + Contains (:34668-34679).
+            //    Ft_Cols_Upd cố định ở gate -> luôn cập nhật 3 cột; thiếu FlagActive -> '0' (StdFlag).
+            var strFt_Cols_Upd = "Mst_Discipline.DisciplineName,Mst_Discipline.DisciplineDesc,Mst_Discipline.FlagActive,";
+            strFt_Cols_Upd = StdParam(strFt_Cols_Upd) ?? "";
+            bool bUpd_DisciplineName = strFt_Cols_Upd.Contains("Mst_Discipline.DisciplineName".ToUpperInvariant());
+            bool bUpd_DisciplineDesc = strFt_Cols_Upd.Contains("Mst_Discipline.DisciplineDesc".ToUpperInvariant());
+            bool bUpd_FlagActive = strFt_Cols_Upd.Contains("Mst_Discipline.FlagActive".ToUpperInvariant());
+
+            // 4. Chuẩn hoá dữ liệu input (MasterData.cs:34671-34674):
+            //    StdParam: Trim + ToUpper, rỗng -> null
+            //    StdStr: Trim + Normalize, rỗng -> null
+            //    StdFlag: "1" nếu đúng "1", mọi giá trị khác (kể cả null/thiếu/rỗng) -> "0"
+            string? strDisciplineCode = StdParam(req.DisciplineCode);
+            string? strDisciplineName = StdStr(req.DisciplineName);
+            string? strDisciplineDesc = StdStr(req.DisciplineDesc);
+            string strFlagActive = StdFlag(req.FlagActive);
+
+            // 5. Kiểm tra theo thứ tự:
+            // Bước 1: Mst_Discipline_CheckDB(ma, "1") (MasterData.cs:34684-34690 -> Mst_Discipline_CheckDB)
+            // Nếu strDisciplineCode rỗng hoặc không tìm thấy dòng -> ErridnLoyalty.Mst_Discipline_CheckDB_DisciplineCodeNotFound
+            if (string.IsNullOrEmpty(strDisciplineCode))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_Discipline_CheckDB_DisciplineCodeNotFound", "Check.DisciplineCode", strDisciplineCode);
+            }
+
+            var entity = await _db.Set<Mst_Discipline>().FirstOrDefaultAsync(x =>
+                EF.Functions.Like((x.DisciplineCode ?? "").ToLower(), PortQuery.Equal(strDisciplineCode), PortQuery.Esc));
+
+            if (entity == null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_Discipline_CheckDB_DisciplineCodeNotFound", "Check.DisciplineCode", strDisciplineCode);
+            }
+
+            // Bước 2: DisciplineName rỗng sau StdStr (MasterData.cs:34694-34704)
+            // -> ErridnLoyalty.Mst_Discipline_UpdateX_InvalidDisciplineName
+            if (string.IsNullOrEmpty(strDisciplineName))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_Discipline_UpdateX_InvalidDisciplineName", "Check.DisciplineName", strDisciplineName);
+            }
+
+            // 6. Gán 3 cột + log (MasterData.cs:34713-34720):
+            //    Ft_Cols_Upd cố định ở gate -> luôn cập nhật 3 cột; thiếu FlagActive -> '0' (StdFlag).
+            if (bUpd_DisciplineName)
+            {
+                entity.DisciplineName = strDisciplineName;             // :34715 DisciplineName (StdStr)
+            }
+            if (bUpd_DisciplineDesc)
+            {
+                entity.DisciplineDesc = strDisciplineDesc;             // :34716 DisciplineDesc (StdStr)
+            }
+            if (bUpd_FlagActive)
+            {
+                entity.FlagActive = strFlagActive;                     // :34717 FlagActive (StdFlag)
+            }
+            entity.LogLUDTimeUTC = DateTime.UtcNow;                    // :34718 LogLUDTimeUTC = dtimeSys (UtcNow)
+            entity.LogLUBy = "port";                                   // :34719 LogLUBy ("port" - đích chưa có session user, loại Đ)
+
+            await _db.SaveChangesAsync();
+
+            // 7. Commit transaction (MasterData.cs:34822 TDALUtils.DBUtils.CommitSafety).
+            await tx.CommitAsync();
+
+            // 8. Thành công: gate Mst_DisciplineController.cs:375-376 SetSuccess + Data = null.
+            return Ok(new
+            {
+                Success = true,
+                Data = (object?)null
+            });
+        }
+        catch (Exception)
+        {
+            await tx.RollbackAsync();
+            throw;
+        }
+    }
+
     private static string? StdParam(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim().ToUpperInvariant();
     private static string? StdStr(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim().Normalize();
+    private static string StdFlag(string? s)
+    {
+        if (s == null) return "0";
+        var t = s.Trim();
+        return t == "1" ? "1" : "0";
+    }
 
     /// <summary>
     /// Lọc + đếm + chia trang theo DisciplineCode asc — dùng cho Search, GetByDisciplineCode, GetAllActive.
