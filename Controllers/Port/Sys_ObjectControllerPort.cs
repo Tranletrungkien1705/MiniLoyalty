@@ -9,10 +9,11 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn Sys_ObjectController.GetAllMenuActive (#317) & GetAllMenuButtonActive (#318)
+// PORT 1:1 — màn Sys_ObjectController.GetAllMenuActive (#317), GetAllMenuButtonActive (#318) & GetFunctionActive (#319)
 // Nguồn:
 //   Sys_ObjectController.cs:29-98 (GetAllMenuActive)
 //   Sys_ObjectController.cs:101-172 (GetAllMenuButtonActive)
+//   Sys_ObjectController.cs:175-243 (GetFunctionActive)
 //   SysObjectController.cs:20-91 (WA_Sys_Object_Get)
 //   System.cs:15325-15424 (WAS_Sys_Object_Get)
 //   System.cs:14892-15098 (Sys_Object_Get)
@@ -78,6 +79,27 @@ public class Sys_ObjectControllerPort : ControllerBase
         var rows = await q.ToListAsync();
 
         // Nguồn Sys_ObjectController.cs:129, 154-159: Khởi tạo null, chỉ gán nếu > 0 dòng
+        return Ok(new { Success = true, Data = rows.Count > 0 ? rows : null });
+    }
+
+    /// <summary>
+    /// Port 1:1 <c>Sys_ObjectController.GetFunctionActive</c>.
+    /// Lọc tĩnh <c>ObjectType == "FUNC"</c> và <c>FlagActive == "1"</c>.
+    /// Sắp xếp theo <c>ObjectCode asc</c>.
+    /// Không nhận body phức tạp. Trả về mảng dữ liệu hoặc <c>null</c> nếu rỗng.
+    /// </summary>
+    [HttpPost("getfunctionactive")]
+    public async Task<IActionResult> GetFunctionActive([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] object? req)
+    {
+        // GATE Sys_ObjectController.cs:197-201: ObjectType = "FUNC", FlagActive = Client_Flag.Active ("1")
+        // strWhereClause_SysObject dùng toán tử "=" cho cả hai
+        var q = _db.Set<Sys_Object>().AsNoTracking()
+            .Where(x => x.ObjectType == "FUNC" && x.FlagActive == "1")
+            .OrderBy(x => x.ObjectCode); // System.cs:14964: order by so.ObjectCode asc
+
+        var rows = await q.ToListAsync();
+
+        // Nguồn Sys_ObjectController.cs:202, 225-228: listSys_Object khởi tạo null, chỉ gán khi Lst_Sys_Object != null && Count > 0
         return Ok(new { Success = true, Data = rows.Count > 0 ? rows : null });
     }
 }
