@@ -178,7 +178,7 @@ public class Mst_PromotionProgramControllerPort : ControllerBase
     public async Task<IActionResult> Search([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] MstPromotionProgramSearchReq? req)
     {
         var r = req ?? new MstPromotionProgramSearchReq();
-        var pageIndex = Math.Max(0, r.Ft_PageIndex);
+        var pageIndex = r.Ft_PageIndex;
         var pageSize = r.Ft_PageSize;
 
         // RecordStart = pageIndex * pageSize, RecordCount = pageSize (gate :76-77).

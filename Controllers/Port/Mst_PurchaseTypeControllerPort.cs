@@ -58,9 +58,9 @@ public class Mst_PurchaseTypeControllerPort(AppDbContext db) : ControllerBase
         var itemCount = await ordered.CountAsync();
 
         // Cắt trang theo recordStart và recordCount (nFilterRecordStart..nFilterRecordEnd tại :22202-22203).
-        var page = recordCount <= 0
+        var page = (recordCount <= 0 || recordStart < 0)
             ? new List<Mst_PurchaseType>()
-            : await ordered.Skip((int)recordStart).Take((int)recordCount).ToListAsync();
+            : await ordered.Skip((int)Math.Min(recordStart, int.MaxValue)).Take((int)Math.Min(recordCount, int.MaxValue)).ToListAsync();
 
         // Kết quả gồm MyIdxSeq + 4 cột của Mst_PurchaseType (:22223-22224), sắp theo MyIdxSeq asc (:22228)
         var rows = page

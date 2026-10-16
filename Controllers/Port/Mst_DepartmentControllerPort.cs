@@ -244,7 +244,7 @@ public class Mst_DepartmentControllerPort : ControllerBase
     public async Task<IActionResult> Search([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] MstDepartmentSearchReq? req)
     {
         var r = req ?? new MstDepartmentSearchReq();
-        var pageIndex = Math.Max(0, r.Ft_PageIndex);
+        var pageIndex = r.Ft_PageIndex;
         var pageSize = r.Ft_PageSize;
 
         // Search gọi GetXAsync với start = PageIndex * PageSize, count = PageSize (giữ nguyên hành vi nguồn Mst_DepartmentController.cs:73-74).
@@ -1250,9 +1250,9 @@ public class Mst_DepartmentControllerPort : ControllerBase
 
         // MyIdxSeq = số thứ tự 0-based trong thứ tự DepartmentCode (identity(bigint, 0, 1) ở SQL nguồn :30450).
         // Lấy dòng [recordStart, recordStart+recordCount) theo thứ tự DepartmentCode.
-        var page = recordCount <= 0
+        var page = (recordCount <= 0 || recordStart < 0)
             ? new List<Mst_Department>()
-            : await ordered.Skip((int)recordStart).Take((int)recordCount).ToListAsync();
+            : await ordered.Skip((int)Math.Min(recordStart, int.MaxValue)).Take((int)Math.Min(recordCount, int.MaxValue)).ToListAsync();
 
         // Tra cứu tên phòng ban cấp trên md_DepartmentNameParent (left join Mst_Department f on t.DepartmentCodeParent = f.DepartmentCode :30512-30513).
         var parentCodes = page

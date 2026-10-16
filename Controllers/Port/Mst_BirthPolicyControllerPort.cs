@@ -185,7 +185,7 @@ public class Mst_BirthPolicyControllerPort : ControllerBase
         [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] MstBirthPolicySearchReq? req)
     {
         var r = req ?? new MstBirthPolicySearchReq();
-        var pageIndex = Math.Max(0, r.Ft_PageIndex);
+        var pageIndex = r.Ft_PageIndex;
         var pageSize = r.Ft_PageSize;
 
         // Search gọi GetXAsync với start = PageIndex * PageSize, count = PageSize (gate :66-67).
@@ -1219,9 +1219,9 @@ public class Mst_BirthPolicyControllerPort : ControllerBase
         // 4. Phân trang (#tbl_Mst_BirthPolicy_Filter — Master.Loyalty.cs:10952-10959):
         // t.MyIdxSeq >= @nFilterRecordStart and t.MyIdxSeq <= @nFilterRecordEnd
         // với nFilterRecordEnd = recordStart + recordCount - 1. Nếu recordCount <= 0 thì trả danh sách rỗng.
-        var page = recordCount <= 0
+        var page = (recordCount <= 0 || recordStart < 0)
             ? new List<Mst_BirthPolicy>()
-            : await ordered.Skip((int)recordStart).Take((int)recordCount).ToListAsync();
+            : await ordered.Skip((int)Math.Min(recordStart, int.MaxValue)).Take((int)Math.Min(recordCount, int.MaxValue)).ToListAsync();
 
         // 5. Select header + FlagShow (Master.Loyalty.cs:10981-10996):
         // FlagShow = '1' khi EffDateStart <= @dateSys and @dateSys <= EffDateEnd, '0' khi ngoài khoảng

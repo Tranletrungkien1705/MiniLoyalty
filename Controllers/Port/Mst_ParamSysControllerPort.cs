@@ -92,9 +92,9 @@ public class Mst_ParamSysControllerPort(AppDbContext db) : ControllerBase
         var itemCount = await ordered.CountAsync();
 
         // Cắt trang theo recordStart và recordCount (nFilterRecordStart..nFilterRecordEnd tại Master.Loyalty.cs:12897-12898, :12939-12940)
-        var page = recordCount <= 0
+        var page = (recordCount <= 0 || recordStart < 0)
             ? new List<Mst_ParamSys>()
-            : await ordered.Skip((int)recordStart).Take((int)recordCount).ToListAsync();
+            : await ordered.Skip((int)Math.Min(recordStart, int.MaxValue)).Take((int)Math.Min(recordCount, int.MaxValue)).ToListAsync();
 
         // Kết quả gồm MyIdxSeq + 6 cột của Mst_ParamSys (Master.Loyalty.cs:12960-12961)
         var rows = page

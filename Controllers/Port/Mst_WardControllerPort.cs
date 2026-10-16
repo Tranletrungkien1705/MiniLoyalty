@@ -196,9 +196,9 @@ public class Mst_WardControllerPort(AppDbContext db) : ControllerBase
 
         // MyIdxSeq = số thứ tự 0-based trong thứ tự WardCode (identity(bigint, 0, 1) ở SQL nguồn :6055).
         // Lấy dòng [recordStart, recordStart+recordCount) theo thứ tự WardCode.
-        var page = recordCount <= 0
+        var page = (recordCount <= 0 || recordStart < 0)
             ? new List<Mst_Ward>()
-            : await ordered.Skip((int)recordStart).Take((int)recordCount).ToListAsync();
+            : await ordered.Skip((int)Math.Min(recordStart, int.MaxValue)).Take((int)Math.Min(recordCount, int.MaxValue)).ToListAsync();
 
         // Select cuối theo t.MyIdxSeq asc (:6100 order by t.MyIdxSeq asc) — select t.MyIdxSeq, mo.*.
         var rows = page

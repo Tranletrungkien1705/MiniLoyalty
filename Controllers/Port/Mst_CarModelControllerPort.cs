@@ -184,7 +184,7 @@ public class Mst_CarModelControllerPort : ControllerBase
     public async Task<IActionResult> Search([FromBody] MstCarModelSearchReq? req)
     {
         var r = req ?? new MstCarModelSearchReq();
-        var pageIndex = Math.Max(0, r.Ft_PageIndex);
+        var pageIndex = r.Ft_PageIndex;
         var pageSize = r.Ft_PageSize;
 
         // Search gọi GetXAsync với start = PageIndex * PageSize, count = PageSize (giữ nguyên hành vi cũ nguồn :68-69, :75).
@@ -978,9 +978,9 @@ public class Mst_CarModelControllerPort : ControllerBase
 
         // MyIdxSeq = số thứ tự 0-based trong thứ tự ModelCode (identity(bigint, 0, 1) ở SQL nguồn :1742).
         // Lấy dòng [recordStart, recordStart+recordCount) theo thứ tự ModelCode.
-        var page = recordCount <= 0
+        var page = (recordCount <= 0 || recordStart < 0)
             ? new List<Mst_CarModel>()
-            : await ordered.Skip((int)recordStart).Take((int)recordCount).ToListAsync();
+            : await ordered.Skip((int)Math.Min(recordStart, int.MaxValue)).Take((int)Math.Min(recordCount, int.MaxValue)).ToListAsync();
 
         // Select cuối theo t.MyIdxSeq asc (Master.Loyalty.cs:1788 order by t.MyIdxSeq asc).
         var rows = page

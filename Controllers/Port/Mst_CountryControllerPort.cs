@@ -92,9 +92,9 @@ public class Mst_CountryControllerPort(AppDbContext db) : ControllerBase
 
         // MyIdxSeq = số thứ tự 0-based trong thứ tự CountryCode (identity(bigint, 0, 1) ở SQL nguồn :3387).
         // Lấy dòng [recordStart, recordStart+recordCount) theo thứ tự CountryCode.
-        var page = recordCount <= 0
+        var page = (recordCount <= 0 || recordStart < 0)
             ? new List<Mst_Country>()
-            : await ordered.Skip((int)recordStart).Take((int)recordCount).ToListAsync();
+            : await ordered.Skip((int)Math.Min(recordStart, int.MaxValue)).Take((int)Math.Min(recordCount, int.MaxValue)).ToListAsync();
 
         // Select cuối theo t.MyIdxSeq asc (:3432 order by t.MyIdxSeq asc) — select t.MyIdxSeq, mc.*.
         var rows = page

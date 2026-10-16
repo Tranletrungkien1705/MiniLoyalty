@@ -136,7 +136,7 @@ public class Mst_RankPolicyControllerPort : ControllerBase
     public async Task<IActionResult> Search([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] MstRankPolicySearchReq? req)
     {
         var r = req ?? new MstRankPolicySearchReq();
-        var pageIndex = Math.Max(0, r.Ft_PageIndex);
+        var pageIndex = r.Ft_PageIndex;
         var pageSize = r.Ft_PageSize;
 
         // KeyWord KHÔNG lọc (gate Mst_RankPolicyController.cs:281-298 không có nhánh nào lọc KeyWord).
