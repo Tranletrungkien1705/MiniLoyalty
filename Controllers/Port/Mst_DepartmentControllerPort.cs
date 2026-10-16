@@ -12,7 +12,7 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục phòng ban (Mst_Department) của dự án nguồn 2022.7.Loyalty (#122, #123, #124, #125, #126).
+// PORT 1:1 — màn danh mục phòng ban (Mst_Department) của dự án nguồn 2022.7.Loyalty (#122, #123, #124, #125, #126, #127).
 //
 // Nguồn controller (tầng gate):
 //   Mst_DepartmentController.cs:30-109   Search -> WA_Mst_Department_Get (#122)
@@ -20,12 +20,14 @@ namespace MiniLoyalty.Controllers.Port;
 //   Mst_DepartmentController.cs:219-282  GetByDepartmentCode -> WA_Mst_Department_Get (#124)
 //   Mst_DepartmentController.cs:286-370  Create -> WA_Mst_Department_Create (#125)
 //   Mst_DepartmentController.cs:374-443  Update -> WA_Mst_Department_Update (#126)
+//   Mst_DepartmentController.cs:446-515  Delete -> WA_Mst_Department_Delete (#127)
 //   Mst_DepartmentController.cs:877-905  strWhereClause_Mst_Department (mệnh đề lọc Search, GetAllActive)
 //   Mst_DepartmentController.cs:907-926  strWhereClause_Mst_Department_By_DepartmentCode (mệnh đề lọc GetByDepartmentCode)
 // Nguồn API:
 //   MstDepartmentController.cs:20-89     WA_Mst_Department_Get
 //   MstDepartmentController.cs:91-160    WA_Mst_Department_Create (#125)
 //   MstDepartmentController.cs:162-231   WA_Mst_Department_Update (#126)
+//   MstDepartmentController.cs:233-302   WA_Mst_Department_Delete (#127)
 // Nguồn biz:
 //   Master.cs:29450-29548                WAS_Mst_Department_Get
 //   Master.cs:29549-29701                Mst_Department_Get
@@ -36,9 +38,12 @@ namespace MiniLoyalty.Controllers.Port;
 //   Master.cs:29936-30021                WAS_Mst_Department_Update (#126)
 //   Master.cs:30022-30180                Mst_Department_Update (#126)
 //   Master.cs:30727-30864                Mst_Department_UpdateX (#126)
+//   Master.cs:30181-30258                WAS_Mst_Department_Delete (#127)
+//   Master.cs:30259-30395                Mst_Department_Delete (#127)
+//   Master.cs:30865-30968                Mst_Department_DeleteX (#127)
 //   Master.cs:29413-29448                Mst_Department_UpdBU (#125, cập nhật BUCode, BUPattern, Level toàn bảng)
 //   Master.cs:7813-7890                  Mst_NNT_CheckDB (#125)
-//   Master.cs:29275-29338                Mst_Department_CheckDB (#125, #126)
+//   Master.cs:29275-29338                Mst_Department_CheckDB (#125, #126, #127)
 //   Master.cs:29341-29411                Mst_Department_CheckDepartmentName (#125, #126)
 //
 // GIỮ ĐÚNG NGUỒN:
@@ -96,6 +101,22 @@ namespace MiniLoyalty.Controllers.Port;
 //       - Lưu DB: DepartmentName, DepartmentDesc, FlagActive, LogLUDTimeUTC = now, LogLUBy = "port".
 //         KHÔNG gọi UpdBU. Mã, cha, OrgID, MST, BU giữ nguyên.
 //     1 transaction duy nhất, lỗi -> rollback + PortResult.Fail. Thành công Data = null (:428-429).
+//   * Delete (#127): [HttpPost("delete")], body { DepartmentCode, OrgID } (gate Mst_DepartmentController.cs:446-515).
+//     EmptyBodyBehavior.Allow. Kiểm tra rỗng tại gate:
+//       - DepartmentCode rỗng / body rỗng -> throw ServiceException("invalid_departmentcode", "invalid_departmentcode") (:500)
+//         -> 400 ErridnLoyalty.invalid_departmentcode.
+//       - OrgID rỗng -> throw ServiceException("invalid_orgid", "invalid_orgid") (:495, kiểm SAU DepartmentCode)
+//         -> 400 ErridnLoyalty.invalid_orgid. OrgID KHÔNG dùng trong nghiệp vụ biz sau đó.
+//     Biz Mst_Department_DeleteX (Master.cs:30865-30968), tách thành DeleteXAsync(code):
+//       - 1 transaction duy nhất (Master.cs:30292 _cf.db.BeginTransaction(), :30358 CommitSafety).
+//       - StdParam mã phòng ban (Trim + ToUpper, rỗng -> null) (:30891).
+//       - Mst_Department_CheckDB(ma, "1"): mã rỗng hoặc không tìm thấy trong DB -> ErridnLoyalty.Mst_Department_CheckDB_DepartmentNotFound (:30897-30903).
+//       - Đếm nhân viên trong Staff_MapDepartment (:30909-30953): join DepartmentCode + OrgID > 0
+//         -> Mst_Department_DeleteX_ExistStaff_MapDepartment — bảng Staff_MapDepartment CHƯA có ở đích -> KHÔNG chặn, GHI GAP.
+//       - FK Train_CourseDepartment.DepartmentCode (20220219.z11.UpdDB.60.Course.sql:177) chưa port -> GHI GAP.
+//       - KHÔNG kiểm tra phòng ban con: các phòng ban con vẫn giữ DepartmentCodeParent trỏ tới mã đã xoá (hành vi nguồn).
+//       - KHÔNG gọi UpdBU: nguồn không gọi Mst_Department_UpdBU khi xoá dòng (Master.cs:30865-30968).
+//       - Xoá dòng Mst_Department. Thành công Data = null (:490-491).
 //   * Cột tính md_DepartmentNameParent: left join Mst_Department f on t.DepartmentCodeParent = f.DepartmentCode (:30512-30513),
 //     lấy tên phòng ban cấp trên f.DepartmentName (null nếu không có cấp trên).
 //   * Cột tính ss_QtyStaff: nguồn left join count StaffCode từ Staff_MapDepartment group by DepartmentCode (:30490-30499, :30506).
@@ -104,10 +125,10 @@ namespace MiniLoyalty.Controllers.Port;
 //   * DDL: không có DDL trong repo nguồn — PK = DepartmentCode (khoá draft), kiểu cột cần xác nhận.
 //
 // Bỏ qua có chủ đích (loại Đ):
-//   - CheckGatewayAuthentication: gate :39, :123, :228, :306, :394, API :40-46, :112-117, :147-152, :183-188
-//   - CheckAuthorize: gate :40, :124, :229, :307, :395 (hệ thống đích chưa có hệ phân quyền)
-//   - Ghi RequestLog/ReturnLog: Master.cs:29593-29600, 29691-29698, 29830-29837, 29925-29932, 30072-30079, 30170-30177
-//   - Sys_User_CheckAuthorize / Sys_Access_CheckDenyV30: Master.cs:29606-29620, 29630-29634, 29849-29870, 30091-30112
+//   - CheckGatewayAuthentication: gate :39, :123, :228, :306, :394, :455, API :40-46, :112-117, :147-152, :183-188, :254-259
+//   - CheckAuthorize: gate :40, :124, :229, :307, :395, :456 (hệ thống đích chưa có hệ phân quyền)
+//   - Ghi RequestLog/ReturnLog: Master.cs:29593-29600, 29691-29698, 29830-29837, 29925-29932, 30072-30079, 30170-30177, 30295-30302, 30385-30392
+//   - Sys_User_CheckAuthorize / Sys_Access_CheckDenyV30: Master.cs:29606-29620, 29630-29634, 29849-29870, 30091-30112, 30314-30335
 // ============================================================================================
 
 /// <summary>Port 1:1 <c>Mst_DepartmentSearch</c> — tham số lọc + phân trang của màn (Mst_DepartmentController.cs:30, 57-61).</summary>
@@ -153,6 +174,16 @@ public class MstDepartmentUpdateReq
     public string? DepartmentName { get; set; }
     public string? DepartmentDesc { get; set; }
     public string? FlagActive { get; set; }
+}
+
+/// <summary>
+/// Body của Delete: { DepartmentCode, OrgID }
+/// Nguồn gate Mst_DepartmentController.cs:446-515 (#127).
+/// </summary>
+public class MstDepartmentDeleteReq
+{
+    public string? DepartmentCode { get; set; }
+    public string? OrgID { get; set; }
 }
 
 [ApiController]
@@ -580,6 +611,131 @@ public class Mst_DepartmentControllerPort : ControllerBase
         await _db.SaveChangesAsync();
 
         return null; // Thành công
+    }
+
+    // ============================================================================================
+    // Delete — nguồn Mst_DepartmentController.cs:446-515 (#127).
+    // Gate:
+    //   - DepartmentCode rỗng / body rỗng -> throw ServiceException("invalid_departmentcode", "invalid_departmentcode") (:500)
+    //     -> 400 ErridnLoyalty.invalid_departmentcode.
+    //   - OrgID rỗng -> throw ServiceException("invalid_orgid", "invalid_orgid") (:495, kiểm SAU DepartmentCode)
+    //     -> 400 ErridnLoyalty.invalid_orgid.
+    //   - Cả hai hợp lệ -> gọi WA_Mst_Department_Delete (:488), thành công SetSuccess, Data = null (:490-491).
+    //   - OrgID KHÔNG dùng trong nghiệp vụ biz sau đó.
+    // Biz Mst_Department_DeleteX (Master.cs:30865-30968), tách thành DeleteXAsync(code) (1 transaction):
+    //   - 1 transaction duy nhất (Master.cs:30292 _cf.db.BeginTransaction(), :30358 CommitSafety).
+    //   - StdParam mã phòng ban (Trim + ToUpper, rỗng -> null) (:30891).
+    //   - Mst_Department_CheckDB(ma, "1"): mã rỗng hoặc không tìm thấy -> ErridnLoyalty.Mst_Department_CheckDB_DepartmentNotFound (:30897-30903).
+    //   - Đếm nhân viên trong Staff_MapDepartment (:30909-30953): join DepartmentCode + OrgID > 0 ->
+    //     Mst_Department_DeleteX_ExistStaff_MapDepartment — bảng CHƯA có ở đích -> KHÔNG chặn, GHI GAP.
+    //   - FK Train_CourseDepartment.DepartmentCode (20220219.z11.UpdDB.60.Course.sql:177) chưa port -> GHI GAP.
+    //   - KHÔNG kiểm tra phòng ban con: các phòng ban cấp dưới vẫn giữ DepartmentCodeParent trỏ tới mã đã xoá (hành vi nguồn).
+    //   - KHÔNG gọi UpdBU: nguồn không gọi Mst_Department_UpdBU khi xoá dòng (Master.cs:30865-30968).
+    //   - Xoá dòng Mst_Department và commit transaction.
+    // ============================================================================================
+    [HttpPost("delete")]
+    public async Task<IActionResult> Delete([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] MstDepartmentDeleteReq? req)
+    {
+        // 1. Kiểm tra DepartmentCode rỗng tại gate (Mst_DepartmentController.cs:465, :500):
+        //    DepartmentCode rỗng / body rỗng -> ServiceException("invalid_departmentcode", "invalid_departmentcode")
+        if (string.IsNullOrWhiteSpace(req?.DepartmentCode))
+        {
+            return PortResult.Fail("invalid_departmentcode", "Check.DepartmentCode", req?.DepartmentCode);
+        }
+
+        // 2. Kiểm tra OrgID rỗng tại gate (Mst_DepartmentController.cs:467, :495):
+        //    OrgID rỗng -> ServiceException("invalid_orgid", "invalid_orgid") (kiểm SAU DepartmentCode).
+        //    LƯU Ý: OrgID không dùng trong nghiệp vụ biz sau đó.
+        if (string.IsNullOrWhiteSpace(req?.OrgID))
+        {
+            return PortResult.Fail("invalid_orgid", "Check.OrgID", req?.OrgID);
+        }
+
+        // 3. Thực hiện nghiệp vụ xoá qua DeleteXAsync (Master.cs:30259-30395, :30865-30968)
+        var err = await DeleteXAsync(req?.DepartmentCode);
+        if (err != null)
+        {
+            return err;
+        }
+
+        // 4. Thành công: gate Mst_DepartmentController.cs:490-491 SetSuccess + Data = null
+        return Ok(new
+        {
+            Success = true,
+            Data = (object?)null
+        });
+    }
+
+    /// <summary>
+    /// Nghiệp vụ xoá 1 phòng ban — port 1:1 từ Mst_Department_DeleteX (Master.cs:30865-30968).
+    /// Chuỗi gọi: API WA_Mst_Department_Delete (MstDepartmentController.cs:233-302)
+    /// -> biz WAS_Mst_Department_Delete (Master.cs:30181-30258)
+    /// -> Mst_Department_Delete (Master.cs:30259-30395)
+    /// -> Mst_Department_DeleteX (Master.cs:30865-30968).
+    ///
+    /// Tách riêng DeleteXAsync(code) trong 1 transaction để DeleteMultiple sau này tái sử dụng.
+    /// Thứ tự xử lý:
+    ///   1. Mở 1 transaction cho mỗi lần xoá (Master.cs:30292 _cf.db.BeginTransaction()).
+    ///   2. Chuẩn hoá mã qua StdParam: Trim + ToUpper, rỗng -> null (Master.cs:30891).
+    ///   3. Mst_Department_CheckDB(ma, "1") (Master.cs:30897-30903, :29275-29338):
+    ///      Mã rỗng hoặc không tìm thấy phòng ban trong DB -> ErridnLoyalty.Mst_Department_CheckDB_DepartmentNotFound.
+    ///   4. Ràng buộc:
+    ///      - GAP Staff_MapDepartment: nguồn kiểm tra nhân viên thuộc phòng ban (Master.cs:30909-30953).
+    ///        Bảng Staff_MapDepartment chưa có ở đích -> không chặn, ghi GAP.
+    ///      - GAP Train_CourseDepartment: FK Train_CourseDepartment.DepartmentCode (20220219.z11.UpdDB.60.Course.sql:177) chưa port -> ghi GAP.
+    ///      - KHÔNG kiểm tra phòng ban con: các phòng ban cấp dưới vẫn giữ DepartmentCodeParent trỏ tới mã đã xoá (hành vi nguồn).
+    ///      - KHÔNG gọi UpdBU: nguồn không gọi Mst_Department_UpdBU khi xoá dòng (Master.cs:30865-30968).
+    ///   5. Xoá dòng Mst_Department (Master.cs:30959 dtDB_Mst_Department.Rows[0].Delete()).
+    ///   6. Commit transaction (Master.cs:30358 TDALUtils.DBUtils.CommitSafety).
+    /// Trả null nếu thành công; trả IActionResult (PortResult.Fail) nếu thất bại.
+    /// </summary>
+    private async Task<IActionResult?> DeleteXAsync(string? code)
+    {
+        // 1. Mở 1 transaction cho mỗi lần xoá (Master.cs:30292 _cf.db.BeginTransaction()).
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // 2. Chuẩn hoá mã qua StdParam: Trim + ToUpper, rỗng -> null (Master.cs:30891)
+            var strDepartmentCode = StdParam(code);
+
+            // 3. Mst_Department_CheckDB(ma, "1") (Master.cs:30897-30903, :29275-29338):
+            //    Mã rỗng hoặc không tìm thấy -> ErridnLoyalty.Mst_Department_CheckDB_DepartmentNotFound.
+            if (string.IsNullOrEmpty(strDepartmentCode))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_Department_CheckDB_DepartmentNotFound", "Check.DepartmentCode", strDepartmentCode);
+            }
+
+            var dep = await _db.Set<Mst_Department>().FirstOrDefaultAsync(x =>
+                EF.Functions.Like((x.DepartmentCode ?? "").ToLower(), PortQuery.Equal(strDepartmentCode), PortQuery.Esc));
+
+            if (dep == null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_Department_CheckDB_DepartmentNotFound", "Check.DepartmentCode", strDepartmentCode);
+            }
+
+            // 4. Ràng buộc & nghiệp vụ nguồn:
+            //    - GAP Staff_MapDepartment: nguồn kiểm tra nhân viên thuộc phòng ban (Master.cs:30909-30953).
+            //      Bảng Staff_MapDepartment chưa có ở đích -> không chặn, ghi GAP.
+            //    - GAP Train_CourseDepartment: FK Train_CourseDepartment.DepartmentCode (20220219.z11.UpdDB.60.Course.sql:177) chưa port -> ghi GAP.
+            //    - KHÔNG kiểm tra phòng ban con: các phòng ban cấp dưới vẫn giữ DepartmentCodeParent trỏ tới mã đã xoá (hành vi nguồn).
+            //    - KHÔNG gọi UpdBU: nguồn không gọi Mst_Department_UpdBU khi xoá dòng (Master.cs:30865-30968).
+
+            // 5. Xoá dòng Mst_Department (Master.cs:30959 dtDB_Mst_Department.Rows[0].Delete())
+            _db.Set<Mst_Department>().Remove(dep);
+            await _db.SaveChangesAsync();
+
+            // 6. Commit transaction (Master.cs:30358 TDALUtils.DBUtils.CommitSafety)
+            await tx.CommitAsync();
+
+            return null;
+        }
+        catch (Exception)
+        {
+            await tx.RollbackAsync();
+            throw;
+        }
     }
 
     /// <summary>
