@@ -33,8 +33,20 @@ public class SysAccessGetByGroupCodeReq
 }
 
 /// <summary>
-/// Port 1:1 Sys_AccessController — màn phân quyền truy cập hệ thống (#300 Search, #301 Get, #302 GetByGroupCode).
-/// Nguồn Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Sys_AccessController.cs:27-109, 110-217, 220-285
+/// DTO tham số cho Sys_AccessController.GetAllFunctionBy_ObjectCode (gate Sys_AccessController.cs:288-402).
+/// Nhận GroupCode qua JSON body (Bài học A.14).
+/// </summary>
+public class SysAccessGetAllFunctionByObjectCodeReq
+{
+    public string? GroupCode { get; set; }
+    public string? OrgID { get; set; }
+    public string? NetworkID { get; set; }
+    public string? Tid { get; set; }
+}
+
+/// <summary>
+/// Port 1:1 Sys_AccessController — màn phân quyền truy cập hệ thống (#300 Search, #301 Get, #302 GetByGroupCode, #303 GetAllFunctionBy_ObjectCode).
+/// Nguồn Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Sys_AccessController.cs:27-109, 110-217, 220-285, 288-402
 /// Nguồn API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\SysAccessController.cs:20-91 (WA_Sys_Access_Get)
 /// Nguồn BIZ: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\System.cs:757-850 (WAS_Sys_Access_Get)
 ///            D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\System.cs:290-512 (Sys_Access_Get)
@@ -100,6 +112,63 @@ public class Sys_AccessControllerPort : ControllerBase
 
         var (_, rows) = await GetXAsync(null, null, null, groupCode, 0, 123456000);
         return Ok(new { Success = true, Data = rows.Count > 0 ? rows : null });
+    }
+
+    /// <summary>
+    /// Port 1:1 Sys_AccessController.GetAllFunctionBy_ObjectCode (gate Sys_AccessController.cs:288-402).
+    /// Lấy danh sách Menu và Button trong hệ thống (Sys_Object: ObjectType IN ('MENU','BUTTON') và FlagActive = '1'),
+    /// sắp xếp theo ObjectCode asc (System.cs:14964).
+    /// Nếu GroupCode được truyền vào (!IsNullOrEmpty), lấy danh sách phân quyền Sys_Access theo GroupCode.
+    /// Gán FlagSelected: "1" nếu ObjectCode có trong phân quyền của nhóm, ngược lại "0".
+    /// Nếu GroupCode rỗng/null, bỏ qua lấy Sys_Access, toàn bộ FlagSelected gán "0" (gate :346-374, :385).
+    /// Nếu danh sách Sys_Object rỗng, Data = null (gate :376).
+    /// </summary>
+    [HttpPost("getallfunctionby_objectcode")]
+    public async Task<IActionResult> GetAllFunctionBy_ObjectCode([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] SysAccessGetAllFunctionByObjectCodeReq? req)
+    {
+        // Danh sách Menu - Button trong hệ thống (gate :310-343)
+        // ObjectType IN ('MENU', 'BUTTON') và FlagActive = "1", order by ObjectCode asc (System.cs:14964)
+        var allowedTypes = new[] { "MENU", "BUTTON" };
+        var listSys_Object = await _db.Set<Sys_Object>().AsNoTracking()
+            .Where(x => allowedTypes.Contains(x.ObjectType) && x.FlagActive == "1")
+            .OrderBy(x => x.ObjectCode)
+            .ToListAsync();
+
+        if (listSys_Object.Count == 0)
+        {
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+
+        // Danh sách Menu - Button gán vào nhóm người dùng (gate :344-374)
+        HashSet<string>? accessSet = null;
+        var groupCode = req?.GroupCode;
+        if (!string.IsNullOrEmpty(groupCode))
+        {
+            var accessObjs = await _db.Set<Sys_Access>().AsNoTracking()
+                .Where(x => EF.Functions.Like((x.GroupCode ?? "").ToLower(), PortQuery.Equal(groupCode), PortQuery.Esc))
+                .Select(x => x.ObjectCode)
+                .ToListAsync();
+            // gate :370-373: listSys_Access chỉ khác null khi có >= 1 dòng Sys_Access; rỗng -> vẫn null
+            if (accessObjs.Count > 0) accessSet = new HashSet<string>(accessObjs, StringComparer.Ordinal);   // it.ObjectCode.Equals(item.ObjectCode) phân biệt hoa/thường
+        }
+
+        // LỖI NGUỒN GIỮ NGUYÊN (gate :385): listSys_Access.Where(...) khi listSys_Access == null (không truyền GroupCode, hoặc nhóm chưa có dòng phân quyền nào)
+        // ném NullReferenceException -> catch của gate (AddException) -> Success = false; ở đích PortExceptionFilter trả 400 PortResult.Fail("Sys_Access_GetAllFunctionBy_ObjectCode", "Exception", ex.Message).
+        if (accessSet == null) throw new NullReferenceException("Object reference not set to an instance of an object.");
+
+        // Project theo gate :378-386
+        var rows = listSys_Object.Select(item => new
+        {
+            item.ObjectCode,
+            item.ObjectName,
+            item.ServiceCode,
+            item.ObjectType,
+            item.FlagExecModal,
+            item.FlagActive,
+            FlagSelected = accessSet != null && accessSet.Contains(item.ObjectCode) ? "1" : "0",
+        }).ToList();
+
+        return Ok(new { Success = true, Data = rows });
     }
 
     /// <summary>
