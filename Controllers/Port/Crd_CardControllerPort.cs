@@ -71,6 +71,16 @@ public class Crd_CardControllerSearchReq
 }
 
 /// <summary>
+/// Tham số lấy chi tiết thẻ hội viên — port 1:1 từ tầng Gate Crd_CardController.GetDetailMember (Crd_CardController.cs:133).
+/// Nguồn nhận 2 tham số MemberNo, CardNo (query string); ở đích nhận qua JSON body (Bài học A.14).
+/// </summary>
+public class Crd_CardControllerGetDetailMemberReq
+{
+    public string? MemberNo { get; set; }                    // Mã hội viên — Crd_CardController.cs:133
+    public string? CardNo { get; set; }                      // Mã thẻ hội viên — Crd_CardController.cs:133
+}
+
+/// <summary>
 /// Model từng dòng dữ liệu thẻ hội viên trả về ở DataList — port 1:1 từ model Crd_Card.cs (1-120) và select cuối (Master.Loyalty.cs:19654-19794).
 /// </summary>
 public class Crd_CardSearchItem
@@ -176,6 +186,12 @@ public class Crd_CardSearchItem
     public string? PurchaseType { get; set; }               // Loại thẻ (Mua mới/Mua thêm xe/Mua lại xe/Đổi xe) — :118
     public string? PurchaseTypeName { get; set; }           // Tên loại thẻ — :119
 }
+
+/// <summary>
+/// Cặp (Crd_Member, Crd_Card) dùng chung cho Search và GetDetailMember — thay cho kiểu ẩn danh
+/// để có thể truyền vào hàm ánh xạ dùng chung (expression tree không cho tuple literal).
+/// </summary>
+public record CrdCardMemberPair(CrdMember Member, CrdCard Card);
 
 [ApiController]
 [Route("api/crd_card")]
@@ -364,7 +380,7 @@ public class Crd_CardControllerPort : ControllerBase
             .OrderByDescending(x => x.cc.CardNo)
             .Skip((int)Math.Min(recordStart, int.MaxValue))
             .Take((int)Math.Min(pageSize, int.MaxValue))
-            .Select(x => new { Member = x.cm, Card = x.cc })
+            .Select(x => new CrdCardMemberPair(x.cm, x.cc))
             .ToListAsync();
 
         if (pagedPairs.Count == 0)
@@ -379,6 +395,79 @@ public class Crd_CardControllerPort : ControllerBase
             return Ok(new { Success = true, Data = emptyResult });
         }
 
+        // 6. Ánh xạ dữ liệu sang model Crd_CardSearchItem kết hợp các phép tính toán:
+        var dataList = await BuildCrdCardItemsAsync(pagedPairs);
+
+        var result = new PageInfo<Crd_CardSearchItem>(
+            dataList,
+            itemCount,
+            pageCount,
+            pageIndex,
+            pageSize
+        );
+
+        return Ok(new { Success = true, Data = result });
+    }
+
+    /// <summary>
+    /// Lấy chi tiết thẻ hội viên theo MemberNo + CardNo — port 1:1 từ Crd_CardController.GetDetailMember (Crd_CardController.cs:133-203).
+    /// Nguồn: nếu CardNo và MemberNo đều khác null/rỗng thì dựng strWhereClause_Crd_Card (MemberNo =, CardNo =)
+    /// rồi gọi Crd_CardService.WA_Crd_Card_Get với Ft_RecordStart = "0", Ft_RecordCount = "1", Rt_Cols_Crd_Card = "*";
+    /// lấy bản ghi Crd_Card ĐẦU TIÊN (nếu có). Trả về Data = { Crd_Card = <đối tượng hoặc null> }.
+    /// </summary>
+    [HttpPost("getdetailmember")]
+    public async Task<IActionResult> GetDetailMember([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_CardControllerGetDetailMemberReq? req)
+    {
+        req ??= new Crd_CardControllerGetDetailMemberReq();
+
+        // Nguồn chỉ truy vấn khi CẢ CardNo VÀ MemberNo đều khác null/rỗng (Crd_CardController.cs:155).
+        // Thiếu tham số -> objCrd_Card giữ null, vẫn SetSuccess() và trả Data = { Crd_Card = null } (:154, :186-190).
+        Crd_CardSearchItem? objCrd_Card = null;
+        if (!string.IsNullOrWhiteSpace(req.CardNo) && !string.IsNullOrWhiteSpace(req.MemberNo))
+        {
+            // strWhereClause_Crd_Card (Crd_CardController.cs:593-596): Crd_Member.MemberNo = <MemberNo>.
+            // LƯU Ý: nhánh lọc theo CardNo trong nguồn đang bị COMMENT OUT (:597-600) — CardNo KHÔNG vào mệnh đề lọc.
+            var patMemberNo = PortQuery.Equal(req.MemberNo);
+
+            // Crd_Card_GetX_New20251229 (Master.Loyalty.cs:19502-19525): draft = Crd_Member inner join Crd_Card
+            // với cc.CardNo là thẻ MỚI NHẤT của hội viên (order by cc.CreateDTimeUTC desc).
+            var query = from cm in _db.CrdMembers.AsNoTracking()
+                        join cc in _db.CrdCards.AsNoTracking() on cm.MemberNo equals cc.MemberNo
+                        where cc.CardNo == _db.CrdCards
+                            .Where(c => c.MemberNo == cm.MemberNo)
+                            .OrderByDescending(c => c.CreateDTimeUTC)
+                            .Select(c => c.CardNo)
+                            .FirstOrDefault()
+                        where EF.Functions.Like((cm.MemberNo ?? "").ToLower(), patMemberNo, PortQuery.Esc)
+                        select new { cm, cc };
+
+            // Ft_RecordStart = "0", Ft_RecordCount = "1" (:173-174) -> lấy đúng 1 bản ghi đầu tiên.
+            // Sắp xếp cc.CardNo desc (:19793) để chọn bản ghi đầu ổn định.
+            var pagedPairs = await query
+                .OrderByDescending(x => x.cc.CardNo)
+                .Take(1)
+                .Select(x => new CrdCardMemberPair(x.cm, x.cc))
+                .ToListAsync();
+
+            if (pagedPairs.Count > 0)
+            {
+                // Nguồn lấy objRT_Crd_Card.Lst_Crd_Card[0] (:181-184).
+                var items = await BuildCrdCardItemsAsync(pagedPairs);
+                objCrd_Card = items.FirstOrDefault();
+            }
+        }
+
+        // Data = new { Crd_Card = objCrd_Card } (:187-190) — thuộc tính DUY NHẤT là Crd_Card.
+        return Ok(new { Success = true, Data = new { Crd_Card = objCrd_Card } });
+    }
+
+    /// <summary>
+    /// Ánh xạ danh sách (Crd_Member, Crd_Card) sang model Crd_CardSearchItem kèm các phép tính của
+    /// Crd_Card_GetX_New20251229 (Master.Loyalty.cs:19556-19794). Dùng chung cho Search và GetDetailMember.
+    /// </summary>
+    private async Task<List<Crd_CardSearchItem>> BuildCrdCardItemsAsync(
+        List<CrdCardMemberPair> pagedPairs)
+    {
         // 5. Nạp dữ liệu các bảng tra cứu liên quan cho các bản ghi trong trang hiện tại (Master.Loyalty.cs:19556-19794):
         var memberNos = pagedPairs.Select(p => p.Member.MemberNo).Distinct().ToList();
         var cardNos = pagedPairs.Select(p => p.Card.CardNo).Distinct().ToList();
@@ -631,14 +720,6 @@ public class Crd_CardControllerPort : ControllerBase
             dataList.Add(item);
         }
 
-        var result = new PageInfo<Crd_CardSearchItem>(
-            dataList,
-            itemCount,
-            pageCount,
-            pageIndex,
-            pageSize
-        );
-
-        return Ok(new { Success = true, Data = result });
+        return dataList;
     }
 }
