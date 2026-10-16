@@ -87,6 +87,15 @@ public class Crd_MemberGetByMemberNoRes
 }
 
 /// <summary>
+/// Tham số request lấy danh sách hội viên theo số điện thoại — Crd_MemberController.GetByPhoneNo (Gate :219).
+/// </summary>
+public class Crd_MemberGetByPhoneNoReq
+{
+    public string? PhoneNo { get; set; }
+}
+
+
+/// <summary>
 /// Model từng dòng dữ liệu hội viên trả về ở DataList — port 1:1 từ model Crd_Member.cs (1-122) và select cuối (Card.cs:20400-20549).
 /// </summary>
 public class Crd_MemberSearchItem
@@ -802,5 +811,213 @@ public class Crd_MemberControllerPort : ControllerBase
 
         return Ok(new { Success = true, Data = new { Crd_Member = item } });
     }
+
+    /// <summary>
+    /// Lấy danh sách thông tin hội viên theo số điện thoại — port 1:1 từ Crd_MemberController.GetByPhoneNo (#041).
+    /// Nguồn Gate: Crd_MemberController.cs:219-291 (GetByPhoneNo)
+    /// Nguồn hàm lọc: Crd_MemberController.cs:1494-1558 (strWhereClause_Crd_Member)
+    /// Nguồn API: CrdMemberController.cs:245-314 (WA_Crd_Member_Get)
+    /// Nguồn Biz: Card.cs:11097-11195 (WAS_Crd_Member_Get) -> Card.cs:11197-11349 (Crd_Member_Get) -> Card.cs:11351-11573 (Crd_Member_GetX)
+    /// </summary>
+    [HttpPost("getbyphoneno")]
+    public async Task<IActionResult> GetByPhoneNo([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_MemberGetByPhoneNoReq? req)
+    {
+        // Gate :242: if (PhoneNo != null && !TUtils.CUtils.IsNullOrEmpty(PhoneNo))
+        // Nếu req null hoặc PhoneNo rỗng -> bỏ qua gọi service, trả về ngay Success = true, Data = { Lst_Crd_Member = null } (Gate :242, :274-278)
+        if (req == null || string.IsNullOrWhiteSpace(req.PhoneNo))
+        {
+            return Ok(new { Success = true, Data = new { Lst_Crd_Member = (object?)null } });
+        }
+
+        // Truy vấn Crd_Member với điều kiện lọc:
+        // MemberStatus = 'APPROVE' (Gate :247, Biz :11421)
+        // PhoneNo = req.PhoneNo (toán tử =, không LIKE, không tách dấu phẩy; Gate :1528-1531, Biz :11542-11548)
+        var patPhoneNo = PortQuery.Equal(req.PhoneNo);
+        var patApprove = PortQuery.Equal("APPROVE");
+
+        var members = await _db.Set<CrdMember>().AsNoTracking()
+            .Where(cm => EF.Functions.Like((cm.MemberStatus ?? "").ToLower(), patApprove, PortQuery.Esc))
+            .Where(cm => EF.Functions.Like((cm.PhoneNo ?? "").ToLower(), patPhoneNo, PortQuery.Esc))
+            .OrderBy(cm => cm.MemberNo) // Sắp xếp cmb.MemberNo asc (Biz :11423, :11511)
+            .ToListAsync();
+
+        // Nếu không có bản ghi nào: list_Crd_Member vẫn là null (Gate :241, :268-272, :275-278)
+        if (members.Count == 0)
+        {
+            return Ok(new { Success = true, Data = new { Lst_Crd_Member = (object?)null } });
+        }
+
+        var dataList = new List<Crd_MemberSearchItem>();
+        for (int i = 0; i < members.Count; i++)
+        {
+            var member = members[i];
+
+            // Subquery top 1 Crd_Card theo cc.MemberNo = cmb.MemberNo order by cc.CreateDTimeUTC desc (Biz :11459-11467)
+            var card = await _db.Set<CrdCard>().AsNoTracking()
+                .Where(c => c.MemberNo == member.MemberNo)
+                .OrderByDescending(c => c.CreateDTimeUTC)
+                .FirstOrDefaultAsync();
+
+            // Lookup danh mục: Mst_Province, Mst_District, Mst_DealerCP, Mst_PurchaseType (Biz :11498-11510)
+            Mst_Province? mpv = null;
+            if (!string.IsNullOrEmpty(member.ProvinceCode))
+            {
+                mpv = await _db.Set<Mst_Province>().AsNoTracking()
+                    .FirstOrDefaultAsync(p => p.ProvinceCode == member.ProvinceCode);
+            }
+
+            Mst_District? mdt = null;
+            if (!string.IsNullOrEmpty(member.ProvinceCode) && !string.IsNullOrEmpty(member.DistrictCode))
+            {
+                mdt = await _db.Set<Mst_District>().AsNoTracking()
+                    .FirstOrDefaultAsync(d => d.ProvinceCode == member.ProvinceCode && d.DistrictCode == member.DistrictCode);
+            }
+
+            Mst_DealerCP? mdcp = null;
+            if (!string.IsNullOrEmpty(member.DLCodeRegis))
+            {
+                mdcp = await _db.Set<Mst_DealerCP>().AsNoTracking()
+                    .FirstOrDefaultAsync(d => d.DLCPCode == member.DLCodeRegis);
+            }
+
+            Mst_DealerCP? mdcpe = null;
+            if (!string.IsNullOrEmpty(member.DLCodeExceptionally))
+            {
+                mdcpe = await _db.Set<Mst_DealerCP>().AsNoTracking()
+                    .FirstOrDefaultAsync(d => d.DLCPCode == member.DLCodeExceptionally);
+            }
+
+            Mst_PurchaseType? mpt = null;
+            if (!string.IsNullOrEmpty(member.PurchaseType))
+            {
+                mpt = await _db.Set<Mst_PurchaseType>().AsNoTracking()
+                    .FirstOrDefaultAsync(pt => pt.PurchaseType == member.PurchaseType);
+            }
+
+            // Chuyển RegisFinishDTimeUTC sang chuỗi ngày giờ nếu có giá trị
+            string? regisFinishDTimeUTC = null;
+            if (member.RegisFinishDTimeUTC.HasValue)
+            {
+                regisFinishDTimeUTC = member.RegisFinishDTimeUTC.Value.AddHours(7).ToString("yyyy-MM-dd HH:mm:ss");
+            }
+
+            // cm_FlagShow: case when cmb.MemberStatus = 'APPROVE' then '1' (Biz :11484-11489)
+            string cm_FlagShow = "1";
+
+            var item = new Crd_MemberSearchItem
+            {
+                MyIdxSeq = i, // Identity tương đương MyIdxSeq trong #tbl_Crd_Member_Filter_Draft (Biz :11411, :11457)
+                MemberNo = member.MemberNo,
+                NetworkID = member.NetworkID,
+                OrgID = member.OrgID,
+                DLCodeRegis = member.DLCodeRegis,
+                DLCodeExceptionally = member.DLCodeExceptionally,
+                RegistrationDate = member.RegistrationDate,
+                CustomerCode = member.CustomerCode,
+                ProvinceCode = member.ProvinceCode,
+                DistrictCode = member.DistrictCode,
+                UserCode_Member = member.UserCode_Member,
+                MemberName = member.MemberName,
+                MemberGender = member.MemberGender,
+                IDCardNo = member.IDCardNo,
+                PhoneNo = member.PhoneNo,
+                DateOfBirth = member.DateOfBirth,
+                MemAddress = member.MemAddress,
+                CarNo = member.CarNo,
+                VIN = member.VIN,
+                ModelCode = member.ModelCode,
+                ModelName = member.ModelName,
+                TradeMarkCode = member.TradeMarkCode,
+                EffDateStart = member.EffDateStart,
+                EffDateEnd = member.EffDateEnd,
+                PointTotal = member.PointTotal,
+                PointBlock = member.PointBlock,
+                PointAvail = member.PointAvail,
+                AmountTotal = member.AmountTotal,
+                AmountBlock = member.AmountBlock,
+                AmountAvail = member.AmountAvail,
+                QtyVisitTotal = member.QtyVisitTotal,
+                QtyVisitBlock = member.QtyVisitBlock,
+                QtyVisitAvail = member.QtyVisitAvail,
+                PointBegin = member.PointBegin,
+                PointEnd = member.PointEnd,
+                AmountBegin = member.AmountBegin,
+                AmountEnd = member.AmountEnd,
+                QtyVisitBegin = member.QtyVisitBegin,
+                QtyVisitEnd = member.QtyVisitEnd,
+                PointCardRank = member.PointCardRank,
+                CardTypeUse = member.CardTypeUse,
+                CardTypeInit = member.CardTypeInit,
+                MemberActiveDate = member.MemberActiveDate,
+                FlagExceptionally = member.FlagExceptionally,
+                MemberNoIntro = member.MemberNoIntro,
+                CarNoIntro = member.CarNoIntro,
+                PointIntro = member.PointIntro,
+                PointBuyCar = member.PointBuyCar,
+                PointBuyCreta = member.PointBuyCreta,
+                PointVoucherNewCar = member.PointVoucherNewCar,
+                PointVoucher = member.PointVoucher,
+                PointActualVoucher = member.PointActualVoucher,
+                PointActualVCNewCar = member.PointActualVCNewCar,
+                DealNo = member.DealNo,
+                TVBHName = member.TVBHName,
+                CreateDTimeUTC = member.CreateDTimeUTC,
+                CreateBy = member.CreateBy,
+                LUDTimeUTC = member.LUDTimeUTC,
+                LUBy = member.LUBy,
+                InactiveDTimeUTC = member.InactiveDTimeUTC,
+                InactiveBy = member.InactiveBy,
+                RegisAppr1DTimeUTC = member.RegisAppr1DTimeUTC,
+                RegisAppr1By = member.RegisAppr1By,
+                RegisAppr2DTimeUTC = member.RegisAppr2DTimeUTC,
+                RegisAppr2By = member.RegisAppr2By,
+                RegisFinishDTimeUTC = regisFinishDTimeUTC,
+                RegisFinishBy = member.RegisFinishBy,
+                RegisCancelDTimeUTC = member.RegisCancelDTimeUTC,
+                RegisCancelBy = member.RegisCancelBy,
+                ApproveDTimeUTC = member.ApproveDTimeUTC,
+                ApproveBy = member.ApproveBy,
+                CancelDTimeUTC = member.CancelDTimeUTC,
+                CancelBy = member.CancelBy,
+                MemberStatus = member.MemberStatus,
+                RegisStatus = member.RegisStatus,
+                Remark = member.Remark,
+                InvoiceDate = member.InvoiceDate,
+                LogLUDTimeUTC = member.LogLUDTimeUTC,
+                LogLUBy = member.LogLUBy,
+                cc_CardNo = card?.CardNo,
+                mcs_CardSourceName = null, // GAP: Mst_CardSource chưa có entity
+                mpv_ProvinceCode = mpv?.ProvinceCode ?? member.ProvinceCode,
+                mpv_ProvinceName = mpv?.ProvinceName,
+                mdt_DistrictCode = mdt?.DistrictCode ?? member.DistrictCode,
+                mdt_DistrictName = mdt?.DistrictName,
+                cm_FlagShow = cm_FlagShow,
+                mdcp_DLCPCode = mdcp?.DLCPCode ?? member.DLCodeRegis,
+                mdcp_DLCPName = mdcp?.DLCPName,
+                mdcpe_DLCPCodeExcep = mdcpe?.DLCPCode ?? member.DLCodeExceptionally,
+                mdcpe_DLCPNameExcep = mdcpe?.DLCPName,
+                MemberFilePath = member.MemberFilePath,
+                MemberFileName = member.MemberFileName,
+                MemberFileSpec = null,
+                FlagFileUpload = null,
+                AttFileId = null,
+                SourceRegisType = member.SourceRegisType,
+                ReqMemberRegisterCodeSys = member.ReqMemberRegisterCodeSys,
+                ReqMemberRegisterCodeOS = null, // GAP: Req_MemberRegister chưa có entity
+                PurchaseType = member.PurchaseType,
+                PurchaseTypeName = mpt?.PurchaseTypeName,
+                WarrantyExpiryDate = member.WarrantyExpiryDate,
+                CardSourceCode = member.CardSourceCode,
+                CardStatus = member.CardStatus,
+                FlagExceptionCard = member.FlagExceptionCard,
+                AmountCardRank = member.AmountCardRank
+            };
+
+            dataList.Add(item);
+        }
+
+        return Ok(new { Success = true, Data = new { Lst_Crd_Member = dataList } });
+    }
 }
+
 
