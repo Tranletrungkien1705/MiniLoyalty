@@ -11,11 +11,13 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — port 1:1 Mst_PositionController.cs — Mst_Position (#197).
+// PORT 1:1 — port 1:1 Mst_PositionController.cs — Mst_Position (#197, #198).
 //
 // Nguồn controller (tầng gate):
-//   - Mst_PositionController.cs:26-106   Search -> WA_Mst_Position_Get
+//   - Mst_PositionController.cs:26-106   Search -> WA_Mst_Position_Get (#197)
+//   - Mst_PositionController.cs:108-171  GetByPositionCode -> WA_Mst_Position_Get (#198)
 //   - Mst_PositionController.cs:624-652  strWhereClause_Mst_Position (mệnh đề lọc Search)
+//   - Mst_PositionController.cs:654-673  strWhereClause_Mst_Position_By_PositionCode (mệnh đề lọc GetByPositionCode)
 // Nguồn API:
 //   - MstPositionController.cs:17-88     WA_Mst_Position_Get -> _biz.WAS_Mst_Position_Get
 // Nguồn biz:
@@ -37,7 +39,10 @@ namespace MiniLoyalty.Controllers.Port;
 //          order by t.MyIdxSeq asc;
 //
 // GIỮ ĐÚNG NGUỒN:
-//   * Endpoint là POST (nguồn Mst_PositionController.cs:26).
+//   * Endpoint là POST (nguồn Mst_PositionController.cs:26, :108).
+//   * GetByPositionCode: PositionCode rỗng/null -> không query DB, trả Success = true, Data = null (gate :127-128, :157-158).
+//   * Lọc PositionCode: toán tử '=' (gate :130-133, :659-662), KHÔNG lọc OrgID, KHÔNG lọc FlagActive (inactive vẫn lấy được).
+//   * Lấy 1 bản ghi đầu tiên (Ft_RecordStart="0", Ft_RecordCount="1", gate :145-146) -> trả 1 object hoặc null.
 //   * Lọc KeyWord: like '%KeyWord%' trên PositionName (Mst_PositionController.cs:629-632). KHÔNG lọc trên PositionCode.
 //   * Lọc OrgID: tham số client, so sánh bằng '=' (Mst_PositionController.cs:633-636).
 //   * Lọc FlagActive: tách dấu phẩy -> toán tử IN ('a','b') (Mst_PositionController.cs:641-649).
@@ -50,8 +55,8 @@ namespace MiniLoyalty.Controllers.Port;
 //     và hàm lưu MasterData.cs:23570-23580 làm từ điển 9 cột. PK phức hợp (OrgID, PositionCode).
 //
 // Bỏ qua có chủ đích (loại Đ):
-//   - CheckGatewayAuthentication: gate :35, API :40-45
-//   - CheckAuthorize: gate :36 (hệ thống đích chưa có hệ phân quyền)
+//   - CheckGatewayAuthentication: gate :35, :117, API :40-45
+//   - CheckAuthorize: gate :36, :118 (hệ thống đích chưa có hệ phân quyền)
 //   - Ghi RequestLog/ReturnLog: MasterData.cs:23267-23274, 23345-23352
 //   - Sys_Access_CheckDenyV30: MasterData.cs:23284-23288
 // ============================================================================================
@@ -66,6 +71,15 @@ public class MstPositionSearchReq
     public string? FlagActive { get; set; }          // Cờ hoạt động, tách dấu phẩy -> toán tử IN (Mst_PositionController.cs:26, :641-649)
     public int Ft_PageIndex { get; set; } = 0;       // Trang (0-based) (Mst_PositionController.cs:26, :47)
     public int Ft_PageSize { get; set; } = 10;       // Số dòng/trang (Mst_PositionController.cs:26, :48)
+}
+
+/// <summary>
+/// Port 1:1 tham số đầu vào của GetByPositionCode (Mst_PositionController.cs:108).
+/// </summary>
+public class MstPositionGetByPositionCodeReq
+{
+    public string? PositionCode { get; set; }
+    public string? OrgID { get; set; }   // nguồn lấy từ session (orgUserUI.OrgId, gate :143) -> nhận tuỳ chọn trong body (LESSONS A.14); không truyền = không lọc
 }
 
 /// <summary>
@@ -124,9 +138,31 @@ public class Mst_PositionControllerPort : ControllerBase
     }
 
     /// <summary>
+    /// Port 1:1 action GetByPositionCode từ gate Mst_PositionController.cs:108-171.
+    /// Nhận POST JSON body, trả 1 đối tượng Mst_PositionSearchResultItem hoặc null trong Data.
+    /// Nếu PositionCode rỗng/null: không truy vấn DB, trả ngay Success = true, Data = null (gate :127-128, :157-158).
+    /// </summary>
+    [HttpPost("getbypositioncode")]
+    public async Task<IActionResult> GetByPositionCode([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] MstPositionGetByPositionCodeReq? req)
+    {
+        // Kiểm tra tham số: nếu PositionCode null hoặc rỗng -> không query DB, trả Success = true, Data = null (gate Mst_PositionController.cs:127-128, :157-158)
+        if (string.IsNullOrWhiteSpace(req?.PositionCode))
+        {
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+
+        // Truy vấn 1 bản ghi đầu tiên với PositionCode khớp bằng '=' (gate :130-133, :145-146, :654-673)
+        // Order by OrgID asc, PositionCode asc theo biz MasterData.cs:23124-23126
+        var (_, rows) = await GetXAsync(null, req.OrgID, null, 0, 1, positionCodeEqual: req.PositionCode);
+
+        // Trả về 1 object duy nhất nếu tìm thấy, ngược lại null (gate Mst_PositionController.cs:152-158)
+        return Ok(new { Success = true, Data = rows.Count > 0 ? rows[0] : null });
+    }
+
+    /// <summary>
     /// Truy vấn 2 bước tương ứng Mst_Position_GetX (MasterData.cs:23056-23224):
     /// 1. Draft query (#tbl_Mst_Position_Filter_Draft, :23115-23131):
-    ///    Lọc KeyWord (PositionName like '%kw%'), OrgID (=), FlagActive (in (...)),
+    ///    Lọc KeyWord (PositionName like '%kw%'), OrgID (=), FlagActive (in (...)), PositionCode (=),
     ///    đếm MyCount, sắp xếp mp.OrgID asc, mp.PositionCode asc.
     /// 2. Cắt trang (#tbl_Mst_Position_Filter, :23133-23141).
     /// 3. Select cuối (:23157-23173) left join Mst_NNT theo OrgID lấy mnnt_NNTFullName, sắp theo MyIdxSeq asc.
@@ -136,7 +172,8 @@ public class Mst_PositionControllerPort : ControllerBase
         string? orgIdEqual,
         string? flagActiveCsv,
         long recordStart,
-        long recordCount)
+        long recordCount,
+        string? positionCodeEqual = null)
     {
         // 1. Khởi tạo truy vấn AsNoTracking từ bảng Mst_Position (#tbl_Mst_Position_Filter_Draft, MasterData.cs:23120-23121)
         var q = _db.Set<Mst_Position>().AsNoTracking().AsQueryable();
@@ -171,19 +208,27 @@ public class Mst_PositionControllerPort : ControllerBase
             }
         }
 
-        // 5. Sắp xếp draft: mp.OrgID asc, mp.PositionCode asc (MasterData.cs:23124-23126)
+        // 5. Lọc PositionCode: toán tử '=' (gate Mst_PositionController.cs:130-133, :659-662).
+        // Nguồn dùng '=' ⇒ so sánh bằng chuỗi không phân biệt hoa/thường qua PortQuery.Equal (không wildcard).
+        if (!string.IsNullOrWhiteSpace(positionCodeEqual))
+        {
+            var pos = PortQuery.Equal(positionCodeEqual);
+            q = q.Where(p => EF.Functions.Like((p.PositionCode ?? "").ToLower(), pos, PortQuery.Esc));
+        }
+
+        // 6. Sắp xếp draft: mp.OrgID asc, mp.PositionCode asc (MasterData.cs:23124-23126)
         var draftOrdered = q.OrderBy(p => p.OrgID).ThenBy(p => p.PositionCode);
 
-        // 6. Đếm tổng MyCount trên bảng draft (#tbl_Mst_Position_Filter_Draft, MasterData.cs:23130)
+        // 7. Đếm tổng MyCount trên bảng draft (#tbl_Mst_Position_Filter_Draft, MasterData.cs:23130)
         var itemCount = await draftOrdered.CountAsync();
 
-        // 7. Cắt trang draft (#tbl_Mst_Position_Filter, MasterData.cs:23133-23141).
+        // 8. Cắt trang draft (#tbl_Mst_Position_Filter, MasterData.cs:23133-23141).
         // Chống tràn int và PageIndex âm/PageSize=0 theo LESSONS A.12, A.7.
         var page = (recordCount <= 0 || recordStart < 0)
             ? new List<Mst_Position>()
             : await draftOrdered.Skip((int)Math.Min(recordStart, int.MaxValue)).Take((int)Math.Min(recordCount, int.MaxValue)).ToListAsync();
 
-        // 8. Select cuối: left join Mst_NNT theo OrgID để lấy mnnt_NNTFullName (MasterData.cs:23162, :23167-23168).
+        // 9. Select cuối: left join Mst_NNT theo OrgID để lấy mnnt_NNTFullName (MasterData.cs:23162, :23167-23168).
         var orgIds = page.Select(x => x.OrgID).Where(x => !string.IsNullOrEmpty(x)).Distinct().ToList();
         var nntMap = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         if (orgIds.Count > 0)
@@ -203,7 +248,7 @@ public class Mst_PositionControllerPort : ControllerBase
             }
         }
 
-        // 9. Sắp xếp cuối theo MyIdxSeq asc (MasterData.cs:23170) và gán MyIdxSeq 0-based
+        // 10. Sắp xếp cuối theo MyIdxSeq asc (MasterData.cs:23170) và gán MyIdxSeq 0-based
         var rows = page.Select((p, idx) => new Mst_PositionSearchResultItem
         {
             MyIdxSeq = recordStart + idx,
