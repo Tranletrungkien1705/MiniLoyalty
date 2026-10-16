@@ -130,7 +130,7 @@ public class Mst_CardTypeControllerPort(AppDbContext db, IConfiguration config, 
     public async Task<IActionResult> Search([FromBody] MstCardTypeSearchReq? req)
     {
         var r = req ?? new MstCardTypeSearchReq();
-        var pageIndex = Math.Max(0, r.Ft_PageIndex);
+        var pageIndex = r.Ft_PageIndex;
         var pageSize = r.Ft_PageSize;
 
         // Search gọi GetXAsync với start = PageIndex*PageSize, count = PageSize (giữ nguyên hành vi cũ).
@@ -228,9 +228,9 @@ public class Mst_CardTypeControllerPort(AppDbContext db, IConfiguration config, 
         // MyIdxSeq = số thứ tự 0-based trong thứ tự CardType (identity(bigint,0,1) ở :5637).
         // Lấy dòng [recordStart, recordStart+recordCount) theo thứ tự CardType.
         // (EF không dịch được Select kèm chỉ số dòng ⇒ cắt trang bằng Skip/Take rồi tự gán MyIdxSeq trong bộ nhớ.)
-        var page = recordCount <= 0
+        var page = (recordCount <= 0 || recordStart < 0)
             ? new List<Mst_CardType>()
-            : await ordered.Skip((int)recordStart).Take((int)recordCount).ToListAsync();
+            : await ordered.Skip((int)Math.Min(recordStart, int.MaxValue)).Take((int)Math.Min(recordCount, int.MaxValue)).ToListAsync();
 
         // Rồi sắp trang đó theo Value asc (Master.Loyalty.cs:5683 — `order by mcb.Value asc`) trước khi trả về.
         var rows = page

@@ -74,7 +74,7 @@ public class Mst_FamilyStatusControllerPort : ControllerBase
     public async Task<IActionResult> Search([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] MstFamilyStatusSearchReq? req)
     {
         var r = req ?? new MstFamilyStatusSearchReq();
-        var pageIndex = Math.Max(0, r.Ft_PageIndex);
+        var pageIndex = r.Ft_PageIndex;
         var pageSize = r.Ft_PageSize;
 
         // Search gọi GetXAsync với start = PageIndex * PageSize, count = PageSize (giữ nguyên hành vi cũ nguồn :50-51, :75).
@@ -121,14 +121,7 @@ public class Mst_FamilyStatusControllerPort : ControllerBase
     /// </summary>
     private async Task<(int itemCount, List<object> rows)> GetXAsync(string? keyWord, string? flagActive, long recordStart, long recordCount)
     {
-        // Trên SQLite, hàm lower() mặc định chỉ hỗ trợ ký tự ASCII, không hạ chữ được ký tự tiếng Việt (vd 'Đ' -> 'đ').
-        // Đăng ký custom lower function trên SqliteConnection nếu là SQLite để tìm kiếm tiếng Việt không phân biệt hoa/thường (bẫy #18/#31).
-        var conn = _db.Database.GetDbConnection();
-        if (conn is Microsoft.Data.Sqlite.SqliteConnection sqliteConn)
-        {
-            sqliteConn.CreateFunction("lower", (string? s) => s == null ? "" : s.ToLowerInvariant());
-        }
-
+        // lower() Unicode trên SQLite được đăng ký MỘT LẦN ở hạ tầng (Data/SqliteUnicodeLower.cs) — không đăng ký trong action.
         var q = _db.Set<Mst_FamilyStatus>().AsNoTracking().AsQueryable();
 
         // KeyWord -> like '%kw%' trên FamilyStatusName (Mst_FamilyStatusController.cs:178).
@@ -153,9 +146,9 @@ public class Mst_FamilyStatusControllerPort : ControllerBase
 
         // MyIdxSeq = số thứ tự 0-based trong thứ tự FamilyStatusCode (identity(bigint, 0, 1) ở SQL nguồn :42471).
         // Lấy dòng [recordStart, recordStart+recordCount) theo thứ tự FamilyStatusCode.
-        var page = recordCount <= 0
+        var page = (recordCount <= 0 || recordStart < 0)
             ? new List<Mst_FamilyStatus>()
-            : await ordered.Skip((int)recordStart).Take((int)recordCount).ToListAsync();
+            : await ordered.Skip((int)Math.Min(recordStart, int.MaxValue)).Take((int)Math.Min(recordCount, int.MaxValue)).ToListAsync();
 
         // Select cuối theo t.MyIdxSeq asc (MasterData.cs:42516 order by t.MyIdxSeq asc).
         var rows = page

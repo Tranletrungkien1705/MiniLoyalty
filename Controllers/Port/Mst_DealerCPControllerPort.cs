@@ -192,7 +192,7 @@ public class Mst_DealerCPControllerPort : ControllerBase
     {
         req ??= new Mst_DealerCPSearchRequest();
 
-        var pageIndex = Math.Max(0, req.Ft_PageIndex);
+        var pageIndex = req.Ft_PageIndex;
         var pageSize = req.Ft_PageSize;
         long recordStart = (long)pageIndex * pageSize;
         long recordCount = pageSize;

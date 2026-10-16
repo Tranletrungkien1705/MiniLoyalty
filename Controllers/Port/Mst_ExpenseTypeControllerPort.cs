@@ -102,9 +102,9 @@ public class Mst_ExpenseTypeControllerPort(AppDbContext db) : ControllerBase
         var itemCount = await ordered.CountAsync();
 
         // Phân trang: nFilterRecordStart..nFilterRecordEnd (Master.Loyalty.cs:9226-9227, :9268-9269).
-        var page = recordCount <= 0
+        var page = (recordCount <= 0 || recordStart < 0)
             ? new List<Mst_ExpenseType>()
-            : await ordered.Skip((int)recordStart).Take((int)recordCount).ToListAsync();
+            : await ordered.Skip((int)Math.Min(recordStart, int.MaxValue)).Take((int)Math.Min(recordCount, int.MaxValue)).ToListAsync();
 
         // Select cuối: t.MyIdxSeq, mrp.* (Master.Loyalty.cs:9288-9295), trả về MyIdxSeq + 7 cột của Mst_ExpenseType.
         var rows = page

@@ -18,12 +18,21 @@ var conn = Environment.GetEnvironmentVariable("CONNECTION_STRING")
 builder.Services.AddDbContext<AppDbContext>(o =>
 {
     if (DbUtil.IsPostgres(conn)) o.UseNpgsql(DbUtil.ToNpgsql(conn));
-    else o.UseSqlite(conn);
+    else
+    {
+        o.UseSqlite(conn);
+        o.AddInterceptors(new SqliteUnicodeLowerInterceptor());   // lower() hiểu Unicode (tìm kiếm tiếng Việt có dấu) — xem Data/SqliteUnicodeLower.cs
+    }
 });
 builder.Services.AddScoped<ITenantContext, TenantContext>();   // multi-tenant: ngữ cảnh org/request
 builder.Services.AddScoped<ILoyaltyService, LoyaltyService>();
 builder.Services.AddFleetObs();
-builder.Services.AddControllersWithViews();
+builder.Services.AddControllersWithViews(o =>
+{
+    // Chỉ tác động controller port 1:1 (namespace MiniLoyalty.Controllers.Port): JSON PascalCase như nguồn + ngoại lệ → 400 PortResult.Fail.
+    o.Filters.Add<PortJsonResultFilter>();
+    o.Filters.Add<PortExceptionFilter>();
+});
 
 var app = builder.Build();
 using (var scope = app.Services.CreateScope())

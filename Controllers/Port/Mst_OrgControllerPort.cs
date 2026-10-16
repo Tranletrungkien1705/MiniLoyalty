@@ -51,7 +51,7 @@ public class Mst_OrgControllerPort : ControllerBase
         // hoàn toàn KHÔNG truyền vào SQL Mst_Org_GetX (dòng 579-580).
         // Giữ đúng nguồn: KHÔNG lọc theo req.OrgID.
 
-        var pageIndex = Math.Max(0, req.Ft_PageIndex);
+        var pageIndex = req.Ft_PageIndex;
         var pageSize = req.Ft_PageSize;
         long recordStart = (long)pageIndex * pageSize;
         long recordCount = pageSize;

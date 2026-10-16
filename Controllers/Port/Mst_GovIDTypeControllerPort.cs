@@ -73,7 +73,7 @@ public class Mst_GovIDTypeControllerPort : ControllerBase
     public async Task<IActionResult> Search([FromBody] MstGovIDTypeSearchReq? req)
     {
         var r = req ?? new MstGovIDTypeSearchReq();
-        var pageIndex = Math.Max(0, r.Ft_PageIndex);
+        var pageIndex = r.Ft_PageIndex;
         var pageSize = Math.Max(0, r.Ft_PageSize);
 
         // Search gọi GetXAsync với start = PageIndex * PageSize, count = PageSize (hành vi nguồn Mst_GovIDTypeController.cs:70-71).
