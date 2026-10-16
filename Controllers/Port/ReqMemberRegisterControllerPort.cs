@@ -13,21 +13,26 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — ReqMemberRegisterController/GetByReqMemberRegisterCodeSys (#274).
+// PORT 1:1 — ReqMemberRegisterController (#274 & #275).
 //
-// Nguồn tầng Gate:
-//   ReqMemberRegisterController.cs:152-253 GetByReqMemberRegisterCodeSys
-//   ReqMemberRegisterController.cs:468-479 strWhereClause_Req_MemberRegister_By_ReqMemberRegisterCodeSys
-// Nguồn tầng API:
-//   ReqMemberRegisterController.cs:21-91  WA_Req_MemberRegister_Get
-// Nguồn tầng Biz:
-//   Member.cs:222-351                     WAS_Req_MemberRegister_Get
-//   Member.cs:354-513                     Req_MemberRegister_Get
-//   Member.cs:515-760                     Req_MemberRegister_GetX
+// 1. GetByReqMemberRegisterCodeSys (#274)
+//    - Gate: ReqMemberRegisterController.cs:152-253
+//    - Filter: strWhereClause_Req_MemberRegister_By_ReqMemberRegisterCodeSys (:468-479)
+//
+// 2. GetByReqMemberRegisterCode (#275)
+//    - Gate: ReqMemberRegisterController.cs:255-356
+//    - Filter: strWhereClause_Req_MemberRegister_By_ReqMemberRegisterCode (:481-492)
+//
+// API / BIZ chung:
+//    - API: ReqMemberRegisterController.cs:21-91 WA_Req_MemberRegister_Get
+//    - Biz: Member.cs:222-351 WAS_Req_MemberRegister_Get
+//    - Biz: Member.cs:354-513 Req_MemberRegister_Get
+//    - Biz: Member.cs:515-760 Req_MemberRegister_GetX
 //
 // GIỮ ĐÚNG NGUỒN:
 //   - Endpoint POST: /api/reqmemberregister/getbyreqmemberregistercodesys
-//   - Nhận ReqMemberRegisterCodeSys qua body JSON
+//   - Endpoint POST: /api/reqmemberregister/getbyreqmemberregistercode (và hỗ trợ /api/req_memberregister/getbyreqmemberregistercode)
+//   - Nhận mã qua body JSON
 //   - Lọc toán tử "=" không phân biệt hoa thường bằng EF.Functions.Like(..., PortQuery.Equal(...), PortQuery.Esc)
 //   - Nối thông tin từ Mst_Province, Mst_District, CrdMember, Mst_DealerCP nếu có
 //   - Chuyển đổi CreateDTimeUTC và ApproveDTimeUTC sang Local Time theo utcOffset (mặc định 7)
@@ -41,6 +46,11 @@ public class Req_MemberRegister_GetByReqMemberRegisterCodeSysReq
     public string? ReqMemberRegisterCodeSys { get; set; }
 }
 
+public class Req_MemberRegister_GetByReqMemberRegisterCodeReq
+{
+    public string? ReqMemberRegisterCode { get; set; }
+}
+
 public class Req_MemberRegisterGetResult
 {
     public Req_MemberRegister? Req_MemberRegister { get; set; }
@@ -51,6 +61,7 @@ public class Req_MemberRegisterGetResult
 
 [ApiController]
 [Route("api/reqmemberregister")]
+[Route("api/req_memberregister")]
 public class ReqMemberRegisterControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
@@ -64,27 +75,11 @@ public class ReqMemberRegisterControllerPort : ControllerBase
     public async Task<IActionResult> GetByReqMemberRegisterCodeSys(
         [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Req_MemberRegister_GetByReqMemberRegisterCodeSysReq? req)
     {
-        double utcOffset = 7;
-        var tzHeader = Request.Headers["TimeZone"].FirstOrDefault();
-        if (!string.IsNullOrEmpty(tzHeader) && double.TryParse(tzHeader, NumberStyles.Any, CultureInfo.InvariantCulture, out var tzVal))
-        {
-            utcOffset = tzVal;
-        }
-
+        double utcOffset = GetUtcOffset();
         var codeSys = req?.ReqMemberRegisterCodeSys?.Trim();
         if (string.IsNullOrEmpty(codeSys))
         {
-            return Ok(new
-            {
-                Success = true,
-                Data = new Req_MemberRegisterGetResult
-                {
-                    Req_MemberRegister = null,
-                    Lst_Req_MemberRegisterIDAttachFile = null,
-                    Lst_Req_MemberRegisterVehicleAttachFile = null,
-                    Lst_Req_MemberRegisterAttachFile = null
-                }
-            });
+            return OkEmptyResult();
         }
 
         var reg = await _db.Set<Req_MemberRegister>()
@@ -93,19 +88,65 @@ public class ReqMemberRegisterControllerPort : ControllerBase
 
         if (reg == null)
         {
-            return Ok(new
-            {
-                Success = true,
-                Data = new Req_MemberRegisterGetResult
-                {
-                    Req_MemberRegister = null,
-                    Lst_Req_MemberRegisterIDAttachFile = null,
-                    Lst_Req_MemberRegisterVehicleAttachFile = null,
-                    Lst_Req_MemberRegisterAttachFile = null
-                }
-            });
+            return OkEmptyResult();
         }
 
+        return await BuildSuccessResultAsync(reg, utcOffset);
+    }
+
+    [HttpPost("getbyreqmemberregistercode")]
+    public async Task<IActionResult> GetByReqMemberRegisterCode(
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Req_MemberRegister_GetByReqMemberRegisterCodeReq? req)
+    {
+        double utcOffset = GetUtcOffset();
+        var code = req?.ReqMemberRegisterCode?.Trim();
+        if (string.IsNullOrEmpty(code))
+        {
+            return OkEmptyResult();
+        }
+
+        // Gate ReqMemberRegisterController.cs:285-288 và strWhereClause_Req_MemberRegister_By_ReqMemberRegisterCode (:481-492)
+        // lọc "=" trên cột ReqMemberRegisterCode
+        var reg = await _db.Set<Req_MemberRegister>()
+            .Where(x => EF.Functions.Like(x.ReqMemberRegisterCode.ToLower(), PortQuery.Equal(code), PortQuery.Esc))
+            .FirstOrDefaultAsync();
+
+        if (reg == null)
+        {
+            return OkEmptyResult();
+        }
+
+        return await BuildSuccessResultAsync(reg, utcOffset);
+    }
+
+    private double GetUtcOffset()
+    {
+        double utcOffset = 7;
+        var tzHeader = Request.Headers["TimeZone"].FirstOrDefault();
+        if (!string.IsNullOrEmpty(tzHeader) && double.TryParse(tzHeader, NumberStyles.Any, CultureInfo.InvariantCulture, out var tzVal))
+        {
+            utcOffset = tzVal;
+        }
+        return utcOffset;
+    }
+
+    private IActionResult OkEmptyResult()
+    {
+        return Ok(new
+        {
+            Success = true,
+            Data = new Req_MemberRegisterGetResult
+            {
+                Req_MemberRegister = null,
+                Lst_Req_MemberRegisterIDAttachFile = null,
+                Lst_Req_MemberRegisterVehicleAttachFile = null,
+                Lst_Req_MemberRegisterAttachFile = null
+            }
+        });
+    }
+
+    private async Task<IActionResult> BuildSuccessResultAsync(Req_MemberRegister reg, double utcOffset)
+    {
         // Bổ sung thông tin từ các bảng liên quan như trong Member.cs:630-653
         if (!string.IsNullOrEmpty(reg.ProvinceCode))
         {
@@ -152,7 +193,7 @@ public class ReqMemberRegisterControllerPort : ControllerBase
             reg.cm_RegisFinishDTimeUTC = cm.RegisFinishDTimeUTC.Value.ToString("yyyy-MM-dd HH:mm:ss");
         }
 
-        // Chuyển đổi thời gian UTC sang Local Time theo utcOffset theo nguồn Gate ReqMemberRegisterController.cs:211-218
+        // Chuyển đổi thời gian UTC sang Local Time theo utcOffset theo nguồn Gate ReqMemberRegisterController.cs:314-321
         if (!string.IsNullOrEmpty(reg.ApproveDTimeUTC) && DateTime.TryParse(reg.ApproveDTimeUTC, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal, out var approveDt))
         {
             reg.ApproveDTimeUTC = approveDt.AddHours(utcOffset).ToString("yyyy-MM-dd HH:mm:ss");
