@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
@@ -114,22 +116,139 @@ public class Crd_CardRankControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly IConfiguration _config;
+    private readonly IWebHostEnvironment? _env;
 
-    public Crd_CardRankControllerPort(AppDbContext db, IConfiguration config)
+    public Crd_CardRankControllerPort(AppDbContext db, IConfiguration config, IWebHostEnvironment? env = null)
     {
         _db = db;
         _config = config;
+        _env = env;
     }
 
     /// <summary>
-    /// Port 1:1 Crd_CardRankController.Search (gate Crd_CardRankController.cs:30-95 -> Biz CardRank.cs:7065-7570).
+    /// Port 1:1 Crd_CardRankController.Search (gate Crd_CardRankController.cs:30-95 -> Biz CardRank.cs:7065-7570) (#007).
     /// Thực hiện lọc và tính toán xếp hạng thẻ hội viên.
     /// </summary>
     [HttpPost("search")]
     public async Task<IActionResult> Search([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_CardSearchReq? req)
     {
         var r = req ?? new Crd_CardSearchReq();
+        var resultList = await SearchCoreAsync(r);
 
+        // Khớp gate Crd_CardRankController.cs:74-82:
+        // if (objRT_Crd_Card_CalcRank.Lst_Crd_Card != null && objRT_Crd_Card_CalcRank.Lst_Crd_Card.Count > 0)
+        //     lst_Crd_Card = objRT_Crd_Card_CalcRank.Lst_Crd_Card;
+        // objJsonResultEntry.Data = new { DataList = lst_Crd_Card }; (rỗng -> DataList null)
+        List<Crd_Card>? dataList = resultList.Count > 0 ? resultList : null;
+
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                DataList = dataList
+            }
+        });
+    }
+
+    /// <summary>
+    /// Port 1:1 Crd_CardRankController.Export (gate Crd_CardRankController.cs:318-394 -> Biz CardRank.cs:7999-8108, 7065-7570) (#011).
+    /// - Nhận các tham số lọc: EffDateEnd, MemberNo, CardTypeUse, CardNo, CarNo, PhoneNo, VIN, RankActionType, FlagExceptionally, CardStatus, NetworkID, OrgID qua body JSON.
+    /// - Gate ghi đè cố định CardStatus = "APPROVE" (:360).
+    /// - Gọi tính toán và lọc dữ liệu tương tự Search qua SearchCoreAsync.
+    /// - Kiểm tra rỗng: nếu list == null || list.Count == 0 -> throw ServiceException("Không có dữ liệu") (gate :380)
+    ///   -> trả về lỗi PortResult.Fail("Crd_CardRank_Export", "Message", "Không có dữ liệu") với Success = false.
+    /// - Lấy từ điển 16 cột GetImportDicColums() (gate :367, :399-420).
+    /// - Tạo đường dẫn file Excel: PortExcel.GenExcelExportFilePath(webRoot, "Crd_Card") (gate :369).
+    /// - Xuất file Excel: PortExcel.ExportToExcelFromList(list, dicColNames, physicalPath, "Crd_Card_CalcRank") với sheet "Crd_Card_CalcRank" (gate :370).
+    /// - Trả về JsonResultEntry với Data = { Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath } (gate :372-375).
+    /// </summary>
+    [HttpPost("export")]
+    public async Task<IActionResult> Export([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_CardSearchReq? req)
+    {
+        var r = req ?? new Crd_CardSearchReq();
+
+        // 1. Thực hiện lọc và tính toán xếp hạng thẻ (CardStatus cố định APPROVE như gate :360)
+        var list = await SearchCoreAsync(r);
+
+        // 2. Kiểm tra dữ liệu rỗng: nếu không có dòng nào -> throw ServiceException("Không có dữ liệu") (gate Crd_CardRankController.cs:380)
+        if (list == null || list.Count == 0)
+        {
+            return PortResult.Fail("Crd_CardRank_Export", "Message", "Không có dữ liệu");
+        }
+
+        // 3. Chuẩn bị đường dẫn thư mục xuất file Excel (gate :369)
+        var webRoot = _env?.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = _env != null
+                ? Path.Combine(_env.ContentRootPath, "wwwroot")
+                : Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+        }
+
+        // 4. Lấy từ điển 16 cột từ GetImportDicColums() (gate Crd_CardRankController.cs:367, :399-420)
+        var dicColNames = GetImportDicColums();
+
+        string virtualPath;
+        try
+        {
+            // Sinh tên file: {prefix}_{yyMMddHHmmss}.xlsx (prefix = "Crd_Card" theo typeof(TModels.Crd_Card).Name tại gate :369)
+            string physicalPath;
+            (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Crd_Card");
+
+            // Xuất danh sách ra Excel với sheet name "Crd_Card_CalcRank" (gate :370)
+            PortExcel.ExportToExcelFromList(list, dicColNames, physicalPath, "Crd_Card_CalcRank");
+        }
+        catch (Exception ex)
+        {
+            // Bắt ngoại lệ nếu ghi file lỗi -> trả Fail (gate :383-387)
+            return PortResult.Fail("Crd_CardRank_Export", "Exception", ex.Message);
+        }
+
+        // 5. Trả URL tải file với Success = true (gate Crd_CardRankController.cs:371-375)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+            }
+        });
+    }
+
+    /// <summary>
+    /// Từ điển 16 cột xuất Excel theo GetImportDicColums() tại gate Crd_CardRankController.cs:399-420.
+    /// Lưu ý: Gate dùng GetImportDicColums() cho action Export (lỗi định danh của nguồn, giữ nguyên).
+    /// </summary>
+    private static Dictionary<string, string> GetImportDicColums()
+    {
+        return new Dictionary<string, string>
+        {
+            { "MemberNo", "Mã thẻ hội viên" },
+            { "CardNo", "Mã kỳ xét hạng" },
+            { "CardTypeUse", "Hạng sử dụng" },
+            { "CardTypeInit", "Hạng thực" },
+            { "CardTypeUseExpect", "Hạng sử dụng đề xuất" },
+            { "CardTypeInitExpect", "Hạng thực đề xuất" },
+            { "RankActionType", "Loại" },
+            { "PointCardRank", "Điểm xét hạng TK" },
+            { "AmountAvail", "Tổng doanh thu xét hạng" },
+            { "QtyVisitAvail", "Lượt dịch vụ" },
+            { "EffDateEnd", "Ngày hết kỳ xét hạng" },
+            { "CarNo", "Biển số xe" },
+            { "VIN", "Số Khung" },
+            { "MemberName", "Tên hội viên" },
+            { "PhoneNo", "Số điện thoại" },
+            { "DLCodeExceptionally", "Đại lý YC đặc cách" }
+        };
+    }
+
+    /// <summary>
+    /// Phương thức dùng chung thực hiện lọc và tính toán xếp hạng thẻ (Crd_Card_CalcRank / CalcRankX).
+    /// Dùng cho cả Search (gate :30-95) và Export (gate :318-394).
+    /// </summary>
+    private async Task<List<Crd_Card>> SearchCoreAsync(Crd_CardSearchReq r)
+    {
         // Chuẩn hóa tham số theo nguồn (TUtils.CUtils — CardRank.cs:7259-7269)
         DateTime? effDateEnd = null;
         if (!string.IsNullOrWhiteSpace(r.EffDateEnd) && DateTime.TryParse(r.EffDateEnd, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dtParsed))
@@ -193,7 +312,7 @@ public class Crd_CardRankControllerPort : ControllerBase
         }
 
         // 2. Lọc Crd_Card: CardRank.cs:7310-7325 (#tbl_Crd_Card_Approve)
-        // Gate Crd_CardRankController.cs:70: CardStatus LUÔN = 'APPROVE', không nhận từ client
+        // Gate Crd_CardRankController.cs:70 & :360: CardStatus LUÔN = 'APPROVE', không nhận từ client
         var cardQuery = _db.CrdCards.AsQueryable();
         {
             var approvePattern = PortQuery.Equal("APPROVE");
@@ -400,20 +519,7 @@ public class Crd_CardRankControllerPort : ControllerBase
             });
         }
 
-        // Khớp gate Crd_CardRankController.cs:74-82:
-        // if (objRT_Crd_Card_CalcRank.Lst_Crd_Card != null && objRT_Crd_Card_CalcRank.Lst_Crd_Card.Count > 0)
-        //     lst_Crd_Card = objRT_Crd_Card_CalcRank.Lst_Crd_Card;
-        // objJsonResultEntry.Data = new { DataList = lst_Crd_Card }; (rỗng -> DataList null)
-        List<Crd_Card>? dataList = resultList.Count > 0 ? resultList : null;
-
-        return Ok(new
-        {
-            Success = true,
-            Data = new
-            {
-                DataList = dataList
-            }
-        });
+        return resultList;
     }
 
     /// <summary>
