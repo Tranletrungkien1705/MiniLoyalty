@@ -18,6 +18,7 @@ namespace MiniLoyalty.Controllers.Port;
 //   - GetByGroupCode (#309)
 //   - Create (#310)
 //   - Update (#311)
+//   - Delete (#312)
 //
 // Nguồn gate: Sys_GroupController.cs:27-135 (Search), 136-243 (GetAllActive), 244-310 (GetByGroupCode) -> WA_Sys_Group_Get
 //   - Search: Nhận OrgID, KeyWord, FlagActive, Ft_PageIndex = 0, Ft_PageSize = 10
@@ -38,9 +39,13 @@ namespace MiniLoyalty.Controllers.Port;
 //     strFt_Cols_Upd = Sys_Group.GroupName,Sys_Group.FlagActive, (:438-439).
 //     WA_Sys_Group_Update -> WAS_Sys_Group_Update -> Sys_Group_Update (System.cs:3019-3163).
 //     Trả Success = true, Data = null.
+//   - Gate Delete (:475-542): GroupCode rỗng -> throw ServiceException("invalid_GroupCode", "invalid_GroupCode") (:528).
+//     Tạo RQ_Sys_Group -> WA_Sys_Group_Delete -> WAS_Sys_Group_Delete -> Sys_Group_Delete (System.cs:3453-3566).
+//     Mở transaction -> Sys_Group_CheckDB (FlagExist = Yes) -> Sys_UserInGroup_Delete_ByGroup -> Delete Sys_Group -> Commit.
+//     Trả Success = true, Data = null (:518-519).
 //
-// Nguồn API: SysGroupController.cs:20-91 (Get), 94-165 (Create), 168-239 (Update)
-// Nguồn biz: System.cs:2510-2625 (WAS_Sys_Group_Get), 2938-3018 (WAS_Sys_Group_Create), 3368-3451 (WAS_Sys_Group_Update), 3019-3163 (Sys_Group_Update)
+// Nguồn API: SysGroupController.cs:20-91 (Get), 94-165 (Create), 168-239 (Update), 242-313 (Delete)
+// Nguồn biz: System.cs:2510-2625 (WAS_Sys_Group_Get), 2938-3018 (WAS_Sys_Group_Create), 3368-3451 (WAS_Sys_Group_Update), 3019-3163 (Sys_Group_Update), 3726-3805 (WAS_Sys_Group_Delete), 3453-3566 (Sys_Group_Delete)
 //   - Draft (:2304-2319): select distinct identity(bigint, 0, 1) MyIdxSeq, sg.GroupCode ... order by sg.GroupCode asc
 //   - Summary (:2322): select Count(0) MyCount from #tbl_Sys_Group_Filter_Draft
 //   - Select cuối (:2356-2363): select t.MyIdxSeq, sg.* from #tbl_Sys_Group_Filter t inner join Sys_Group sg ... order by t.MyIdxSeq asc
@@ -502,6 +507,82 @@ public class Sys_GroupControllerPort : ControllerBase
     }
 
     /// <summary>
+    /// Port 1:1 Delete action từ gate Sys_GroupController.cs:475-542 (#312).
+    /// Chuỗi gọi: gate Sys_GroupController.Delete -> WA_Sys_Group_Delete -> WAS_Sys_Group_Delete -> Sys_Group_Delete (System.cs:3453-3566).
+    ///
+    /// Quy trình nghiệp vụ:
+    ///   0. Kiểm tra GroupCode rỗng: Gate Sys_GroupController.cs:494, 528
+    ///      Nếu GroupCode null hoặc rỗng -> ném ServiceException("invalid_GroupCode", "invalid_GroupCode") -> HTTP 400 ErridnLoyalty.invalid_GroupCode.
+    ///   1. Mở transaction: System.cs:3480 _cf.db.BeginTransaction(). Lỗi rẽ nhánh -> rollback. Ngoại lệ -> trả mã mặc định Sys_Group_Delete.
+    ///   2. Chuẩn hoá: strGroupCode = StdParam(objGroupCode).
+    ///   3. Kiểm tra DB: Sys_Group_CheckDB (System.cs:3503-3509, 1546-1576) với strFlagExistToCheck = TConst.Flag.Yes ("1"):
+    ///      Nếu không tìm thấy bản ghi trong Sys_Group -> ném ErridnLoyalty.Sys_Group_CheckDB_GroupCodeNotFound (Check.GroupCodeNotFound).
+    ///   4. Xóa bảng phụ Sys_UserInGroup trước (System.cs:3511-3513, 14126-14141 Sys_UserInGroup_Delete_ByGroup):
+    ///      Xóa tất cả bản ghi trong Sys_UserInGroup có GroupCode khớp với strGroupCode.
+    ///   5. Xóa bản ghi Sys_Group (System.cs:3521-3527):
+    ///      dtDB_Sys_Group.Rows[0].Delete(); _cf.db.SaveData("Sys_Group", dtDB_Sys_Group);
+    ///   6. Commit transaction (System.cs:3532 TDALUtils.DBUtils.CommitSafety), trả về Success = true, Data = null (gate :518-519).
+    /// </summary>
+    [HttpPost("delete")]
+    public async Task<IActionResult> Delete([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Sys_GroupDeleteReq? req)
+    {
+        // 0. Kiểm tra GroupCode rỗng tại gate Sys_GroupController.cs:494, 528:
+        // Nếu req null hoặc GroupCode null/trắng -> throw ServiceException("invalid_GroupCode", "invalid_GroupCode")
+        if (req == null || string.IsNullOrWhiteSpace(req.GroupCode))
+        {
+            return PortResult.Fail("invalid_GroupCode", "Check.GroupCode", req?.GroupCode);
+        }
+
+        // 1. Mở transaction (System.cs:3480 _cf.db.BeginTransaction())
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // 2. Chuẩn hoá GroupCode theo CUtils.StdParam (System.cs:3498): Trim, ToUpper
+            var strGroupCode = StdParam(req.GroupCode)!;
+
+            // 3. Sys_Group_CheckDB (System.cs:3503-3509, 1566-1576) với FlagExist = Yes
+            // So sánh chuỗi trên SQLite không phân biệt hoa thường theo chuẩn: Like + PortQuery.Equal
+            var groupCodePattern = PortQuery.Equal(strGroupCode);
+            var matchedGroup = await _db.Set<Sys_Group>()
+                .FirstOrDefaultAsync(x => EF.Functions.Like((x.GroupCode ?? "").ToLower(), groupCodePattern, PortQuery.Esc));
+
+            if (matchedGroup == null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Sys_Group_CheckDB_GroupCodeNotFound", "Check.GroupCodeNotFound", strGroupCode);
+            }
+
+            // 4. Xóa bảng phụ Sys_UserInGroup_Delete_ByGroup(strGroupCode) (System.cs:3511, 14126-14141)
+            var usersInGroup = await _db.Set<Sys_UserInGroup>()
+                .Where(x => EF.Functions.Like((x.GroupCode ?? "").ToLower(), groupCodePattern, PortQuery.Esc))
+                .ToListAsync();
+            if (usersInGroup.Count > 0)
+            {
+                _db.Set<Sys_UserInGroup>().RemoveRange(usersInGroup);
+            }
+
+            // 5. Xóa bản ghi Sys_Group (System.cs:3521-3527)
+            _db.Set<Sys_Group>().Remove(matchedGroup);
+            await _db.SaveChangesAsync();
+
+            // 6. Commit transaction (System.cs:3532)
+            await tx.CommitAsync();
+
+            // Gate Sys_GroupController.cs:518-519: SetSuccess(), Data = null
+            return Ok(new
+            {
+                Success = true,
+                Data = (object?)null
+            });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return PortResult.Fail("Sys_Group_Delete", "Exception", ex.Message);
+        }
+    }
+
+    /// <summary>
     /// Chuẩn hoá chuỗi mã theo CUtils.StdParam: Trim, viết HOA, rỗng -> null.
     /// </summary>
     private static string? StdParam(object? s)
@@ -623,5 +704,14 @@ public class Sys_GroupUpdateReq
     public string? FlagActive { get; set; }
     public string? MST { get; set; }
 }
+
+/// <summary>
+/// DTO request cho action Delete — Sys_GroupController.cs:475 (#312).
+/// </summary>
+public class Sys_GroupDeleteReq
+{
+    public string? GroupCode { get; set; }
+}
+
 
 
