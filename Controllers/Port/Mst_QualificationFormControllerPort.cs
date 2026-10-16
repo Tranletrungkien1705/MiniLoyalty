@@ -11,10 +11,13 @@ namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
 // PORT 1:1 — Mst_QualificationFormController/Search (#225).
+// PORT 1:1 — Mst_QualificationFormController/GetAllActive (#226).
 //
 // Nguồn controller (tầng gate):
 //   Mst_QualificationFormController.cs:25-105     Search -> WA_Mst_QualificationForm_Get
 //   Mst_QualificationFormController.cs:171-186    strWhereClause_Mst_QualificationForm
+//   Mst_QualificationFormController.cs:107-167    GetAllActive -> WA_Mst_QualificationForm_Get
+//   Mst_QualificationFormController.cs:188-199    strWhereClause_Mst_QualificationForm_Active
 // Nguồn API:
 //   MstQualificationFormController.cs:17-88       WA_Mst_QualificationForm_Get
 // Nguồn biz:
@@ -57,6 +60,15 @@ public class Mst_QualificationFormControllerPort : ControllerBase
         var pageCount = rows.Count == 0 ? 0 : (itemCount % ps == 0 ? itemCount / ps : itemCount / ps + 1);
 
         return Ok(new { Success = true, Data = new PageInfo<object>(rows, itemCount, pageCount, pageIndex, pageSize) });
+    }
+
+    [HttpPost("getallactive")]
+    public async Task<IActionResult> GetAllActive()
+    {
+        // Mst_QualificationFormController.cs:126-154
+        // GetXAsync gọi với FlagActive "1", số lượng lấy lớn nhất (123456000)
+        var (_, rows) = await GetXAsync(null, "1", 0, 123456000);
+        return Ok(new { Success = true, Data = rows.Count > 0 ? rows : null });
     }
 
     private async Task<(int itemCount, List<object> rows)> GetXAsync(string? keyWord, string? flagActive, long recordStart, long recordCount)
