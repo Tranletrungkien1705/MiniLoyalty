@@ -12,12 +12,14 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục phòng ban (Mst_Department) của dự án nguồn 2022.7.Loyalty (#122, #123).
+// PORT 1:1 — màn danh mục phòng ban (Mst_Department) của dự án nguồn 2022.7.Loyalty (#122, #123, #124).
 //
 // Nguồn controller (tầng gate):
 //   Mst_DepartmentController.cs:30-109   Search -> WA_Mst_Department_Get (#122)
 //   Mst_DepartmentController.cs:110-218  GetAllActive -> WA_Mst_Department_Get (#123)
+//   Mst_DepartmentController.cs:219-282  GetByDepartmentCode -> WA_Mst_Department_Get (#124)
 //   Mst_DepartmentController.cs:877-905  strWhereClause_Mst_Department (mệnh đề lọc Search, GetAllActive)
+//   Mst_DepartmentController.cs:907-926  strWhereClause_Mst_Department_By_DepartmentCode (mệnh đề lọc GetByDepartmentCode)
 // Nguồn API:
 //   MstDepartmentController.cs:20-89     WA_Mst_Department_Get
 // Nguồn biz:
@@ -40,6 +42,11 @@ namespace MiniLoyalty.Controllers.Port;
 //     Đích chưa có user đăng nhập: lấy từ IConfiguration["Biz_OrgID"]; nếu không cấu hình (null/rỗng)
 //     thì GetXAsync bỏ nhánh lọc OrgID -> lấy mọi tổ chức (GAP: nguồn lọc theo tổ chức của user đăng nhập).
 //     Khối Ext/tree (:162-193) bị comment ở nguồn -> trả Data là mảng trần list Mst_Department (null nếu rỗng) (:199-204).
+//   * GetByDepartmentCode: [HttpPost("getbydepartmentcode")], body { DepartmentCode } (gate :219-282).
+//     DepartmentCode rỗng -> Data null, không truy vấn (:239, :269). Ngược lại lọc DepartmentCode = (Like + PortQuery.Equal, :914).
+//     Nhánh OrgID (:916-919) và FlagActive (:920-923) không truyền nên không chạy (OLD inactive VẪN lấy; OrgID user chỉ gán vào request, không lọc).
+//     Ft_RecordStart = "0", Ft_RecordCount = "1" (:256-257).
+//     Trả Lst_Mst_Department[0] hoặc null (:263-269).
 //   * Cột tính md_DepartmentNameParent: left join Mst_Department f on t.DepartmentCodeParent = f.DepartmentCode (:30512-30513),
 //     lấy tên phòng ban cấp trên f.DepartmentName (null nếu không có cấp trên).
 //   * Cột tính ss_QtyStaff: nguồn left join count StaffCode từ Staff_MapDepartment group by DepartmentCode (:30490-30499, :30506).
@@ -48,8 +55,8 @@ namespace MiniLoyalty.Controllers.Port;
 //   * DDL: không có DDL trong repo nguồn — PK = DepartmentCode (khoá draft), kiểu cột cần xác nhận.
 //
 // Bỏ qua có chủ đích (loại Đ):
-//   - CheckGatewayAuthentication: gate :39, :123, API :40-46
-//   - CheckAuthorize: gate :40, :124 (hệ thống đích chưa có hệ phân quyền)
+//   - CheckGatewayAuthentication: gate :39, :123, :228, API :40-46
+//   - CheckAuthorize: gate :40, :124, :229 (hệ thống đích chưa có hệ phân quyền)
 //   - Ghi RequestLog/ReturnLog: Master.cs:29593-29600, 29691-29698
 //   - Sys_User_CheckAuthorize / Sys_Access_CheckDenyV30: Master.cs:29606-29620, 29630-29634
 // ============================================================================================
@@ -62,6 +69,12 @@ public class MstDepartmentSearchReq
     public string? FlagActive { get; set; }          // Cờ hoạt động, danh sách phân cách dấu phẩy -> IN (:30, :60, :894-902)
     public int Ft_PageIndex { get; set; } = 0;       // Trang (0-based) (:30, :51)
     public int Ft_PageSize { get; set; } = 10;       // Số dòng/trang (:30, :52)
+}
+
+/// <summary>Port 1:1 <c>GetByDepartmentCode</c> — body chỉ có DepartmentCode (Mst_DepartmentController.cs:219-282).</summary>
+public class MstDepartmentGetByDepartmentCodeReq
+{
+    public string? DepartmentCode { get; set; }       // Mã phòng ban cần lấy — :239-243
 }
 
 [ApiController]
@@ -120,11 +133,42 @@ public class Mst_DepartmentControllerPort : ControllerBase
         return Ok(new { Success = true, Data = rows.Count > 0 ? rows : null });
     }
 
+    // ============================================================================================
+    // GetByDepartmentCode — nguồn Mst_DepartmentController.cs:219-282 (#124).
+    // Gate: nếu DepartmentCode rỗng thì KHÔNG truy vấn (:239), objMst_Department giữ null (:238) ⇒ Data = null (:269).
+    // Ngược lại gán DepartmentCode (:241-244) rồi gọi strWhereClause_Mst_Department_By_DepartmentCode (:907-926)
+    // (lọc `DepartmentCode = 'x'` — KHÔNG truyền OrgID/FlagActive nên hàng FlagActive '0' VẪN lấy được, OrgID không lọc).
+    // Ft_RecordStart = "0", Ft_RecordCount = "1" (:256-257) ⇒ lấy đúng 1 dòng, trả Lst_Mst_Department[0] (:263-266).
+    // ============================================================================================
+    [HttpPost("getbydepartmentcode")]
+    public async Task<IActionResult> GetByDepartmentCode([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] MstDepartmentGetByDepartmentCodeReq? req)
+    {
+        var departmentCode = req?.DepartmentCode;
+
+        // DepartmentCode rỗng ⇒ nguồn không truy vấn (:239) và trả Data = null (:269).
+        if (string.IsNullOrWhiteSpace(departmentCode))
+        {
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+
+        // Lấy 1 dòng theo DepartmentCode (Ft_RecordStart = "0", Ft_RecordCount = "1" — :256-257).
+        var (_, rows) = await GetXAsync(null, null, null, 0, 1, departmentCodeEqual: departmentCode);
+
+        // Nguồn trả Lst_Mst_Department[0] khi có dòng, ngược lại null (:263-266).
+        return Ok(new { Success = true, Data = rows.Count > 0 ? rows[0] : null });
+    }
+
     /// <summary>
-    /// Lọc + đếm + chia trang theo DepartmentCode asc — dùng cho Search.
+    /// Lọc + đếm + chia trang theo DepartmentCode asc — dùng cho Search, GetAllActive, GetByDepartmentCode.
     /// Trả (itemCount, rows): itemCount = tổng số dòng sau lọc (MyCount, SQL :30461); rows = trang đã cắt kèm MyIdxSeq 0-based (:30503).
     /// </summary>
-    private async Task<(int itemCount, List<object> rows)> GetXAsync(string? keyWord, string? orgIdEqual, string? flagActiveCsv, long recordStart, long recordCount)
+    private async Task<(int itemCount, List<object> rows)> GetXAsync(
+        string? keyWord,
+        string? orgIdEqual,
+        string? flagActiveCsv,
+        long recordStart,
+        long recordCount,
+        string? departmentCodeEqual = null)
     {
         var q = _db.Set<Mst_Department>().AsNoTracking().AsQueryable();
 
@@ -134,6 +178,15 @@ public class Mst_DepartmentControllerPort : ControllerBase
         {
             var kw = PortQuery.Contains(keyWord);
             q = q.Where(x => EF.Functions.Like((x.DepartmentName ?? "").ToLower(), kw, PortQuery.Esc));
+        }
+
+        // DepartmentCode -> `DepartmentCode = 'x'` (Mst_DepartmentController.cs:914 — strWhereClause_Mst_Department_By_DepartmentCode).
+        // Nguồn dùng `=` trên SQL Server collation KHÔNG phân biệt hoa/thường ⇒ Like KHÔNG wildcard, hạ chữ 2 phía (PortQuery.Equal).
+        // LƯU Ý: nhánh OrgID (:916-919) và FlagActive (:920-923) KHÔNG được truyền ở GetByDepartmentCode (:241-244) nên KHÔNG chạy.
+        if (!string.IsNullOrWhiteSpace(departmentCodeEqual))
+        {
+            var dc = PortQuery.Equal(departmentCodeEqual);
+            q = q.Where(x => EF.Functions.Like((x.DepartmentCode ?? "").ToLower(), dc, PortQuery.Esc));
         }
 
         // OrgID -> `OrgID = 'x'` (Mst_DepartmentController.cs:888).
