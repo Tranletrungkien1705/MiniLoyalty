@@ -4,7 +4,7 @@ Nguồn mẫu số: `D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.Web
 
 **Mẫu số (N)**: 337
 
-**Tiến độ hiện tại**: 179/337 (53.12%)
+**Tiến độ hiện tại**: 180/337 (53.41%)
 
 Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã có` (đã port từ trước, có bằng chứng) · `Bỏ` (scaffold/không nghiệp vụ, ghi lý do) · `Cần xem tay`.
 
@@ -328,7 +328,7 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 316 | Sys_GroupController/ExportTemplate | Chưa làm | - |
 | 317 | Sys_ObjectController/GetAllMenuActive | Đã làm | 23718cf |
 | 318 | Sys_ObjectController/GetAllMenuButtonActive | Đã làm | 3440dc8 |
-| 319 | Sys_ObjectController/GetFunctionActive | Chưa làm | - |
+| 319 | Sys_ObjectController/GetFunctionActive | Đã làm | 4a2db63 |
 | 320 | Sys_ObjectController/GetFunctionByObjectCode | Chưa làm | - |
 | 321 | Sys_ObjectController/GetAllFunctionBy_ObjectCode | Chưa làm | - |
 | 322 | Sys_ObjectController/Get | Chưa làm | - |
