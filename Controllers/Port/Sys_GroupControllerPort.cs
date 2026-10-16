@@ -24,6 +24,7 @@ namespace MiniLoyalty.Controllers.Port;
 //   - DeleteMultiple (#313)
 //   - Import (#314)
 //   - Export (#315)
+//   - ExportTemplate (#316)
 //
 // Nguồn gate: Sys_GroupController.cs:27-135 (Search), 136-243 (GetAllActive), 244-310 (GetByGroupCode) -> WA_Sys_Group_Get
 //   - Search: Nhận OrgID, KeyWord, FlagActive, Ft_PageIndex = 0, Ft_PageSize = 10
@@ -67,6 +68,11 @@ namespace MiniLoyalty.Controllers.Port;
 //     (dùng từ điển Import cho Export là của nguồn).
 //     Ghi Excel qua PortExcel.ExportToExcelFromList(list, dicColNames, filePath, "Sys_Group").
 //     Trả về Success = true, Data = { Url = base + url } (:814-817).
+//   - Gate ExportTemplate (:839-871): Không nhận tham số (#316).
+//     Khởi tạo danh sách rỗng List<Sys_Group>() (:847). Không truy vấn CSDL, không kiểm tra danh sách rỗng.
+//     Từ điển cột lấy từ GetImportDicColumsTemplate() (:849, :885-893) gồm 2 cột: GroupCode, GroupName (FlagActive bị comment).
+//     Ghi Excel qua PortExcel.ExportToExcelFromList(list, dicColNames, filePath, "Sys_Group").
+//     Trả về Success = true, Data = { Url = base + url } (:853-857).
 //
 // Nguồn API: SysGroupController.cs:20-91 (Get), 94-165 (Create), 168-239 (Update), 242-313 (Delete)
 // Nguồn biz: System.cs:2510-2625 (WAS_Sys_Group_Get), 2938-3018 (WAS_Sys_Group_Create), 3368-3451 (WAS_Sys_Group_Update), 3019-3163 (Sys_Group_Update), 3726-3805 (WAS_Sys_Group_Delete), 3453-3566 (Sys_Group_Delete)
@@ -884,6 +890,80 @@ public class Sys_GroupControllerPort : ControllerBase
                 Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
             }
         });
+    }
+
+    /// <summary>
+    /// Port 1:1 ExportTemplate action từ gate Sys_GroupController.cs:839-871 (#316).
+    /// Không nhận tham số body ([HttpPost("exporttemplate")]).
+    /// Nguồn gate:
+    /// - Không kiểm tra quyền ở gate (không gọi CheckGatewayAuthentication / CheckAuthorize) (:839-846).
+    /// - Không đọc DB, khởi tạo danh sách rỗng List<Sys_Group>() (:847).
+    /// - Không có nhánh kiểm tra dữ liệu rỗng (khác Export :822).
+    /// - Lấy từ điển cột mẫu từ GetImportDicColumsTemplate() (:849).
+    ///   Theo mã nguồn gốc Sys_GroupController.cs:885-893, từ điển gồm 2 cột:
+    ///   1. GroupCode ("Mã nhóm người dùng (*)")
+    ///   2. GroupName ("Tên nhóm người dùng (*)")
+    ///   (Cột FlagActive bị comment trong nguồn: //{TblSys_Group.FlagActive,"Trạng thái"}).
+    ///   (Lưu ý: Đề bài #316 phỏng đoán 3 cột do nhầm sang GetImportDicColums() tại :875-883;
+    ///   xem conflicts/316_conflict.md và quyết định của Claude tại 314_conflict.md).
+    /// - Sinh đường dẫn file qua PortExcel.GenExcelExportFilePath(webRoot, "Sys_Group") (:851).
+    /// - Ghi danh sách rỗng ra file Excel với tên sheet "Sys_Group" (:852).
+    /// - Trả về: Success = true, Data = { Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath } (:853-857).
+    /// </summary>
+    [HttpPost("exporttemplate")]
+    public IActionResult ExportTemplate()
+    {
+        // 1. Khởi tạo danh sách rỗng kiểu Sys_Group (gate Sys_GroupController.cs:847)
+        var list = new List<Sys_Group>();
+
+        // 2. Lấy từ điển 2 cột mẫu import (gate Sys_GroupController.cs:849, :885-893)
+        var dicColNames = GetImportDicColumsTemplate();
+
+        // 3. Đường dẫn thư mục webRoot
+        var webRoot = _env?.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = _env != null ? Path.Combine(_env.ContentRootPath, "wwwroot") : Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+        }
+
+        // 4. Sinh file Excel và trả về Url (gate Sys_GroupController.cs:850-857)
+        try
+        {
+            var (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Sys_Group");
+
+            // Ghi danh sách rỗng ra file Excel với tên sheet "Sys_Group" (gate :852)
+            PortExcel.ExportToExcelFromList(list, dicColNames, physicalPath, "Sys_Group");
+
+            // Trả URL tải file với Success = true (gate Sys_GroupController.cs:853-857)
+            return Ok(new
+            {
+                Success = true,
+                Data = new
+                {
+                    Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            return PortResult.Fail("Sys_Group_ExportTemplate", "Exception", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Từ điển cột mẫu Import Excel: gate Sys_GroupController.cs:885-893 (GetImportDicColumsTemplate).
+    /// Giữ đúng thứ tự 2 cột từ nguồn gốc:
+    /// 1. GroupCode ("Mã nhóm người dùng (*)")
+    /// 2. GroupName ("Tên nhóm người dùng (*)")
+    /// (Cột FlagActive bị comment trong nguồn: //{TblSys_Group.FlagActive,"Trạng thái"}).
+    /// </summary>
+    private static Dictionary<string, string> GetImportDicColumsTemplate()
+    {
+        return new Dictionary<string, string>
+        {
+            { "GroupCode", "Mã nhóm người dùng (*)" },
+            { "GroupName", "Tên nhóm người dùng (*)" }
+        };
     }
 
     /// <summary>
