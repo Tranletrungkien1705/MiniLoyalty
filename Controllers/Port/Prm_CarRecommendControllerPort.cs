@@ -139,6 +139,63 @@ public class Prm_CarRecommendControllerPort : ControllerBase
 
         return Ok(new { Success = true, Data = pageInfo });
     }
+
+    /// <summary>
+    /// Port 1:1 Prm_CarRecommendController.GetByPRMCRCodeSys (gate Prm_CarRecommendController.cs:~149-235, #257).
+    /// PRMCRCodeSys rỗng => không truy vấn, Data = { Prm_CarRecommend = null, Lst_Prm_CarRecommendDtl = null, Lst_Prm_CarRecommendSpec = null }.
+    /// Khi có: lấy bản ghi đầu (Ft_RecordCount = "1"); ApprDTimeUTC/CreateDTimeUTC đổi sang giờ địa phương (utcOffset mặc định 7, gate :201-208) thành chuỗi;
+    /// EffDateEnd = "2100-01-01" => "" (gate :209-212); FlagShow do biz tính theo ngày UTC+7 (biz :3286-3298); Dtl/Spec rỗng => null.
+    /// Lưu ý DDL nguồn: Prm_CarRecommendDtl/Spec dùng cột PRMCNCodeSys làm khoá liên kết với Prm_CarRecommend.PRMCRCodeSys.
+    /// </summary>
+    [HttpPost("getbyprmcrcodesys")]
+    public async Task<IActionResult> GetByPRMCRCodeSys([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Prm_CarRecommendGetByCodeSysReq? req)
+    {
+        var codeSys = req?.PRMCRCodeSys;
+        if (string.IsNullOrEmpty(codeSys))
+        {
+            return Ok(new { Success = true, Data = new { Prm_CarRecommend = (object?)null, Lst_Prm_CarRecommendDtl = (object?)null, Lst_Prm_CarRecommendSpec = (object?)null } });
+        }
+
+        var pat = PortQuery.Equal(codeSys);
+        var cr = await _context.Set<Prm_CarRecommend>().AsNoTracking()
+            .Where(x => EF.Functions.Like((x.PRMCRCodeSys ?? "").ToLower(), pat, PortQuery.Esc))
+            .OrderByDescending(x => x.CreateDTimeUTC)
+            .FirstOrDefaultAsync();
+
+        object? header = null;
+        if (cr != null)
+        {
+            var dateSys = DateTime.UtcNow.AddHours(7).ToString("yyyy-MM-dd");
+            var flagShow = (cr.PRMCRStatus == "FINISH" && string.Compare(cr.EffDateStart, dateSys) <= 0 && string.Compare(dateSys, cr.EffDateEnd) <= 0) ? "1" : "0";
+            header = new
+            {
+                cr.PRMCRCodeSys, cr.NetworkID, cr.OrgID, cr.DLCPCode, cr.PRMCRCode, cr.PRMCRName, cr.EffDateStart,
+                EffDateEnd = cr.EffDateEnd == "2100-01-01" ? "" : cr.EffDateEnd,
+                cr.FlagAllModel, cr.PointValAllModel,
+                CreateDTimeUTC = cr.CreateDTimeUTC?.AddHours(7).ToString("yyyy-MM-dd HH:mm:ss"),
+                cr.CreateBy, cr.LUDTimeUTC, cr.LUBy,
+                ApprDTimeUTC = cr.ApprDTimeUTC?.AddHours(7).ToString("yyyy-MM-dd HH:mm:ss"),
+                cr.ApprBy, cr.FinishDTimeUTC, cr.FinishBy, cr.CancelDTimeUTC, cr.CancelBy, cr.PRMCRStatus, cr.Remark, cr.LogLUDTimeUTC, cr.LogLUBy,
+                FlagShow = flagShow
+            };
+        }
+
+        var dtl = await _context.Set<Prm_CarRecommendDtl>().AsNoTracking()
+            .Where(x => EF.Functions.Like((x.PRMCNCodeSys ?? "").ToLower(), pat, PortQuery.Esc)).OrderBy(x => x.Idx).ToListAsync();
+        var spec = await _context.Set<Prm_CarRecommendSpec>().AsNoTracking()
+            .Where(x => EF.Functions.Like((x.PRMCNCodeSys ?? "").ToLower(), pat, PortQuery.Esc)).OrderBy(x => x.Idx).ToListAsync();
+
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Prm_CarRecommend = header,
+                Lst_Prm_CarRecommendDtl = dtl.Count > 0 ? dtl : null,
+                Lst_Prm_CarRecommendSpec = spec.Count > 0 ? spec : null
+            }
+        });
+    }
 }
 
 public class Prm_CarRecommendSearchReq
@@ -156,4 +213,9 @@ public class Prm_CarRecommendSearchReq
     public string? FlagShow { get; set; }
     public int Ft_PageIndex { get; set; } = 0;
     public int Ft_PageSize { get; set; } = 10;
+}
+
+public class Prm_CarRecommendGetByCodeSysReq
+{
+    public string? PRMCRCodeSys { get; set; }
 }

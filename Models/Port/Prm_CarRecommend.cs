@@ -127,3 +127,55 @@ public class Prm_CarRecommendSeeder : IPortSeeder
         }
     }
 }
+
+// Bảng Prm_CarRecommendDtl — DDL nguồn dùng tên cột PRMCNCodeSys (không phải PRMCRCodeSys) cho khoá liên kết (20221006.QUYNHNTN\...Promotion.sql:31-42).
+public class Prm_CarRecommendDtl
+{
+    public string PRMCNCodeSys { get; set; } = "";
+    public long Idx { get; set; }
+    public string NetworkID { get; set; } = "";
+    public string OrgID { get; set; } = "";
+    public double? PointVal { get; set; }
+    public string? PRMCNStatusDtl { get; set; }
+    public string? Remark { get; set; }
+    public DateTime? LogLUDTimeUTC { get; set; }
+    public string? LogLUBy { get; set; }
+}
+
+public class Prm_CarRecommendDtlConfig : IEntityTypeConfiguration<Prm_CarRecommendDtl>
+{
+    public void Configure(EntityTypeBuilder<Prm_CarRecommendDtl> b)
+    {
+        b.ToTable("Prm_CarRecommendDtl");
+        b.HasKey(x => new { x.PRMCNCodeSys, x.Idx });
+        b.Property(x => x.PRMCNCodeSys).IsRequired();
+        b.Property(x => x.NetworkID).IsRequired();
+        b.Property(x => x.OrgID).IsRequired();
+    }
+}
+
+// Bảng Prm_CarRecommendSpec (cùng quy ước cột PRMCNCodeSys).
+public class Prm_CarRecommendSpec
+{
+    public string PRMCNCodeSys { get; set; } = "";
+    public long Idx { get; set; }
+    public string ModelCode { get; set; } = "";
+    public string NetworkID { get; set; } = "";
+    public string OrgID { get; set; } = "";
+    public string? PRMCNStatusSpec { get; set; }
+    public DateTime? LogLUDTimeUTC { get; set; }
+    public string? LogLUBy { get; set; }
+}
+
+public class Prm_CarRecommendSpecConfig : IEntityTypeConfiguration<Prm_CarRecommendSpec>
+{
+    public void Configure(EntityTypeBuilder<Prm_CarRecommendSpec> b)
+    {
+        b.ToTable("Prm_CarRecommendSpec");
+        b.HasKey(x => new { x.PRMCNCodeSys, x.Idx });
+        b.Property(x => x.PRMCNCodeSys).IsRequired();
+        b.Property(x => x.ModelCode).IsRequired();
+        b.Property(x => x.NetworkID).IsRequired();
+        b.Property(x => x.OrgID).IsRequired();
+    }
+}
