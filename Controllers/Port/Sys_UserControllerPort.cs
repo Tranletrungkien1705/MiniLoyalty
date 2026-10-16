@@ -194,10 +194,10 @@ public class Sys_UserGetForCurrentUserRes
 }
 
 /// <summary>
-/// Controller Port 1:1 cho Sys_UserController — hạng mục #323 (Search), #324 (GetByUserCode), #325 (GetByMST), #327 (GetForCurrentUser).
-/// Nguồn Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Sys_UserController.cs:390-496
-/// Nguồn API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\SysUserController.cs:273-344
-/// Nguồn Biz LIVE: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\System.cs:6151-6249, 5886-6080 (Sys_User_GetForCurrentUser)
+/// Controller Port 1:1 cho Sys_UserController — hạng mục #323 (Search), #324 (GetByUserCode), #325 (GetByMST), #327 (GetForCurrentUser), #328 (GetAllActive).
+/// Nguồn Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Sys_UserController.cs:498-561
+/// Nguồn API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\SysUserController.cs:199-270
+/// Nguồn Biz LIVE: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\System.cs:8365-8478, 7987-8363 (Sys_User_Get_New20191104)
 /// Route: api/sys_user
 /// </summary>
 [ApiController]
@@ -684,6 +684,124 @@ public class Sys_UserControllerPort : ControllerBase
             FlagActive = user.FlagActive
         };
         return Ok(new { Success = true, Data = res });
+    }
+
+    /// <summary>
+    /// Port 1:1 GetAllActive action từ gate Sys_UserController.cs:498-561 (#328).
+    /// Chuỗi gọi: Gate Sys_UserController.cs:498 -> WA_Sys_User_Get (SysUserController.cs:199)
+    ///            -> WAS_Sys_User_Get (System.cs:8365) -> Sys_User_Get_New20191104 (System.cs:7987-8363).
+    /// Lọc FlagActive = "1", sắp xếp theo UserCode asc, trả về đối tượng chứa Lst_Sys_User (null nếu rỗng).
+    /// </summary>
+    [HttpPost("getallactive")]
+    public async Task<IActionResult> GetAllActive([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] object? req)
+    {
+        // 1. Lọc theo FlagActive = "1" (Sys_UserController.cs:518-521, 1413-1416)
+        var fa = PortQuery.Equal("1");
+        var q = _db.Set<Sys_User>().AsNoTracking()
+            .Where(x => EF.Functions.Like((x.FlagActive ?? "").ToLower(), fa, PortQuery.Esc));
+
+        // 2. Sắp xếp draft: System.cs:8127: "order by su.UserCode asc"
+        var users = await q.OrderBy(x => x.UserCode).ToListAsync();
+
+        if (users.Count == 0)
+        {
+            return Ok(new
+            {
+                Success = true,
+                Data = new
+                {
+                    Lst_Sys_User = (List<Sys_User>?)null
+                }
+            });
+        }
+
+        // 3. Thực hiện Left Join sang các bảng liên quan theo System.cs:8196-8207:
+        // - Mst_Department mdept on su.DepartmentCode = mdept.DepartmentCode
+        // - Mst_Customer mc on su.CustomerCodeSys = mc.CustomerCodeSys
+        // - Mst_Org mo on su.OrgID = mo.OrgID
+        // - Map_DealerCP_Org mdcpo on mo.OrgID = mdcpo.OrgID
+        // - Mst_DealerCP mdcp on mdcpo.DLCPCode = mdcp.DLCPCode
+        var deptCodes = users.Select(u => u.DepartmentCode).Where(c => !string.IsNullOrEmpty(c)).Distinct().ToList();
+        var custCodeSysList = users.Select(u => u.CustomerCodeSys).Where(c => !string.IsNullOrEmpty(c)).Distinct().ToList();
+        var orgIds = users.Select(u => u.OrgID).Where(c => !string.IsNullOrEmpty(c)).Distinct().ToList();
+
+        var departments = await _db.Set<Mst_Department>().AsNoTracking()
+            .Where(d => deptCodes.Contains(d.DepartmentCode))
+            .ToDictionaryAsync(d => d.DepartmentCode, d => d);
+
+        var customers = await _db.Set<Mst_Customer>().AsNoTracking()
+            .Where(c => custCodeSysList.Contains(c.CustomerCodeSys))
+            .ToDictionaryAsync(c => c.CustomerCodeSys, c => c);
+
+        var dealerMappings = await (
+            from mo in _db.Set<Mst_Org>().AsNoTracking()
+            where orgIds.Contains(mo.OrgID)
+            join mdcpo in _db.Set<Map_DealerCP_Org>().AsNoTracking() on mo.OrgID equals mdcpo.OrgID into mdcpoGroup
+            from mdcpo in mdcpoGroup.DefaultIfEmpty()
+            join mdcp in _db.Set<Mst_DealerCP>().AsNoTracking() on (mdcpo != null ? mdcpo.DLCPCode : null) equals mdcp.DLCPCode into mdcpGroup
+            from mdcp in mdcpGroup.DefaultIfEmpty()
+            select new
+            {
+                OrgID = mo.OrgID,
+                DLCPCode = mdcpo != null ? mdcpo.DLCPCode : null,
+                DLCPName = mdcp != null ? mdcp.DLCPName : null
+            }
+        ).ToListAsync();
+
+        var dealerDict = dealerMappings
+            .GroupBy(x => x.OrgID)
+            .ToDictionary(g => g.Key, g => g.FirstOrDefault());
+
+        // 4. Map dữ liệu trả về cho Client (System.cs:8165-8209)
+        var rows = users.Select((u, idx) =>
+        {
+            departments.TryGetValue(u.DepartmentCode ?? "", out var dept);
+            customers.TryGetValue(u.CustomerCodeSys ?? "", out var cust);
+            dealerDict.TryGetValue(u.OrgID ?? "", out var dcp);
+
+            return new Sys_User
+            {
+                MyIdxSeq = idx,
+                UserCode = u.UserCode,
+                UserName = u.UserName,
+                UserPassword = Default_PasswordMask,
+                PhoneNo = u.PhoneNo,
+                EMail = u.EMail,
+                MST = u.MST,
+                DepartmentCode = u.DepartmentCode,
+                Position = u.Position,
+                FlagDLAdmin = u.FlagDLAdmin,
+                FlagSysAdmin = u.FlagSysAdmin,
+                FlagNNTAdmin = u.FlagNNTAdmin,
+                OrgID = u.OrgID,
+                CustomerCodeSys = u.CustomerCodeSys,
+                FlagActive = u.FlagActive,
+
+                ACId = u.ACId,
+                ACAvatar = u.ACAvatar,
+                ACEmail = u.ACEmail,
+                ACLanguage = u.ACLanguage,
+                ACName = u.ACName,
+                ACPhone = u.ACPhone,
+                ACTimeZone = u.ACTimeZone,
+
+                CustomerCode = cust?.CustomerCode,
+                CustomerName = cust?.CustomerName,
+                mdept_DepartmentCode = dept?.DepartmentCode,
+                mdept_DepartmentName = dept?.DepartmentName,
+                mdcpo_DLCPCode = dcp?.DLCPCode,
+                mdcp_DLCPName = dcp?.DLCPName
+            };
+        }).ToList();
+
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Lst_Sys_User = rows.Count > 0 ? rows : null
+            }
+        });
     }
 
     /// <summary>
