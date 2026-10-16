@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
@@ -12,10 +14,13 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ===========================================================================================
-// PORT 1:1 từ dự án nguồn 2022.7.Loyalty — Crd_CardTransactionController/Search (dòng #12).
+// PORT 1:1 từ dự án nguồn 2022.7.Loyalty:
+//   - Search (#12) — Crd_CardTransactionController.cs:32-113
+//   - SearchDetailCrdDealUsePromotion (#13) — Crd_CardTransactionController.cs:114-187
+//   - Export (#14) — Crd_CardTransactionController.cs:312-395
 //
 // Nguồn tra cứu (chỉ đọc):
-//   - Gate: Crd_CardTransactionController.cs:32-113 (Search) & :191-308 (strWhereClause_Crd_CardTransaction)
+//   - Gate: Crd_CardTransactionController.cs:312-395 (Export), :399-418 (GetImportDicColums)
 //   - API:  CrdCardTransactionController.cs:24-91 (WA_Crd_CardTransaction_Get)
 //   - BIZ:  Master.Loyalty.cs:21144-21253 (WAS_Crd_CardTransaction_Get)
 //           Master.Loyalty.cs:21254-21408 (Crd_CardTransaction_Get)
@@ -36,6 +41,23 @@ public class Crd_CardTransactionDetailPromotionReq
     public string? DLCode { get; set; }
     public string? UsePrmDTimeFrom { get; set; }
     public string? UsePrmDTimeTo { get; set; }
+}
+
+/// <summary>
+/// DTO tham số xuất Excel giao dịch thẻ — port 1:1 gate Crd_CardTransactionController.cs:312.
+/// </summary>
+public class Crd_CardTransactionExportReq
+{
+    public string? CreateDTimeUTCFrom { get; set; }     // Gate :312 — Thời gian thực hiện từ
+    public string? CreateDTimeUTCTo { get; set; }       // Gate :312 — Thời gian thực hiện đến
+    public string? CardType { get; set; }               // Gate :312 — Hạng thẻ (ánh xạ sang CardTypeUse)
+    public string? CardTypeUse { get; set; }            // Hạng thẻ sử dụng (dự phòng)
+    public string? MemberNo { get; set; }               // Gate :312 — Mã thẻ hội viên
+    public string? PhoneNo { get; set; }                // Gate :312 — Số điện thoại
+    public string? PrProgramCode { get; set; }          // Gate :312 — Mã chương trình
+    public string? DLCode { get; set; }                 // Gate :312 — Mã đại lý thực hiện
+    public string? OrgID { get; set; }                  // Bài học A.14 — OrgID tùy chọn
+    public string? NetworkID { get; set; }              // Mã mạng
 }
 
 public class Crd_CardTransactionSearchReq
@@ -169,10 +191,12 @@ public class Crd_CardTransactionSearchResult
 public class Crd_CardTransactionControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly IWebHostEnvironment? _env;
 
-    public Crd_CardTransactionControllerPort(AppDbContext db)
+    public Crd_CardTransactionControllerPort(AppDbContext db, IWebHostEnvironment? env = null)
     {
         _db = db;
+        _env = env;
     }
 
     /// <summary>
@@ -227,6 +251,100 @@ public class Crd_CardTransactionControllerPort : ControllerBase
             return Ok(new { Success = true, Data = new { DataList = (list != null && list.Count > 0) ? list : null } });
         }
         return res;
+    }
+
+    /// <summary>
+    /// Port 1:1 Export — Crd_CardTransactionController.cs:312-395 (#014).
+    /// Tham số nhận qua body JSON: { CreateDTimeUTCFrom, CreateDTimeUTCTo, CardType, MemberNo, PhoneNo, PrProgramCode, DLCode }.
+    /// Nguồn gate:
+    /// - Tham số truyền vào được ánh xạ qua hàm lọc strWhereClause_Crd_CardTransaction (:333-342) với:
+    ///   DealPointType = "PRPROGRAM" (:338) — cố định, không nhận từ client.
+    ///   CreateDTimeUTCFrom + " 00:00:00", CreateDTimeUTCTo + " 23:59:59" (:335-336).
+    ///   CardTypeUse = CardType (:339).
+    /// - Phân trang: Ft_RecordStart = "0", Ft_RecordCount = mặc định 123456000 (:355-356).
+    /// - Dữ liệu rỗng (rows null hoặc Count == 0) -> ném ServiceException("Không có dữ liệu") (:379-382)
+    ///   -> trả về HTTP 400 ErridnLoyalty.Crd_CardTransaction_Export kèm Params Message = "Không có dữ liệu".
+    /// - Có dữ liệu:
+    ///   * Lấy từ điển cột từ GetImportDicColums() (:368, :399-418) gồm 14 cột.
+    ///   * Sinh đường dẫn file: GenExcelExportFilePath("Crd_CardTransaction", ref url) (:370).
+    ///   * Xuất file Excel: ExcelExport.ExportToExcelFromList(list, dicColNames, filePath, "Crd_CardTransaction") (:371).
+    ///   * Trả về Success = true, Data = { Url = GetRequestBaseAddress() + url } (:372-376).
+    /// </summary>
+    [HttpPost("export")]
+    public async Task<IActionResult> Export([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_CardTransactionExportReq? req)
+    {
+        var r = req ?? new Crd_CardTransactionExportReq();
+        var cardTypeUse = !string.IsNullOrWhiteSpace(r.CardType) ? r.CardType : r.CardTypeUse;
+
+        var core = new Crd_CardTransactionSearchReq
+        {
+            CreateDTimeUTCFrom = string.IsNullOrWhiteSpace(r.CreateDTimeUTCFrom) ? null : (r.CreateDTimeUTCFrom.Contains(' ') ? r.CreateDTimeUTCFrom : r.CreateDTimeUTCFrom + " 00:00:00"),
+            CreateDTimeUTCTo = string.IsNullOrWhiteSpace(r.CreateDTimeUTCTo) ? null : (r.CreateDTimeUTCTo.Contains(' ') ? r.CreateDTimeUTCTo : r.CreateDTimeUTCTo + " 23:59:59"),
+            MemberNo = r.MemberNo,
+            DealPointType = "PRPROGRAM", // Gate Crd_CardTransactionController.cs:338 cố định "PRPROGRAM"
+            CardTypeUse = cardTypeUse,
+            PhoneNo = r.PhoneNo,
+            DLCode = r.DLCode,
+            // PrProgramCode: gate Export (:312) nhận tham số nhưng KHÔNG đưa vào strWhereClause (:333-342) => bỏ qua (LESSONS A.18)
+            OrgID = r.OrgID,
+            NetworkID = r.NetworkID,
+            Ft_PageIndex = 0,
+            Ft_PageSize = 123456000,
+            Ft_RecordStart = "0",
+            Ft_RecordCount = "123456000"
+        };
+
+        var searchResult = await SearchCoreAsync(core);
+        if (searchResult is not OkObjectResult ok || ok.Value == null)
+        {
+            return searchResult;
+        }
+
+        var dataObj = ok.Value.GetType().GetProperty("Data")?.GetValue(ok.Value);
+        var pageInfo = dataObj as PageInfo<Crd_CardTransactionSearchResult>;
+        var rows = pageInfo?.DataList;
+
+        // Gate Crd_CardTransactionController.cs:364, 379-382:
+        // if (objRT_Crd_CardTransactionCur.Lst_Crd_CardTransaction != null && objRT_Crd_CardTransactionCur.Lst_Crd_CardTransaction.Count > 0)
+        // else throw new ServiceException("Không có dữ liệu");
+        if (rows == null || rows.Count == 0)
+        {
+            return PortResult.Fail("Crd_CardTransaction_Export", "Message", "Không có dữ liệu");
+        }
+
+        // Tạo thư mục và đường dẫn file Excel xuất: GenExcelExportFilePath (gate :370)
+        var webRoot = _env?.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = _env != null ? Path.Combine(_env.ContentRootPath, "wwwroot") : Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+        }
+
+        // Lấy từ điển cột: gate Crd_CardTransactionController.cs:368 gọi GetImportDicColums() (14 cột)
+        var dicColNames = GetImportDicColums();
+        string virtualPath;
+        try
+        {
+            var (physicalPath, vPath) = PortExcel.GenExcelExportFilePath(webRoot, "Crd_CardTransaction");
+            virtualPath = vPath;
+
+            // Ghi danh sách ra file Excel với sheet "Crd_CardTransaction" (gate :371)
+            PortExcel.ExportToExcelFromList(rows, dicColNames, physicalPath, "Crd_CardTransaction");
+        }
+        catch (Exception ex)
+        {
+            // Gate :384-388 bắt ngoại lệ và trả Success=false
+            return PortResult.Fail("Crd_CardTransaction_Export", "Exception", ex.Message);
+        }
+
+        // Trả URL tải file: Data = { Url = GetRequestBaseAddress() + url } (gate :372-376)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+            }
+        });
     }
 
     private async Task<IActionResult> SearchCoreAsync(Crd_CardTransactionSearchReq r)
@@ -712,6 +830,45 @@ public class Crd_CardTransactionControllerPort : ControllerBase
             DiscountRate = mvt.PolicyDiscountRate ?? 0d,
             DiscountAmount = mvt.PointChTotal ?? 0d,
             DiscountRevenue = mvt.AmountForDC ?? 0d
+        };
+    }
+
+    /// <summary>
+    /// Từ điển cột xuất Excel: gate Crd_CardTransactionController.cs:399-418 (GetImportDicColums).
+    /// Giữ đúng thứ tự 14 cột từ nguồn:
+    /// 1. RefNo ("Số giao dịch")
+    /// 2. DLCode ("Đại lý thực hiện")
+    /// 3. CreateDTimeUTC ("Ngày thực hiện")
+    /// 4. MemberNo ("Mã thẻ hội viên")
+    /// 5. MemberName ("Tên hội viên")
+    /// 6. CardTypeUse ("Hạng sử dụng")
+    /// 7. PhoneNo ("Số điện thoại")
+    /// 8. CarNo ("Biển số xe")
+    /// 9. CardNo ("Mã kỳ xét hạng")
+    /// 10. PrProgramCode ("Mã chương trình")
+    /// 11. PrProgramName ("Tên chương trình")
+    /// 12. Remark ("Mô tả")
+    /// 13. QtyPrChTotal ("Số lượng sử dụng")
+    /// 14. Unit ("Đơn vị tính")
+    /// </summary>
+    private static Dictionary<string, string> GetImportDicColums()
+    {
+        return new Dictionary<string, string>
+        {
+            { "RefNo", "Số giao dịch" },
+            { "DLCode", "Đại lý thực hiện" },
+            { "CreateDTimeUTC", "Ngày thực hiện" },
+            { "MemberNo", "Mã thẻ hội viên" },
+            { "MemberName", "Tên hội viên" },
+            { "CardTypeUse", "Hạng sử dụng" },
+            { "PhoneNo", "Số điện thoại" },
+            { "CarNo", "Biển số xe" },
+            { "CardNo", "Mã kỳ xét hạng" },
+            { "PrProgramCode", "Mã chương trình" },
+            { "PrProgramName", "Tên chương trình" },
+            { "Remark", "Mô tả" },
+            { "QtyPrChTotal", "Số lượng sử dụng" },
+            { "Unit", "Đơn vị tính" }
         };
     }
 }
