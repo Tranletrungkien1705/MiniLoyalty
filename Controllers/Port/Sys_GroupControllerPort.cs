@@ -17,6 +17,7 @@ namespace MiniLoyalty.Controllers.Port;
 //   - GetAllActive (#308)
 //   - GetByGroupCode (#309)
 //   - Create (#310)
+//   - Update (#311)
 //
 // Nguồn gate: Sys_GroupController.cs:27-135 (Search), 136-243 (GetAllActive), 244-310 (GetByGroupCode) -> WA_Sys_Group_Get
 //   - Search: Nhận OrgID, KeyWord, FlagActive, Ft_PageIndex = 0, Ft_PageSize = 10
@@ -32,9 +33,14 @@ namespace MiniLoyalty.Controllers.Port;
 //   - Gate Create (:314-398): Body rỗng -> throw ServiceException("strJson null") -> 400.
 //     Deser objSys_Group -> WA_Sys_Group_Create -> WAS_Sys_Group_Create -> Sys_Group_Create_New20191102 (zTemp.cs:1034-1251).
 //     Trả Success = true, Data = null.
+//   - Gate Update (:402-471): Body rỗng -> throw Exception("strJson null") -> 400.
+//     Deser objSys_Group -> gán mặc định FlagActive="1" nếu null/rỗng (:415-418).
+//     strFt_Cols_Upd = Sys_Group.GroupName,Sys_Group.FlagActive, (:438-439).
+//     WA_Sys_Group_Update -> WAS_Sys_Group_Update -> Sys_Group_Update (System.cs:3019-3163).
+//     Trả Success = true, Data = null.
 //
-// Nguồn API: SysGroupController.cs:20-91 (Get), 94-165 (Create)
-// Nguồn biz: System.cs:2510-2625 (WAS_Sys_Group_Get), 2938-3018 (WAS_Sys_Group_Create)
+// Nguồn API: SysGroupController.cs:20-91 (Get), 94-165 (Create), 168-239 (Update)
+// Nguồn biz: System.cs:2510-2625 (WAS_Sys_Group_Get), 2938-3018 (WAS_Sys_Group_Create), 3368-3451 (WAS_Sys_Group_Update), 3019-3163 (Sys_Group_Update)
 //   - Draft (:2304-2319): select distinct identity(bigint, 0, 1) MyIdxSeq, sg.GroupCode ... order by sg.GroupCode asc
 //   - Summary (:2322): select Count(0) MyCount from #tbl_Sys_Group_Filter_Draft
 //   - Select cuối (:2356-2363): select t.MyIdxSeq, sg.* from #tbl_Sys_Group_Filter t inner join Sys_Group sg ... order by t.MyIdxSeq asc
@@ -45,6 +51,12 @@ namespace MiniLoyalty.Controllers.Port;
 //     * Sys_Group_CheckDB (GroupCode, FlagExistToCheck: No) -> Sys_Group_CheckDB_GroupCodeExist
 //     * Sys_User_CheckDB (WAUserCode, Yes, Active) -> GAP
 //     * Save DB: GroupCode, NetworkID, MST, GroupName, FlagActive="1", LogLUDTimeUTC=UtcNow, LogLUBy="port"
+//   - Sys_Group_Update (System.cs:3019-3163):
+//     * strFt_Cols_Upd = StdParam(objFt_Cols_Upd) (ToUpper), strGroupCode = StdParam(objGroupCode), strGroupName = string.Format("{0}", objGroupName).Trim(), strFlagActive = StdFlag(objFlagActive)
+//     * bUpd_GroupName = strFt_Cols_Upd.Contains("SYS_GROUP.GROUPNAME"), bUpd_FlagActive = strFt_Cols_Upd.Contains("SYS_GROUP.FLAGACTIVE")
+//     * Sys_Group_CheckDB(objGroupCode, TConst.Flag.Yes, "") -> Sys_Group_CheckDB_GroupCodeNotFound
+//     * Nếu bUpd_GroupName và strGroupName.Length < 1 -> Sys_Group_Update_InvalidGroupName
+//     * Save DB: GroupName (nếu bUpd_GroupName), FlagActive (nếu bUpd_FlagActive), LogLUDTimeUTC=UtcNow, LogLUBy="port"
 //
 // Bỏ qua có chủ đích (loại Đ):
 //   - CheckGatewayAuthentication: Sys_GroupController.cs:36, :149, :334, SysGroupController.cs:43-48, :117-122
@@ -374,6 +386,122 @@ public class Sys_GroupControllerPort : ControllerBase
     }
 
     /// <summary>
+    /// Port 1:1 Update action từ gate Sys_GroupController.cs:402-471 (#311).
+    /// Chuỗi gọi: gate Sys_GroupController.Update -> WA_Sys_Group_Update -> WAS_Sys_Group_Update -> Sys_Group_Update (System.cs:3019-3163).
+    ///
+    /// Quy trình nghiệp vụ:
+    ///   0. Body rỗng / null: gate Sys_GroupController.cs:420-423 ném Exception("strJson null") -> 400 ErridnLoyalty.Sys_Group_Update (Check.strJson).
+    ///   1. Mở transaction: System.cs:3054 _cf.db.BeginTransaction(). Lỗi -> rollback + trả PortResult.Fail("Sys_Group_Update", "Exception", ex.Message).
+    ///   2. Chuỗi Ft_Cols_Upd do gate gửi lên: gate Sys_GroupController.cs:436-439:
+    ///      strFt_Cols_Upd = Sys_Group.GroupName,Sys_Group.FlagActive,
+    ///      Biz System.cs:3072: strFt_Cols_Upd = StdParam(objFt_Cols_Upd) (ToUpper).
+    ///      Kiểm tra các cột cập nhật (System.cs:3080-3081):
+    ///      - bUpd_GroupName = strFt_Cols_Upd.Contains("SYS_GROUP.GROUPNAME")
+    ///      - bUpd_FlagActive = strFt_Cols_Upd.Contains("SYS_GROUP.FLAGACTIVE")
+    ///   3. Chuẩn hoá dữ liệu input (System.cs:3075-3077):
+    ///      - strGroupCode = StdParam(objGroupCode)
+    ///      - strGroupName = string.Format("{0}", objGroupName).Trim()
+    ///      - FlagActive: Gate Sys_GroupController.cs:415-418 nếu IsNullOrEmpty(FlagActive) -> mặc định "1" (CẢNH BÁO / HÀNH VI NGUỒN).
+    ///        Sau đó qua StdFlag(objFlagActive) (System.cs:3077: "1" nếu là "1", mọi giá trị khác -> "0").
+    ///   4. Thứ tự kiểm tra điều kiện (guards theo System.cs:3085-3103):
+    ///      - Sys_Group_CheckDB(objGroupCode, TConst.Flag.Yes, "") (System.cs:3085-3091, 1566-1576):
+    ///        Kiểm tra tồn tại GroupCode trong DB. Nếu không tìm thấy -> ném ErridnLoyalty.Sys_Group_CheckDB_GroupCodeNotFound (Check.GroupCodeNotFound).
+    ///      - Nếu bUpd_GroupName và strGroupName.Length &lt; 1 (System.cs:3093-3103):
+    ///        -> ném ErridnLoyalty.Sys_Group_Update_InvalidGroupName (Check.strGroupName).
+    ///   5. Lưu DB (System.cs:3108-3125):
+    ///      - Nếu bUpd_GroupName: cập nhật GroupName = strGroupName
+    ///      - Nếu bUpd_FlagActive: cập nhật FlagActive = strFlagActive
+    ///      - Cập nhật LogLUDTimeUTC = DateTime.UtcNow, LogLUBy = "port"
+    ///   6. Commit transaction (System.cs:3129 TDALUtils.DBUtils.CommitSafety), trả Ok(new { Success = true, Data = (object?)null }) (gate :457-458).
+    /// </summary>
+    [HttpPost("update")]
+    public async Task<IActionResult> Update([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Sys_GroupUpdateReq? req)
+    {
+        // 0. Body rỗng: gate Sys_GroupController.cs:420-423 throw new Exception("strJson null") -> mã mặc định Sys_Group_Update
+        if (req == null)
+        {
+            return PortResult.Fail("Sys_Group_Update", "Check.strJson", null);
+        }
+
+        // 1. Mở transaction (System.cs:3054 _cf.db.BeginTransaction())
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // 2. Chuỗi Ft_Cols_Upd do gate gửi lên: gate Sys_GroupController.cs:436-439
+            var strFt_Cols_Upd = "";
+            var tblSysGroup = "Sys_Group.";
+            strFt_Cols_Upd += string.Format("{0}{1},", tblSysGroup, "GroupName");
+            strFt_Cols_Upd += string.Format("{0}{1},", tblSysGroup, "FlagActive");
+
+            // Chuẩn hoá Ft_Cols_Upd theo biz System.cs:3072: strFt_Cols_Upd = StdParam(objFt_Cols_Upd)
+            strFt_Cols_Upd = StdParam(strFt_Cols_Upd) ?? "";
+
+            // So khớp các cột được phép cập nhật: System.cs:3080-3081
+            bool bUpd_GroupName = strFt_Cols_Upd.Contains("Sys_Group.GroupName".ToUpperInvariant());
+            bool bUpd_FlagActive = strFt_Cols_Upd.Contains("Sys_Group.FlagActive".ToUpperInvariant());
+
+            // 3. Chuẩn hoá dữ liệu input (System.cs:3075-3077):
+            var strGroupCode = StdParam(req.GroupCode);
+            var strGroupName = string.Format("{0}", req.GroupName).Trim();
+
+            // Xử lý FlagActive theo tầng gate Sys_GroupController.cs:415-418 và biz System.cs:3077:
+            // CẢNH BÁO / HÀNH VI NGUỒN: nếu req.FlagActive là null/rỗng thì gate tự gán mặc định "1" trước khi gọi Biz.
+            var strFlagActive = StdFlag(req.FlagActive);   // nguồn :3077 StdFlag(objFlagActive): chỉ "1" -> "1", còn lại (kể cả thiếu/null) -> "0" (KHÔNG có mặc định "1")
+
+            // 4. Thứ tự kiểm tra điều kiện (guards theo System.cs:3085-3103):
+            // (a) Sys_Group_CheckDB: kiểm tra tồn tại GroupCode (System.cs:3085-3091, 1566-1576)
+            Sys_Group? matchedGroup = null;
+            if (!string.IsNullOrEmpty(strGroupCode))
+            {
+                var groupCodePattern = PortQuery.Equal(strGroupCode);
+                matchedGroup = await _db.Set<Sys_Group>()
+                    .FirstOrDefaultAsync(x => EF.Functions.Like((x.GroupCode ?? "").ToLower(), groupCodePattern, PortQuery.Esc));
+            }
+
+            if (matchedGroup == null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Sys_Group_CheckDB_GroupCodeNotFound", "Check.GroupCodeNotFound", strGroupCode);
+            }
+
+            // (b) Nếu bUpd_GroupName và strGroupName.Length < 1: ném Sys_Group_Update_InvalidGroupName (System.cs:3093-3103)
+            if (bUpd_GroupName && strGroupName.Length < 1)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Sys_Group_Update_InvalidGroupName", "Check.strGroupName", strGroupName);
+            }
+
+            // 5. Lưu DB (System.cs:3108-3125):
+            if (bUpd_GroupName)
+            {
+                matchedGroup.GroupName = strGroupName;
+            }
+            if (bUpd_FlagActive)
+            {
+                matchedGroup.FlagActive = strFlagActive;
+            }
+            matchedGroup.LogLUDTimeUTC = DateTime.UtcNow;
+            matchedGroup.LogLUBy = "port";
+
+            await _db.SaveChangesAsync();
+
+            // 6. Commit transaction (System.cs:3129 TDALUtils.DBUtils.CommitSafety)
+            await tx.CommitAsync();
+
+            return Ok(new
+            {
+                Success = true,
+                Data = (object?)null
+            });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return PortResult.Fail("Sys_Group_Update", "Exception", ex.Message);
+        }
+    }
+
+    /// <summary>
     /// Chuẩn hoá chuỗi mã theo CUtils.StdParam: Trim, viết HOA, rỗng -> null.
     /// </summary>
     private static string? StdParam(object? s)
@@ -381,6 +509,14 @@ public class Sys_GroupControllerPort : ControllerBase
         if (s == null) return null;
         var str = s.ToString()?.Trim().ToUpperInvariant();
         return string.IsNullOrEmpty(str) ? null : str;
+    }
+
+    /// <summary>
+    /// Chuẩn hoá cờ theo CUtils.StdFlag: "1" nếu là "1", mọi giá trị khác -> "0".
+    /// </summary>
+    private static string StdFlag(object? s)
+    {
+        return string.Equals(s?.ToString()?.Trim(), "1", StringComparison.Ordinal) ? "1" : "0";
     }
 }
 
@@ -476,4 +612,16 @@ public class Sys_GroupCreateReq
     public string? GroupName { get; set; }
     public string? MST { get; set; }
 }
+
+/// <summary>
+/// DTO request cho action Update — Sys_GroupController.cs:402 (#311).
+/// </summary>
+public class Sys_GroupUpdateReq
+{
+    public string? GroupCode { get; set; }
+    public string? GroupName { get; set; }
+    public string? FlagActive { get; set; }
+    public string? MST { get; set; }
+}
+
 
