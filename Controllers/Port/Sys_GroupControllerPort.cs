@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
@@ -21,6 +23,7 @@ namespace MiniLoyalty.Controllers.Port;
 //   - Delete (#312)
 //   - DeleteMultiple (#313)
 //   - Import (#314)
+//   - Export (#315)
 //
 // Nguồn gate: Sys_GroupController.cs:27-135 (Search), 136-243 (GetAllActive), 244-310 (GetByGroupCode) -> WA_Sys_Group_Get
 //   - Search: Nhận OrgID, KeyWord, FlagActive, Ft_PageIndex = 0, Ft_PageSize = 10
@@ -56,6 +59,14 @@ namespace MiniLoyalty.Controllers.Port;
 //     Vòng lặp 1: kiểm tra rỗng GroupCode ("Mã nhóm người dùng không được trống"), GroupName ("Tên nhóm người dùng không được trống") cho TẤT CẢ các dòng trước khi tạo (:662-684).
 //     Vòng lặp 2: gọi WA_Sys_Group_Create tuần tự cho từng dòng (mỗi dòng 1 transaction riêng, :705-731). Lỗi ở dòng k -> dừng ngay, trả lỗi dòng k (import một phần).
 //     Thành công: Data = null (:733-735).
+//   - Gate Export (:758-836): Nhận OrgID, KeyWord, FlagActive (#315).
+//     strWhereClause_Sys_Group (:917-932): KeyWord và OrgID bị bỏ qua; chỉ lọc FlagActive = nguyên chuỗi (nếu có).
+//     Ft_RecordStart = "0", Ft_RecordCount = 123456000 (:797-798).
+//     Rỗng -> throw ServiceException("Không có dữ liệu") (:822) -> trả 400 ErridnLoyalty.Sys_Group_Export kèm Message = "Không có dữ liệu".
+//     Có dữ liệu -> từ điển cột = GetImportDicColums() (gate :809, :875-883) gồm 3 cột: GroupCode, GroupName, FlagActive
+//     (dùng từ điển Import cho Export là của nguồn).
+//     Ghi Excel qua PortExcel.ExportToExcelFromList(list, dicColNames, filePath, "Sys_Group").
+//     Trả về Success = true, Data = { Url = base + url } (:814-817).
 //
 // Nguồn API: SysGroupController.cs:20-91 (Get), 94-165 (Create), 168-239 (Update), 242-313 (Delete)
 // Nguồn biz: System.cs:2510-2625 (WAS_Sys_Group_Get), 2938-3018 (WAS_Sys_Group_Create), 3368-3451 (WAS_Sys_Group_Update), 3019-3163 (Sys_Group_Update), 3726-3805 (WAS_Sys_Group_Delete), 3453-3566 (Sys_Group_Delete)
@@ -92,11 +103,13 @@ namespace MiniLoyalty.Controllers.Port;
 public class Sys_GroupControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly IWebHostEnvironment? _env;
     private readonly IConfiguration? _config;
 
-    public Sys_GroupControllerPort(AppDbContext db, IConfiguration? config = null)
+    public Sys_GroupControllerPort(AppDbContext db, IWebHostEnvironment? env = null, IConfiguration? config = null)
     {
         _db = db;
+        _env = env;
         _config = config;
     }
 
@@ -795,6 +808,104 @@ public class Sys_GroupControllerPort : ControllerBase
     {
         return string.Equals(s?.ToString()?.Trim(), "1", StringComparison.Ordinal) ? "1" : "0";
     }
+
+    /// <summary>
+    /// Port 1:1 Export action từ gate Sys_GroupController.cs:758-836 (#315).
+    /// Tham số nhận qua body JSON: { OrgID, KeyWord, FlagActive }.
+    /// Nguồn gate:
+    /// - KeyWord truyền vào nhưng strWhereClause_Sys_Group (:917-932) chỉ kiểm tra GroupCode -> bỏ qua KeyWord.
+    /// - OrgID truyền vào nhưng strWhereClause_Sys_Group KHÔNG kiểm tra OrgID -> bỏ qua OrgID.
+    /// - FlagActive lọc bằng toán tử = nguyên chuỗi (nếu có).
+    /// - Phân trang: Ft_RecordStart = "0", Ft_RecordCount = 123456000 (:797-798).
+    /// - Sắp xếp: order by sg.GroupCode asc (System.cs:2318).
+    /// - Rỗng -> throw ServiceException("Không có dữ liệu") (:822) -> trả 400 ErridnLoyalty.Sys_Group_Export kèm Message = "Không có dữ liệu".
+    /// - Có dữ liệu -> dùng từ điển cột GetImportDicColums() (gate :809, :875-883) gồm 3 cột (dùng từ điển Import cho Export là của nguồn).
+    /// - Sinh đường dẫn file qua PortExcel.GenExcelExportFilePath(webRoot, "Sys_Group") (:811).
+    /// - Ghi file Excel qua PortExcel.ExportToExcelFromList(rows, dicColNames, physicalPath, "Sys_Group") (:812).
+    /// - Trả về: Success = true, Data = { Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath } (:814-817).
+    /// </summary>
+    [HttpPost("export")]
+    public async Task<IActionResult> Export(
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Sys_GroupExportReq? req)
+    {
+        var r = req ?? new Sys_GroupExportReq();
+
+        // 1. Lọc dữ liệu theo strWhereClause_Sys_Group (Sys_GroupController.cs:917-932)
+        // OrgID và KeyWord bị bỏ qua vì hàm lọc không kiểm tra (hành vi nguồn).
+        var q = _db.Set<Sys_Group>().AsNoTracking().AsQueryable();
+        if (!string.IsNullOrEmpty(r.FlagActive))
+        {
+            var fa = PortQuery.Equal(r.FlagActive);
+            q = q.Where(x => EF.Functions.Like((x.FlagActive ?? "").ToLower(), fa, PortQuery.Esc));
+        }
+
+        // Sắp xếp theo GroupCode asc (SQL System.cs:2318)
+        var ordered = q.OrderBy(x => x.GroupCode);
+
+        // Lấy từ 0 đến 123456000 (gate :797-798, Ft_RecordStart = "0", Ft_RecordCount = 123456000)
+        var rows = await ordered.Skip(0).Take(123456000).ToListAsync();
+
+        // 2. Kiểm tra dữ liệu rỗng (gate Sys_GroupController.cs:805, 822)
+        // if (objRT_Sys_Group.Lst_Sys_Group != null && objRT_Sys_Group.Lst_Sys_Group.Count > 0) ... else throw new ServiceException("Không có dữ liệu")
+        if (rows == null || rows.Count == 0)
+        {
+            return PortResult.Fail("Sys_Group_Export", "Message", "Không có dữ liệu");
+        }
+
+        // 3. Đường dẫn thư mục webRoot
+        var webRoot = _env?.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = _env != null ? Path.Combine(_env.ContentRootPath, "wwwroot") : Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+        }
+
+        // 4. Từ điển cột: gate Sys_GroupController.cs:809 gọi GetImportDicColums() (dùng từ điển Import cho Export là của nguồn)
+        var dicColNames = GetImportDicColums();
+        string virtualPath;
+        try
+        {
+            var (physicalPath, vPath) = PortExcel.GenExcelExportFilePath(webRoot, "Sys_Group");
+            virtualPath = vPath;
+
+            // Ghi danh sách ra file Excel với sheet "Sys_Group" (gate :812)
+            PortExcel.ExportToExcelFromList(rows, dicColNames, physicalPath, "Sys_Group");
+        }
+        catch (Exception ex)
+        {
+            return PortResult.Fail("Sys_Group_Export", "Exception", ex.Message);
+        }
+
+        // 5. Trả về Url tải file (gate :814-817)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+            }
+        });
+    }
+
+    /// <summary>
+    /// Từ điển cột xuất Excel: gate Sys_GroupController.cs:875-883 (GetImportDicColums).
+    /// ĐẶC BIỆT LƯU Ý THEO NGUỒN: Nguồn tại Sys_GroupController.cs:809 sử dụng GetImportDicColums()
+    /// (ghi rõ: dùng từ điển Import cho Export là của nguồn, KHÔNG phải GetExportDicColums).
+    /// Giữ đúng thứ tự 3 cột từ nguồn:
+    /// 1. GroupCode ("Mã nhóm người dùng")
+    /// 2. GroupName ("Tên nhóm người dùng")
+    /// 3. FlagActive ("Trạng thái")
+    /// (Lưu ý xung đột #315: đề bài phỏng đoán 5 cột GroupCode, GroupName, MST, FlagActive, LogLUBy,
+    /// nhưng nguồn thật tại Sys_GroupController.cs:875-883 chỉ có 3 cột).
+    /// </summary>
+    private static Dictionary<string, string> GetImportDicColums()
+    {
+        return new Dictionary<string, string>
+        {
+            { "GroupCode", "Mã nhóm người dùng" },
+            { "GroupName", "Tên nhóm người dùng" },
+            { "FlagActive", "Trạng thái" }
+        };
+    }
 }
 
 /// <summary>
@@ -908,6 +1019,17 @@ public class Sys_GroupDeleteReq
 {
     public string? GroupCode { get; set; }
 }
+
+/// <summary>
+/// DTO request cho action Export — gate Sys_GroupController.cs:758 (#315).
+/// </summary>
+public class Sys_GroupExportReq
+{
+    public string? OrgID { get; set; }
+    public string? KeyWord { get; set; }
+    public string? FlagActive { get; set; }
+}
+
 
 
 
