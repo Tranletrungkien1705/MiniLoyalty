@@ -12,18 +12,20 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục phòng ban (Mst_Department) của dự án nguồn 2022.7.Loyalty (#122, #123, #124, #125).
+// PORT 1:1 — màn danh mục phòng ban (Mst_Department) của dự án nguồn 2022.7.Loyalty (#122, #123, #124, #125, #126).
 //
 // Nguồn controller (tầng gate):
 //   Mst_DepartmentController.cs:30-109   Search -> WA_Mst_Department_Get (#122)
 //   Mst_DepartmentController.cs:110-218  GetAllActive -> WA_Mst_Department_Get (#123)
 //   Mst_DepartmentController.cs:219-282  GetByDepartmentCode -> WA_Mst_Department_Get (#124)
 //   Mst_DepartmentController.cs:286-370  Create -> WA_Mst_Department_Create (#125)
+//   Mst_DepartmentController.cs:374-443  Update -> WA_Mst_Department_Update (#126)
 //   Mst_DepartmentController.cs:877-905  strWhereClause_Mst_Department (mệnh đề lọc Search, GetAllActive)
 //   Mst_DepartmentController.cs:907-926  strWhereClause_Mst_Department_By_DepartmentCode (mệnh đề lọc GetByDepartmentCode)
 // Nguồn API:
 //   MstDepartmentController.cs:20-89     WA_Mst_Department_Get
 //   MstDepartmentController.cs:91-160    WA_Mst_Department_Create (#125)
+//   MstDepartmentController.cs:162-231   WA_Mst_Department_Update (#126)
 // Nguồn biz:
 //   Master.cs:29450-29548                WAS_Mst_Department_Get
 //   Master.cs:29549-29701                Mst_Department_Get
@@ -31,10 +33,13 @@ namespace MiniLoyalty.Controllers.Port;
 //   Master.cs:29702-29785                WAS_Mst_Department_Create (#125)
 //   Master.cs:29786-29935                Mst_Department_Create (#125)
 //   Master.cs:30569-30726                Mst_Department_CreateX (#125)
+//   Master.cs:29936-30021                WAS_Mst_Department_Update (#126)
+//   Master.cs:30022-30180                Mst_Department_Update (#126)
+//   Master.cs:30727-30864                Mst_Department_UpdateX (#126)
 //   Master.cs:29413-29448                Mst_Department_UpdBU (#125, cập nhật BUCode, BUPattern, Level toàn bảng)
 //   Master.cs:7813-7890                  Mst_NNT_CheckDB (#125)
-//   Master.cs:29275-29338                Mst_Department_CheckDB (#125)
-//   Master.cs:29341-29411                Mst_Department_CheckDepartmentName (#125)
+//   Master.cs:29275-29338                Mst_Department_CheckDB (#125, #126)
+//   Master.cs:29341-29411                Mst_Department_CheckDepartmentName (#125, #126)
 //
 // GIỮ ĐÚNG NGUỒN:
 //   * Endpoint là POST (nguồn Mst_DepartmentController.cs:30, :110, :286).
@@ -74,6 +79,23 @@ namespace MiniLoyalty.Controllers.Port;
 //     Level = 1, MST = MST_UC, DepartmentName, DepartmentDesc, FlagActive = "1", LogLUDTimeUTC = now, LogLUBy = "port".
 //     Mst_Department_UpdBU: gốc 'HO' (mã viết cứng tại Master.cs:29416) -> BUCode 'HO', Pattern 'HO%', Level 1; lặp 7 vòng snapshot cập nhật toàn bảng.
 //     1 transaction duy nhất, lỗi -> rollback + PortResult.Fail. Thành công Data = null.
+//   * Update (#126): [HttpPost("update")], body { DepartmentCode, DepartmentCodeParent, OrgID, MST, DepartmentName, DepartmentDesc, FlagActive }.
+//     EmptyBodyBehavior.Allow; body rỗng -> throw Exception("strJson null") -> mã mặc định Mst_Department_Update.
+//     Ft_Cols_Upd CỐ ĐỊNH từ gate (:404-410): DepartmentCodeParent, DepartmentName, DepartmentDesc, FlagActive (MST bị comment).
+//     Biz Mst_Department_UpdateX (Master.cs:30727-30864):
+//       - StdParam: DepartmentCode, DepartmentCodeParent, OrgID, MST; StdStr: DepartmentName, DepartmentDesc; FlagActive StdFlag (thiếu -> '0').
+//       - Cờ cập nhật: bUpd_MST (false do gate comment MST), bUpd_DepartmentName, bUpd_DepartmentDesc, bUpd_FlagActive.
+//       - ĐẶC BIỆT: KHÔNG có cờ cập nhật DepartmentCodeParent -> cha KHÔNG BAO GIỜ đổi dù gate có gửi (ghi comment).
+//       - Kiểm tra đúng thứ tự:
+//         a. Mst_Department_CheckDB(ma, "1") -> Mst_Department_CheckDB_DepartmentNotFound (Mst_NNT check :30801-30810 bị comment).
+//         b. Tên rỗng -> Mst_Department_UpdateX_InvalidDepartmentName.
+//         c. CHỈ KHI tên mới KHÁC tên DB (so sánh chính xác string.Equals(..., StringComparison.Ordinal)):
+//            -> Mst_Department_CheckDepartmentName(OrgID CỦA DÒNG DB, tên, "0") (LIKE không phân biệt hoa thường, %/_ là wildcard)
+//            -> Mst_Department_CheckDB_DepartmentNameExist.
+//            HỆ QUẢ: đổi KD thành "kinh doanh" (chỉ khác hoa thường) sẽ vấp chính nó -> lỗi (giữ nguyên).
+//       - Lưu DB: DepartmentName, DepartmentDesc, FlagActive, LogLUDTimeUTC = now, LogLUBy = "port".
+//         KHÔNG gọi UpdBU. Mã, cha, OrgID, MST, BU giữ nguyên.
+//     1 transaction duy nhất, lỗi -> rollback + PortResult.Fail. Thành công Data = null (:428-429).
 //   * Cột tính md_DepartmentNameParent: left join Mst_Department f on t.DepartmentCodeParent = f.DepartmentCode (:30512-30513),
 //     lấy tên phòng ban cấp trên f.DepartmentName (null nếu không có cấp trên).
 //   * Cột tính ss_QtyStaff: nguồn left join count StaffCode từ Staff_MapDepartment group by DepartmentCode (:30490-30499, :30506).
@@ -82,10 +104,10 @@ namespace MiniLoyalty.Controllers.Port;
 //   * DDL: không có DDL trong repo nguồn — PK = DepartmentCode (khoá draft), kiểu cột cần xác nhận.
 //
 // Bỏ qua có chủ đích (loại Đ):
-//   - CheckGatewayAuthentication: gate :39, :123, :228, :306, API :40-46, :112-117
-//   - CheckAuthorize: gate :40, :124, :229, :307 (hệ thống đích chưa có hệ phân quyền)
-//   - Ghi RequestLog/ReturnLog: Master.cs:29593-29600, 29691-29698, 29830-29837, 29925-29932
-//   - Sys_User_CheckAuthorize / Sys_Access_CheckDenyV30: Master.cs:29606-29620, 29630-29634, 29849-29870
+//   - CheckGatewayAuthentication: gate :39, :123, :228, :306, :394, API :40-46, :112-117, :147-152, :183-188
+//   - CheckAuthorize: gate :40, :124, :229, :307, :395 (hệ thống đích chưa có hệ phân quyền)
+//   - Ghi RequestLog/ReturnLog: Master.cs:29593-29600, 29691-29698, 29830-29837, 29925-29932, 30072-30079, 30170-30177
+//   - Sys_User_CheckAuthorize / Sys_Access_CheckDenyV30: Master.cs:29606-29620, 29630-29634, 29849-29870, 30091-30112
 // ============================================================================================
 
 /// <summary>Port 1:1 <c>Mst_DepartmentSearch</c> — tham số lọc + phân trang của màn (Mst_DepartmentController.cs:30, 57-61).</summary>
@@ -116,6 +138,21 @@ public class MstDepartmentCreateReq
     public string? MST { get; set; }
     public string? DepartmentName { get; set; }
     public string? DepartmentDesc { get; set; }
+}
+
+/// <summary>
+/// Body của Update: { DepartmentCode, DepartmentCodeParent, OrgID, MST, DepartmentName, DepartmentDesc, FlagActive }
+/// Nguồn gate Mst_DepartmentController.cs:374-443 (#126).
+/// </summary>
+public class MstDepartmentUpdateReq
+{
+    public string? DepartmentCode { get; set; }
+    public string? DepartmentCodeParent { get; set; }
+    public string? OrgID { get; set; }
+    public string? MST { get; set; }
+    public string? DepartmentName { get; set; }
+    public string? DepartmentDesc { get; set; }
+    public string? FlagActive { get; set; }
 }
 
 [ApiController]
@@ -402,6 +439,149 @@ public class Mst_DepartmentControllerPort : ControllerBase
         return null;
     }
 
+    // ============================================================================================
+    // Update — nguồn Mst_DepartmentController.cs:374-443 (#126).
+    // Gate: body rỗng -> throw Exception("strJson null") -> lỗi mặc định Mst_Department_Update.
+    // Ft_Cols_Upd CỐ ĐỊNH từ gate (:404-410): DepartmentCodeParent, DepartmentName, DepartmentDesc, FlagActive (MST bị comment).
+    // Nghiệp vụ Mst_Department_UpdateX (Master.cs:30727-30864):
+    // 1. StdParam: DepartmentCode, DepartmentCodeParent, OrgID, MST; StdStr: DepartmentName, DepartmentDesc; FlagActive: StdFlag (thiếu -> '0').
+    //    Cờ cập nhật: bUpd_MST (false do MST bị comment ở gate), bUpd_DepartmentName, bUpd_DepartmentDesc, bUpd_FlagActive.
+    //    ĐẶC BIỆT: KHÔNG có cờ hay lệnh gán cho DepartmentCodeParent -> phòng ban cha KHÔNG BAO GIỜ đổi dù gate có gửi.
+    // 2. Kiểm tra ĐÚNG THỨ TỰ:
+    //    (a) Mst_Department_CheckDB(ma, "1") -> Mst_Department_CheckDB_DepartmentNotFound.
+    //        (Mst_NNT check :30801-30810 bị comment ở nguồn nên không chạy).
+    //    (b) Tên rỗng sau StdStr -> Mst_Department_UpdateX_InvalidDepartmentName.
+    //    (c) CHỈ KHI tên mới KHÁC tên DB (so sánh chính xác string.Equals(..., StringComparison.Ordinal)):
+    //        -> Mst_Department_CheckDepartmentName(OrgID CỦA DÒNG DB, tên, "0") (LIKE không phân biệt hoa thường, %/_ là wildcard)
+    //        -> trùng tên trong cùng OrgID -> Mst_Department_CheckDB_DepartmentNameExist.
+    //        HỆ QUẢ: đổi tên chỉ khác chữ hoa/thường (vd KD "Kinh doanh 2" -> "KINH DOANH 2") sẽ vấp phải chính nó -> lỗi.
+    // 3. Lưu DB (:30848-30861): DepartmentName, DepartmentDesc, FlagActive, LogLUDTimeUTC = now, LogLUBy = "port".
+    //    KHÔNG gọi UpdBU. Mã, cha, OrgID, MST, BUCode, BUPattern, Level KHÔNG đổi.
+    // 1 transaction duy nhất, lỗi -> rollback + PortResult.Fail. Thành công Data = null (:428-429).
+    // ============================================================================================
+    [HttpPost("update")]
+    public async Task<IActionResult> Update([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] MstDepartmentUpdateReq? req)
+    {
+        // 0. Body rỗng / null: gate :388-391 ném Exception("strJson null") -> mã mặc định Mst_Department_Update.
+        if (req == null)
+        {
+            return PortResult.Fail("Mst_Department_Update", "Check.strJson", null);
+        }
+
+        // 1 transaction duy nhất cho Update (Master.cs:30069 _cf.db.BeginTransaction(), :30143 CommitSafety, :30151 RollbackSafety)
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            var err = await UpdateXAsync(req);
+            if (err != null)
+            {
+                await tx.RollbackAsync();
+                return err;
+            }
+
+            await tx.CommitAsync();
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return PortResult.Fail("Mst_Department_Update", "Exception", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Nghiệp vụ cập nhật phòng ban — port 1:1 từ Mst_Department_UpdateX (Master.cs:30727-30864).
+    /// </summary>
+    private async Task<IActionResult?> UpdateXAsync(MstDepartmentUpdateReq req)
+    {
+        // 1. Chuỗi Ft_Cols_Upd cố định từ gate Mst_DepartmentController.cs:404-410
+        // Gate: DepartmentCodeParent, DepartmentName, DepartmentDesc, FlagActive (MST bị comment)
+        var strFt_Cols_Upd = "Mst_Department.DepartmentCodeParent,Mst_Department.DepartmentName,Mst_Department.DepartmentDesc,Mst_Department.FlagActive,";
+        strFt_Cols_Upd = StdParam(strFt_Cols_Upd) ?? "";
+
+        // So khớp các cột được phép cập nhật: Master.cs:30780-30784
+        bool bUpd_MST = strFt_Cols_Upd.Contains("Mst_Department.MST".ToUpperInvariant());
+        bool bUpd_DepartmentName = strFt_Cols_Upd.Contains("Mst_Department.DepartmentName".ToUpperInvariant());
+        bool bUpd_DepartmentDesc = strFt_Cols_Upd.Contains("Mst_Department.DepartmentDesc".ToUpperInvariant());
+        bool bUpd_FlagActive = strFt_Cols_Upd.Contains("Mst_Department.FlagActive".ToUpperInvariant());
+
+        // 2. Chuẩn hoá tham số input (Master.cs:30772-30778)
+        var strDepartmentCode = StdParam(req.DepartmentCode);
+        var strDepartmentCodeParent = StdParam(req.DepartmentCodeParent);
+        var strOrgID = StdParam(req.OrgID);
+        var strMST = StdParam(req.MST);
+        var strDepartmentName = StdStr(req.DepartmentName);
+        var strDepartmentDesc = StdStr(req.DepartmentDesc);
+        var strFlagActive = StdFlag(req.FlagActive);
+
+        // 3. Kiểm tra ĐÚNG THỨ TỰ (Master.cs:30786-30839):
+        // 3.a. Mst_Department_CheckDB(ma, "1") (Master.cs:30790-30799, :29275-29338)
+        if (string.IsNullOrEmpty(strDepartmentCode))
+        {
+            return PortResult.Fail("Mst_Department_CheckDB_DepartmentNotFound", "Check.DepartmentCode", strDepartmentCode);
+        }
+
+        var dep = await _db.Set<Mst_Department>().FirstOrDefaultAsync(x =>
+            EF.Functions.Like((x.DepartmentCode ?? "").ToLower(), PortQuery.Equal(strDepartmentCode), PortQuery.Esc));
+
+        if (dep == null)
+        {
+            return PortResult.Fail("Mst_Department_CheckDB_DepartmentNotFound", "Check.DepartmentCode", strDepartmentCode);
+        }
+
+        var strDepartmentName_DB = StdStr(dep.DepartmentName);
+        var strOrgID_DB = StdParam(dep.OrgID);
+
+        // (Mst_NNT check :30801-30810 bị comment trong nguồn)
+
+        // 3.b. Tên phòng ban rỗng (Master.cs:30813-30823) -> Mst_Department_UpdateX_InvalidDepartmentName
+        if (bUpd_DepartmentName && string.IsNullOrEmpty(strDepartmentName))
+        {
+            return PortResult.Fail("Mst_Department_UpdateX_InvalidDepartmentName", "Check.strDepartmentName", strDepartmentName);
+        }
+
+        // 3.c. Kiểm tra trùng tên: CHỈ KHI tên mới KHÁC tên DB (so sánh chính xác, phân biệt hoa thường)
+        // Master.cs:30825-30838 (!CmUtils.StringUtils.StringEqual(strDepartmentName, strDepartmentName_DB))
+        // So sánh phân biệt hoa thường bằng StringComparison.Ordinal.
+        // Mst_Department_CheckDepartmentName(OrgID CỦA DÒNG DB, tên, "0")
+        // LIKE không phân biệt hoa thường, %/_ là wildcard.
+        // HỆ QUẢ: đổi tên chỉ khác chữ hoa/thường (vd KD "Kinh doanh 2" -> "KINH DOANH 2") sẽ vấp phải chính nó -> báo lỗi tồn tại.
+        if (bUpd_DepartmentName)
+        {
+            if (!string.Equals(strDepartmentName, strDepartmentName_DB, StringComparison.Ordinal))
+            {
+                var namePattern = (strDepartmentName ?? "").ToLowerInvariant().Replace("\\", "\\\\");
+                var orgPattern = PortQuery.Equal(strOrgID_DB ?? "");
+
+                var nameExist = await _db.Set<Mst_Department>().AsNoTracking()
+                    .FirstOrDefaultAsync(x =>
+                        EF.Functions.Like((x.OrgID ?? "").ToLower(), orgPattern, PortQuery.Esc) &&
+                        EF.Functions.Like((x.DepartmentName ?? "").ToLower(), namePattern, PortQuery.Esc));
+
+                if (nameExist != null)
+                {
+                    return PortResult.Fail("Mst_Department_CheckDB_DepartmentNameExist",
+                        "Check.OrgID", strOrgID_DB,
+                        "Check.DepartmentName", strDepartmentName);
+                }
+            }
+        }
+
+        // 4. Lưu DB Mst_Department (Master.cs:30843-30861)
+        // LƯU Ý: KHÔNG có cờ cập nhật DepartmentCodeParent -> cha KHÔNG BAO GIỜ đổi dù gate có gửi DepartmentCodeParent.
+        // KHÔNG gọi UpdBU. Mã, cha, OrgID, MST, BUCode, BUPattern, Level giữ nguyên.
+        if (bUpd_MST) dep.MST = strMST;
+        if (bUpd_DepartmentName) dep.DepartmentName = strDepartmentName;
+        if (bUpd_DepartmentDesc) dep.DepartmentDesc = strDepartmentDesc;
+        if (bUpd_FlagActive) dep.FlagActive = strFlagActive;
+        dep.LogLUDTimeUTC = DateTime.UtcNow;
+        dep.LogLUBy = "port"; // GAP: nguồn lấy từ strWAUserCode
+
+        await _db.SaveChangesAsync();
+
+        return null; // Thành công
+    }
+
     /// <summary>
     /// Cập nhật cấu trúc BUCode, BUPattern, Level cho toàn bảng Mst_Department sau khi ghi.
     /// Nguồn: Master.cs:29413-29448 (Mst_Department_UpdBU).
@@ -481,6 +661,8 @@ public class Mst_DepartmentControllerPort : ControllerBase
         var t = s.Trim().Normalize();
         return t.Length == 0 ? null : t;
     }
+
+    private static string StdFlag(string? s) => s?.Trim() == "1" ? "1" : "0";
 
     /// <summary>
     /// Lọc + đếm + chia trang theo DepartmentCode asc — dùng cho Search, GetAllActive, GetByDepartmentCode.
