@@ -14,19 +14,24 @@ namespace MiniLoyalty.Controllers.Port
 {
 
 // ============================================================================================
-// PORT 1:1 — port 1:1 Mst_PositionController.cs — Mst_Position (#197, #198, #199, #200).
+// PORT 1:1 — port 1:1 Mst_PositionController.cs — Mst_Position (#197, #198, #199, #200, #201).
 //
 // Nguồn controller (tầng gate):
 //   - Mst_PositionController.cs:26-106   Search -> WA_Mst_Position_Get (#197)
 //   - Mst_PositionController.cs:108-171  GetByPositionCode -> WA_Mst_Position_Get (#198)
 //   - Mst_PositionController.cs:173-234  GetAllActive -> WA_Mst_Position_Get (#199)
 //   - Mst_PositionController.cs:238-321  Create -> WA_Mst_Position_Create (#200)
+//   - Mst_PositionController.cs:325-391  Update -> WA_Mst_Position_Update (#201)
 //   - Mst_PositionController.cs:624-652  strWhereClause_Mst_Position (mệnh đề lọc Search & GetAllActive)
 //   - Mst_PositionController.cs:654-673  strWhereClause_Mst_Position_By_PositionCode (mệnh đề lọc GetByPositionCode)
 // Nguồn API:
 //   - MstPositionController.cs:17-88     WA_Mst_Position_Get -> _biz.WAS_Mst_Position_Get
 //   - MstPositionController.cs:91-162    WA_Mst_Position_Create -> _biz.WAS_Mst_Position_Create
+//   - MstPositionController.cs:165-236   WA_Mst_Position_Update -> _biz.WAS_Mst_Position_Update
 // Nguồn biz:
+//   - MasterData.cs:24069-24149          WAS_Mst_Position_Update -> Mst_Position_Update
+//   - MasterData.cs:23933-24067          Mst_Position_Update -> Mst_Position_UpdateX
+//   - MasterData.cs:23798-23931          Mst_Position_UpdateX (Mst_Position_CheckDB, Mst_Org_CheckDB, InvalidPositionName, Mst_Position_CheckPositionName, SaveDB)
 //   - MasterData.cs:23719-23796          WAS_Mst_Position_Create -> Mst_Position_Create
 //   - MasterData.cs:23592-23717          Mst_Position_Create -> Mst_Position_CreateX
 //   - MasterData.cs:23452-23590          Mst_Position_CreateX (Kiểm tra OrgID, sinh SEQ PositionCode, CheckDB, Mst_Org_CheckDB, CheckPositionName, SaveDB)
@@ -109,6 +114,20 @@ public class MstPositionCreateReq
     public string? PositionCode { get; set; }
     public string? PositionName { get; set; }
     public string? PositionDesc { get; set; }
+    public string? Remark { get; set; }
+}
+
+/// <summary>
+/// Port 1:1 tham số đầu vào của Update (Mst_PositionController.cs:325-391).
+/// Gate nhận strJson bọc trong TModels.Mst_Position.
+/// </summary>
+public class MstPositionUpdateReq
+{
+    public string? OrgID { get; set; }
+    public string? PositionCode { get; set; }
+    public string? PositionName { get; set; }
+    public string? PositionDesc { get; set; }
+    public string? FlagActive { get; set; }
     public string? Remark { get; set; }
 }
 
@@ -362,6 +381,153 @@ public class Mst_PositionControllerPort : ControllerBase
     }
 
     /// <summary>
+    /// Port 1:1 action Update từ gate Mst_PositionController.cs:325-391 (#201).
+    /// Chuỗi gọi: gate Mst_PositionController.Update -> WA_Mst_Position_Update -> WAS_Mst_Position_Update -> Mst_Position_Update -> Mst_Position_UpdateX (MasterData.cs:23798-23931).
+    ///
+    /// Quy trình nghiệp vụ:
+    ///   0. Body rỗng / null: gate :340 ném ServiceException("strJson null") -> mã mặc định Mst_Position_Update (400).
+    ///   1. Chuỗi Ft_Cols_Upd cứng từ Gate: "Mst_Position.PositionName,Mst_Position.PositionDesc,Mst_Position.FlagActive," (:356-359).
+    ///      Biz MasterData.cs:23838-23851:
+    ///      strFt_Cols_Upd = StdParam(objFt_Cols_Upd) ?? "";
+    ///      bUpd_PositionName = strFt_Cols_Upd.Contains("Mst_Position.PositionName".ToUpperInvariant());
+    ///      bUpd_PositionDesc = strFt_Cols_Upd.Contains("Mst_Position.PositionDesc".ToUpperInvariant());
+    ///      bUpd_FlagActive = strFt_Cols_Upd.Contains("Mst_Position.FlagActive".ToUpperInvariant());
+    ///      bUpd_Remark = strFt_Cols_Upd.Contains("Mst_Position.Remark".ToUpperInvariant());
+    ///   2. Mở transaction: _cf.db.BeginTransaction() (:23976).
+    ///   3. Chuẩn hoá dữ liệu (MasterData.cs:23841-23846):
+    ///      - strOrgID = StdParam(req.OrgID) (Trim + ToUpper, rỗng -> null)
+    ///      - strPositionCode = StdParam(req.PositionCode)
+    ///      - strPositionName = StdStr(req.PositionName) (Trim + Normalize, rỗng -> null)
+    ///      - strPositionDesc = StdStr(req.PositionDesc)
+    ///      - strFlagActive = StdFlag(req.FlagActive) ("1" -> "1", khác -> "0")
+    ///      - strRemark = StdStr(req.Remark)
+    ///   4. Kiểm tra DB theo đúng thứ tự (MasterData.cs:23859-23905):
+    ///      (a) Mst_Position_CheckDB(OrgID, PositionCode, "1", "") (:23859-23867, :22920-22970):
+    ///          Kiểm tra PositionCode tồn tại trong OrgID. Lấy thực thể được tracking ra.
+    ///          Nếu không tồn tại -> Mst_Position_CheckDB_PositionCodeNotFound (nguồn: MasterData.cs:22948, Error.HRM.cs:167; đề bài ghi Mst_Position_CheckDB_PositionNotFound -> xung đột đã ghi nhận).
+    ///          Lấy strPositionName_DB = StdStr(position.PositionName) (:23867).
+    ///      (b) Mst_Org_CheckDB(OrgID, "1", "1") (:23870-23876, MasterData.Org.cs:29-93):
+    ///          OrgID phải tồn tại trong Mst_Org và FlagActive thuộc "1"
+    ///          -> nếu không thấy ném Mst_Org_CheckDB_OrgNotFound (:61);
+    ///          -> nếu FlagActive không thuộc "1" ném Mst_Org_CheckDB_FlagActiveNotMatched (:88).
+    ///      (c) strPositionName rỗng -> ErridnLoyalty.Mst_Position_UpdateX_InvalidPositionName (:23878-23888).
+    ///      (d) bUpd_PositionName và đổi tên (!string.Equals(strPositionName, strPositionName_DB, StringComparison.Ordinal)):
+    ///          Mst_Position_CheckPositionName(OrgID, PositionName, "0", "") (:23890-23903, :22984-23054):
+    ///          Nếu trùng tên trong cùng OrgID -> ném ErridnLoyalty.Mst_Position_CheckDB_PositionNameExist (:23032).
+    ///   5. Cập nhật các cột có cờ trong Ft_Cols_Upd (MasterData.cs:23910-23928):
+    ///      - if (bUpd_PositionName) position.PositionName = strPositionName;
+    ///      - if (bUpd_PositionDesc) position.PositionDesc = strPositionDesc;
+    ///      - if (bUpd_FlagActive) position.FlagActive = strFlagActive;
+    ///      - if (bUpd_Remark) position.Remark = strRemark;
+    ///      - position.LogLUDTimeUTC = DateTime.UtcNow;
+    ///      - position.LogLUBy = "port";
+    ///   6. Commit transaction. Thành công trả Data = null (gate :377-378).
+    ///   7. Gặp ngoại lệ -> rollback và trả lỗi mặc định PortResult.Fail("Mst_Position_Update", "Exception", ex.Message).
+    /// </summary>
+    [HttpPost("update")]
+    public async Task<IActionResult> Update(
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] MstPositionUpdateReq? req)
+    {
+        // 0. Body rỗng / null: gate Mst_PositionController.cs:340 ném ServiceException("strJson null") -> lỗi mặc định Mst_Position_Update
+        if (req == null)
+        {
+            return PortResult.Fail("Mst_Position_Update", "Check.strJson", null);
+        }
+
+        // 1. Chuỗi Ft_Cols_Upd cứng từ Gate: "Mst_Position.PositionName,Mst_Position.PositionDesc,Mst_Position.FlagActive," (gate :356-359)
+        var strFt_Cols_Upd = StdParam("Mst_Position.PositionName,Mst_Position.PositionDesc,Mst_Position.FlagActive,") ?? "";
+        var bUpd_PositionName = strFt_Cols_Upd.Contains("Mst_Position.PositionName".ToUpperInvariant());
+        var bUpd_PositionDesc = strFt_Cols_Upd.Contains("Mst_Position.PositionDesc".ToUpperInvariant());
+        var bUpd_FlagActive = strFt_Cols_Upd.Contains("Mst_Position.FlagActive".ToUpperInvariant());
+        var bUpd_Remark = strFt_Cols_Upd.Contains("Mst_Position.Remark".ToUpperInvariant());
+
+        // 2. Mở transaction chính cho nghiệp vụ cập nhật (MasterData.cs:23976 _cf.db.BeginTransaction())
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // 3. Chuẩn hoá đầu vào (MasterData.cs:23841-23846)
+            var strOrgID = StdParam(req.OrgID);
+            var strPositionCode = StdParam(req.PositionCode);
+            var strPositionName = StdStr(req.PositionName);
+            var strPositionDesc = StdStr(req.PositionDesc);
+            var strFlagActive = StdFlag(req.FlagActive);
+            var strRemark = StdStr(req.Remark);
+
+            // 4. Kiểm tra DB theo đúng thứ tự nguồn:
+            // (a) Mst_Position_CheckDB(OrgID, PositionCode, "1", "") (:23859-23867, :22920-22970)
+            //     Kiểm tra PositionCode tồn tại trong OrgID. Lấy thực thể được tracking ra.
+            var position = await _db.Set<Mst_Position>()
+                .FirstOrDefaultAsync(x => EF.Functions.Like((x.OrgID ?? "").ToLower(), PortQuery.Equal(strOrgID ?? ""), PortQuery.Esc)
+                                       && EF.Functions.Like((x.PositionCode ?? "").ToLower(), PortQuery.Equal(strPositionCode ?? ""), PortQuery.Esc));
+            if (position == null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_Position_CheckDB_PositionCodeNotFound", "Check.OrgID", strOrgID, "Check.PositionCode", strPositionCode);
+            }
+
+            var strPositionName_DB = StdStr(position.PositionName);
+
+            // (b) Mst_Org_CheckDB(OrgID, "1", "1") (:23870-23876, MasterData.Org.cs:29-93)
+            //     OrgID phải tồn tại trong Mst_Org và FlagActive thuộc "1"
+            var org = await _db.Set<Mst_Org>().AsNoTracking()
+                .FirstOrDefaultAsync(x => EF.Functions.Like((x.OrgID ?? "").ToLower(), PortQuery.Equal(strOrgID ?? ""), PortQuery.Esc));
+            if (org == null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_Org_CheckDB_OrgNotFound", "Check.OrgID", strOrgID);
+            }
+            if (!"1".Contains(org.FlagActive ?? ""))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_Org_CheckDB_FlagActiveNotMatched", "Check.OrgID", strOrgID,
+                    "Check.strFlagActiveListToCheck", "1", "DB.FlagActive", org.FlagActive);
+            }
+
+            // (c) Kiểm tra chuỗi rỗng PositionName (MasterData.cs:23878-23888)
+            if (string.IsNullOrEmpty(strPositionName))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_Position_UpdateX_InvalidPositionName", "Check.strPositionName", strPositionName);
+            }
+
+            // (d) Mst_Position_CheckPositionName(OrgID, PositionName, "0", "") (:23890-23903, :22984-23054)
+            //     Nếu đổi tên: PositionName trong OrgID phải CHƯA tồn tại
+            if (bUpd_PositionName && !string.Equals(strPositionName, strPositionName_DB, StringComparison.Ordinal))
+            {
+                var existPositionName = await _db.Set<Mst_Position>().AsNoTracking()
+                    .AnyAsync(x => EF.Functions.Like((x.OrgID ?? "").ToLower(), PortQuery.Equal(strOrgID ?? ""), PortQuery.Esc)
+                                && EF.Functions.Like((x.PositionName ?? "").ToLower(), PortQuery.Equal(strPositionName ?? ""), PortQuery.Esc));
+                if (existPositionName)
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Mst_Position_CheckDB_PositionNameExist", "Check.OrgID", strOrgID, "Check.PositionName", strPositionName);
+                }
+            }
+
+            // 5. Cập nhật các cột có cờ trong Ft_Cols_Upd (MasterData.cs:23910-23928)
+            if (bUpd_PositionName) position.PositionName = strPositionName;
+            if (bUpd_PositionDesc) position.PositionDesc = strPositionDesc;
+            if (bUpd_FlagActive) position.FlagActive = strFlagActive;
+            if (bUpd_Remark) position.Remark = strRemark;
+            position.LogLUDTimeUTC = DateTime.UtcNow;
+            position.LogLUBy = "port";
+
+            await _db.SaveChangesAsync();
+
+            // 6. Commit transaction
+            await tx.CommitAsync();
+
+            // Thành công trả Data = null (gate Mst_PositionController.cs:377-378)
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return PortResult.Fail("Mst_Position_Update", "Exception", ex.Message);
+        }
+    }
+
+    /// <summary>
     /// Truy vấn 2 bước tương ứng Mst_Position_GetX (MasterData.cs:23056-23224):
     /// 1. Draft query (#tbl_Mst_Position_Filter_Draft, :23115-23131):
     ///    Lọc KeyWord (PositionName like '%kw%'), OrgID (=), FlagActive (in (...)), PositionCode (=),
@@ -471,6 +637,7 @@ public class Mst_PositionControllerPort : ControllerBase
 
     private static string? StdParam(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim().ToUpperInvariant();
     private static string? StdStr(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim().Normalize();
+    private static string StdFlag(string? s) => s == "1" ? "1" : "0";
 }
 }
 
