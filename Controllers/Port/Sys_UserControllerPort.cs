@@ -139,10 +139,65 @@ public class Sys_UserGetByMSTItemRes
 }
 
 /// <summary>
-/// Controller Port 1:1 cho Sys_UserController — hạng mục #323 (Search), #324 (GetByUserCode), #325 (GetByMST).
-/// Nguồn Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Sys_UserController.cs
-/// Nguồn API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\SysUserController.cs
-/// Nguồn Biz LIVE: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\System.cs:7987-8363 (Sys_User_Get_New20191104)
+/// DTO request cho action GetForCurrentUser (Gate Sys_UserController.cs:390).
+/// </summary>
+public class Sys_UserGetForCurrentUserReq
+{
+    public string? UserCode { get; set; }
+}
+
+/// <summary>
+/// DTO response cho action GetForCurrentUser (Gate Sys_UserController.cs:442-483).
+/// Gồm 39 trường tương ứng gate.
+/// </summary>
+public class Sys_UserGetForCurrentUserRes
+{
+    public string? UserCode { get; set; }
+    public string? NetworkID { get; set; }
+    public string? UserName { get; set; }
+    public string? UserPassword { get; set; }
+    public string? UserPasswordNew { get; set; }
+    public string? PhoneNo { get; set; }
+    public string? EMail { get; set; }
+    public string? MST { get; set; }
+    public string? OrganCode { get; set; }
+    public string? DepartmentCode { get; set; }
+    public string? Position { get; set; }
+    public string? VerificationCode { get; set; }
+    public string? Avatar { get; set; }
+    public string? UUID { get; set; }
+    public string? FlagDLAdmin { get; set; }
+    public string? FlagSysAdmin { get; set; }
+    public string? FlagNNTAdmin { get; set; }
+    public string? OrgID { get; set; }
+    public string? CustomerCodeSys { get; set; }
+    public string? CustomerCode { get; set; }
+    public string? CustomerName { get; set; }
+    public string? FlagActive { get; set; }
+    public string? ACId { get; set; }
+    public string? ACAvatar { get; set; }
+    public string? ACEmail { get; set; }
+    public string? ACLanguage { get; set; }
+    public string? ACName { get; set; }
+    public string? ACPhone { get; set; }
+    public string? ACTimeZone { get; set; }
+    public string? mo_OrganCode { get; set; }
+    public string? mo_OrganName { get; set; }
+    public string? mdept_DepartmentCode { get; set; }
+    public string? mdept_DepartmentName { get; set; }
+    public string? mnnt_DealerType { get; set; }
+    public string? ctitctg_CustomerGrpCode { get; set; }
+    public string? ACAvatarUrl { get; set; }
+    public string? mdcpo_DLCPCode { get; set; }
+    public string? mdcp_DLCPName { get; set; }
+    public string? mdcp_FlagRoot { get; set; }
+}
+
+/// <summary>
+/// Controller Port 1:1 cho Sys_UserController — hạng mục #323 (Search), #324 (GetByUserCode), #325 (GetByMST), #327 (GetForCurrentUser).
+/// Nguồn Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Sys_UserController.cs:390-496
+/// Nguồn API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\SysUserController.cs:273-344
+/// Nguồn Biz LIVE: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\System.cs:6151-6249, 5886-6080 (Sys_User_GetForCurrentUser)
 /// Route: api/sys_user
 /// </summary>
 [ApiController]
@@ -595,6 +650,40 @@ public class Sys_UserControllerPort : ControllerBase
             Success = true,
             Data = dataList
         });
+    }
+
+    /// <summary>
+    /// Port 1:1 Sys_UserController.GetForCurrentUser (#327, gate :390-490) -> WA_Sys_User_GetForCurrentUser -> Sys_User_GetForCurrentUser (System.cs:5726-5860).
+    /// Biz CHỈ chọn 6 cột của Sys_User: UserCode, UserName, MST, FlagDLAdmin, FlagSysAdmin, FlagActive (:5774-5783) — mọi cột khác trong phép chiếu của gate là null.
+    /// UserCode rỗng -> không truy vấn, Data = null; không tìm thấy -> Data = null. (Các bảng quyền Sys_Access/Sys_Object do biz trả thêm không được gate dùng; Sys_Access_CheckDeny loại Đ.)
+    /// </summary>
+    [HttpPost("getforcurrentuser")]
+    public async Task<IActionResult> GetForCurrentUser([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Sys_UserGetForCurrentUserReq? req)
+    {
+        var userCode = req?.UserCode;
+        if (string.IsNullOrEmpty(userCode))
+        {
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+
+        var uCode = PortQuery.Equal(userCode);
+        var user = await _db.Set<Sys_User>().AsNoTracking()
+            .FirstOrDefaultAsync(x => EF.Functions.Like((x.UserCode ?? "").ToLower(), uCode, PortQuery.Esc));
+        if (user == null)
+        {
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+
+        var res = new Sys_UserGetForCurrentUserRes
+        {
+            UserCode = user.UserCode,
+            UserName = user.UserName,
+            MST = user.MST,
+            FlagDLAdmin = user.FlagDLAdmin,
+            FlagSysAdmin = user.FlagSysAdmin,
+            FlagActive = user.FlagActive
+        };
+        return Ok(new { Success = true, Data = res });
     }
 
     /// <summary>
