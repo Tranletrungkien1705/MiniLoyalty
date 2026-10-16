@@ -36,7 +36,7 @@ public class InvF_TempPrintControllerPort : ControllerBase
         {
             objInvF_TempPrint = await _db.Set<InvF_TempPrint>()
                 .Where(x => x.TempPrintType != null && EF.Functions.Like(x.TempPrintType.ToLower(), PortQuery.Equal(tempPrintType), PortQuery.Esc))
-                .OrderBy(x => x.IF_TempPrintNo)
+                .OrderByDescending(x => x.IF_TempPrintNo)   // biz MasterData.cs:45366: order by ifmo.IF_TempPrintNo desc
                 .FirstOrDefaultAsync();
         }
 
@@ -46,6 +46,30 @@ public class InvF_TempPrintControllerPort : ControllerBase
             Data = new
             {
                 InvF_TempPrint = objInvF_TempPrint
+            }
+        });
+    }
+
+    [HttpPost("getallactive")]
+    public async Task<IActionResult> GetAllActive()
+    {
+        List<InvF_TempPrint>? listInvF_TempPrint = null;
+
+        listInvF_TempPrint = await _db.Set<InvF_TempPrint>()
+            .OrderByDescending(x => x.IF_TempPrintNo)   // biz MasterData.cs:45366: order by ifmo.IF_TempPrintNo desc
+            .ToListAsync();
+
+        if (listInvF_TempPrint != null && listInvF_TempPrint.Count == 0)
+        {
+            listInvF_TempPrint = null;
+        }
+
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Lst_InvF_TempPrint = listInvF_TempPrint
             }
         });
     }
