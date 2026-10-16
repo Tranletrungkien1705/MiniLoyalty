@@ -53,6 +53,17 @@ public class Mst_ReligionCategoryControllerPort : ControllerBase
         return Ok(new { Success = true, Data = new PageInfo<object>(rows, itemCount, pageCount, pageIndex, pageSize) });
     }
 
+    [HttpPost("getallactive")]
+    public async Task<IActionResult> GetAllActive()
+    {
+        // Gate gọi cứng FlagActive="1" (Mst_ReligionCategoryController.cs:128-130).
+        // RecordStart, RecordCount truyền xuống get data (Mst_ReligionCategoryController.cs:142-143).
+        var (_, rows) = await GetXAsync(null, "1", 0, 123456000);
+
+        // Data = lst_Mst_ReligionCategory (DANH SÁCH TRẦN, trả về null nếu rỗng) (Mst_ReligionCategoryController.cs:149-154).
+        return Ok(new { Success = true, Data = rows.Count > 0 ? rows : null });
+    }
+
     private async Task<(int itemCount, List<object> rows)> GetXAsync(string? keyWord, string? flagActive, long recordStart, long recordCount)
     {
         var q = _db.Set<Mst_ReligionCategory>().AsNoTracking().AsQueryable();
