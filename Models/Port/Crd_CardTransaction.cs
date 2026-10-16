@@ -56,7 +56,7 @@ public class Crd_CardTransactionSeeder : IPortSeeder
                 PhoneNo = "0901234567",
                 CarNo = "30A-99999",
                 IDCardNo = "001234567890",
-                DLCodeRegis = "DL01",
+                DLCodeRegis = "VS058",
                 CustomerCode = "KH001",
                 CardTypeUse = "N",
                 CardTypeInit = "N",

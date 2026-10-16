@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using MiniLoyalty.Data;
 using MiniLoyalty.Models;
 using MiniLoyalty.Models.Port;
@@ -198,10 +199,12 @@ public record CrdCardMemberPair(CrdMember Member, CrdCard Card);
 public class Crd_CardControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly IConfiguration? _config;
 
-    public Crd_CardControllerPort(AppDbContext db)
+    public Crd_CardControllerPort(AppDbContext db, IConfiguration? config = null)
     {
         _db = db;
+        _config = config;
     }
 
     /// <summary>
@@ -851,4 +854,331 @@ public class Crd_CardControllerPort : ControllerBase
 
         return dataList;
     }
+
+    /// <summary>
+    /// Yêu cầu xét duyệt đặc cách thẻ — port 1:1 từ Crd_CardController.RequestException (#004).
+    /// Nguồn tầng Gate:
+    ///   Crd_CardController.cs:289-352   RequestException(strJson) -> Crd_CardService.WA_Crd_Card_RequestException
+    /// Nguồn tầng API:
+    ///   CrdCardController.cs:383-453    WA_Crd_Card_RequestException -> _biz.WAS_Crd_Card_RequestException
+    /// Nguồn tầng Biz:
+    ///   Card.cs:26670-26757             WAS_Crd_Card_RequestException
+    ///   Card.cs:26759-26896             Crd_Card_RequestException
+    ///   Card.cs:26898-27199             Crd_Card_RequestExceptionX
+    /// </summary>
+    [HttpPost("requestexception")]
+    public async Task<IActionResult> RequestException(
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] RQ_Crd_Card? req)
+    {
+        // 1. Kiểm tra strJson null hoặc rỗng ở tầng Gate (Crd_CardController.cs:298-305):
+        //    if (string.IsNullOrEmpty(strJson)) throw new ServiceException("strJson null") -> 400 ErridnLoyalty.Crd_Card_RequestException (Check.strJson).
+        if (req == null || req.Crd_Card == null)
+        {
+            return PortResult.Fail("Crd_Card_RequestException", "Check.strJson", null);
+        }
+
+        // 2. Chuẩn hóa tham số đầu vào Crd_Card theo Biz Crd_Card_RequestExceptionX (Card.cs:26944-26947):
+        var strCardNo = StdParam(req.Crd_Card.CardNo);
+        var strCardTypeUse = StdParam(req.Crd_Card.CardTypeUse);
+        var strDLCodeExceptionally = StdParam(req.Crd_Card.DLCodeExceptionally);
+        var strRemark = StdStr(req.Crd_Card.Remark);
+
+        // 3. Kiểm tra Crd_Card_CheckDB (Card.cs:26961-26967, Card.cs:21229-21344):
+        //    - strFlagExistToCheck = Yes ("1"): không tìm thấy thẻ -> Crd_Card_CheckDB_CardNotFound (:21261)
+        if (string.IsNullOrWhiteSpace(strCardNo))
+        {
+            return PortResult.Fail("Crd_Card_CheckDB_CardNotFound", "Check.CardNo", strCardNo);
+        }
+
+        var cardPat = PortQuery.Equal(strCardNo);
+        var card = await _db.CrdCards.AsNoTracking()
+            .FirstOrDefaultAsync(c => EF.Functions.Like((c.CardNo ?? "").ToLower(), cardPat, PortQuery.Esc));
+        if (card == null)
+        {
+            return PortResult.Fail("Crd_Card_CheckDB_CardNotFound", "Check.CardNo", strCardNo);
+        }
+
+        //    - strCardStatusListToCheck = Approve ("APPROVE"): khác APPROVE -> Crd_Card_CheckDB_CardStatusNotMatched (:21297)
+        if (!string.Equals(card.CardStatus, "APPROVE", StringComparison.OrdinalIgnoreCase))
+        {
+            return PortResult.Fail("Crd_Card_CheckDB_CardStatusNotMatched",
+                "Check.CardNo", strCardNo,
+                "Check.strCardStatusListToCheck", "APPROVE",
+                "DB.CardStatus", card.CardStatus);
+        }
+
+        //    - Kiểm tra hiệu lực thẻ khi APPROVE (Card.cs:21310-21343):
+        var dtimeSys = DateTime.UtcNow;
+        var todayStr = dtimeSys.ToString("yyyy-MM-dd");
+        if (card.EffDateStart.HasValue && card.EffDateStart.Value.ToString("yyyy-MM-dd").CompareTo(todayStr) > 0)
+        {
+            return PortResult.Fail("Crd_Card_CheckDB_InvalidEffDateStartAfterSysDate",
+                "Check.EffDateStart", card.EffDateStart.Value.ToString("yyyy-MM-dd"),
+                "Check.SysDate", todayStr);
+        }
+        if (card.EffDateEnd.HasValue && card.EffDateEnd.Value.ToString("yyyy-MM-dd").CompareTo(todayStr) < 0)
+        {
+            return PortResult.Fail("Crd_Card_CheckDB_InvalidEffDateEndBeforeSysDate",
+                "Check.EffDateEnd", card.EffDateEnd.Value.ToString("yyyy-MM-dd"),
+                "Check.SysDate", todayStr);
+        }
+
+        var strMemberNo = StdStr(card.MemberNo);
+        var strCardTypeUseDB = StdStr(card.CardTypeUse);
+        var strCardTypeInitDB = StdStr(card.CardTypeInit);
+
+        // 4. Kiểm tra Crd_Member_CheckDB (Card.cs:26972-26979, Card.cs:29-108):
+        //    - strFlagExistToCheck = Yes ("1"): không tìm thấy hội viên -> Crd_Member_CheckDB_MemberNotFound (:62)
+        if (string.IsNullOrWhiteSpace(strMemberNo))
+        {
+            return PortResult.Fail("Crd_Member_CheckDB_MemberNotFound", "Check.MemberNo", strMemberNo);
+        }
+
+        var memPat = PortQuery.Equal(strMemberNo);
+        var member = await _db.CrdMembers
+            .FirstOrDefaultAsync(m => EF.Functions.Like((m.MemberNo ?? "").ToLower(), memPat, PortQuery.Esc));
+        if (member == null)
+        {
+            return PortResult.Fail("Crd_Member_CheckDB_MemberNotFound", "Check.MemberNo", strMemberNo);
+        }
+
+        //    - strRegisStatusListToCheck = Finish ("FINISH"): khác FINISH -> Crd_Member_CheckDB_RegisStatusNotMatched (:89)
+        if (string.IsNullOrEmpty(member.RegisStatus) ||
+            !string.Equals(member.RegisStatus, "FINISH", StringComparison.OrdinalIgnoreCase))
+        {
+            return PortResult.Fail("Crd_Member_CheckDB_RegisStatusNotMatched",
+                "Check.MemberNo", strMemberNo,
+                "Check.strRegisStatusListToCheck", "FINISH",
+                "DB.RegisStatus", member.RegisStatus);
+        }
+
+        //    - strMemberStatusListToCheck = Approve ("APPROVE"): khác APPROVE -> Crd_Member_CheckDB_MemberStatusNotMatched (:104)
+        if (string.IsNullOrEmpty(member.MemberStatus) ||
+            !string.Equals(member.MemberStatus, "APPROVE", StringComparison.OrdinalIgnoreCase))
+        {
+            return PortResult.Fail("Crd_Member_CheckDB_MemberStatusNotMatched",
+                "Check.MemberNo", strMemberNo,
+                "Check.strMemberStatusListToCheck", "APPROVE",
+                "DB.MemberStatus", member.MemberStatus);
+        }
+
+        // 5. Kiểm tra xem đã tồn tại thẻ đặc cách ở trạng thái PENDING chưa (Card.cs:26989-27015):
+        //    CardNoPrev = @strCardNo and CardStatus = 'PENDING' and FlagExceptionally = '1'
+        //    Nếu có -> ném lỗi Crd_Card_RequestException_ExistedCardNoException
+        var cardNoPat = PortQuery.Equal(strCardNo);
+        var existedPendingCard = await _db.CrdCards.AsNoTracking()
+            .FirstOrDefaultAsync(c => EF.Functions.Like((c.CardNoPrev ?? "").ToLower(), cardNoPat, PortQuery.Esc)
+                                   && c.CardStatus == "PENDING"
+                                   && c.FlagExceptionally == "1");
+        if (existedPendingCard != null)
+        {
+            return PortResult.Fail("Crd_Card_RequestException_ExistedCardNoException",
+                "Check.MemberNo", strMemberNo,
+                "Check.CardNo", strCardNo,
+                "Check.CardNo_Exception", existedPendingCard.CardNo);
+        }
+
+        // 6. Kiểm tra bảng Crd_CardDealerUseException (Card.cs:27048-27076):
+        //    - dsData không có bảng -> Crd_Card_RequestException_CardDealerUseExceptionTblNotFound (:27059)
+        //    - Bảng trống (Rows.Count < 1) -> Crd_Card_RequestException_CardDealerUseExceptionTblInvalid (:27072)
+        if (req.Lst_Crd_CardDealerUseException == null || req.Lst_Crd_CardDealerUseException.Count < 1)
+        {
+            return PortResult.Fail("Crd_Card_RequestException_CardDealerUseExceptionTblInvalid",
+                "Check.TableName", "Crd_CardDealerUseException");
+        }
+
+        var validDealers = req.Lst_Crd_CardDealerUseException
+            .Where(d => !string.IsNullOrWhiteSpace(d.DealerCode))
+            .ToList();
+        if (validDealers.Count < 1)
+        {
+            return PortResult.Fail("Crd_Card_RequestException_CardDealerUseExceptionTblInvalid",
+                "Check.TableName", "Crd_CardDealerUseException");
+        }
+
+        // 7. Sinh mã thẻ mới theo Crd_Card_AddX -> GenCardNo (Card.cs:27022-27044, Card.cs:21579-21583, Card.cs:27641-27744):
+        var existingCards = await _db.CrdCards.AsNoTracking()
+            .Where(c => c.MemberNo == strMemberNo)
+            .Select(c => c.CardNo)
+            .ToListAsync();
+
+        var (strCardNoNew, genErr) = GenCardNo(strMemberNo, member.DLCodeRegis, existingCards);
+        if (genErr != null)
+        {
+            return genErr;
+        }
+
+        // Kiểm tra mã thẻ mới đã tồn tại chưa (Card.cs:21597-21603):
+        if (await _db.CrdCards.AnyAsync(c => c.CardNo == strCardNoNew))
+        {
+            return PortResult.Fail("Crd_Card_CheckDB_CardExist", "Check.CardNo", strCardNoNew!);
+        }
+
+        var networkId = _config?["Biz_NetworkID"] ?? member.NetworkID ?? card.NetworkID ?? "1001";
+        var userCode = Request?.Headers["WAUserCode"].FirstOrDefault() ?? "port";
+
+        // 8. Thực hiện giao dịch an toàn (Transaction: Card.cs:26797, Commit: :26859, Rollback: :26867):
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // 8.1 Thêm thẻ mới CrdCard (Card.cs:27022-27044, Card.cs:21627-21675)
+            var newCard = new CrdCard
+            {
+                CardNo = strCardNoNew!,
+                NetworkID = networkId,
+                MemberNo = strMemberNo!,
+                CardSourceCode = "UP", // TConst.CardSourceCode.Up (:27034)
+                RankPolicyCode = null, // :27037 objRankPolicyCode = null
+                DLCodeExceptionally = strDLCodeExceptionally,
+                PointBonus = 0,
+                PointPurchaseAddCar = 0,
+                EffDateStart = null,
+                EffDateEnd = null,
+                PointTotal = 0,
+                PointBlock = 0,
+                PointAvail = 0,
+                AmountTotal = 0,
+                AmountBlock = 0,
+                AmountAvail = 0,
+                QtyVisitTotal = 0,
+                QtyVisitBlock = 0,
+                QtyVisitAvail = 0,
+                PointCardRank = 0,
+                TotalAmountPeriod = 0,
+                CardNoPrev = strCardNo,
+                CardTypeUse = strCardTypeUse ?? card.CardTypeUse,
+                CardTypeInit = strCardTypeInitDB ?? card.CardTypeInit,
+                CardTypeUsePrev = strCardTypeUseDB ?? card.CardTypeUse,
+                CardTypeInitPrev = strCardTypeInitDB ?? card.CardTypeInit,
+                CardActiveDate = null,
+                FlagExceptionally = "1", // TConst.Flag.Active (:27038)
+                CardTypeUseExpect = null,
+                CardTypeInitExpect = null,
+                RankActionType = "UP",
+                CreateDTimeUTC = dtimeSys,
+                CreateBy = userCode,
+                LUDTimeUTC = dtimeSys,
+                LUBy = userCode,
+                ApproveDTimeUTC = null,
+                ApproveBy = null,
+                CancelDTimeUTC = null,
+                CancelBy = null,
+                CardStatus = "PENDING", // TConst.CardStatus.Pending (:21664)
+                Remark = strRemark,
+                LogLUDTimeUTC = dtimeSys,
+                LogLUBy = userCode
+            };
+            _db.CrdCards.Add(newCard);
+
+            // 8.2 Thêm danh sách đại lý ngoại lệ vào Crd_CardDealerUseException (Card.cs:27078-27162)
+            var dealerTable = _db.Set<Crd_CardDealerUseException>();
+            var addedDealers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var item in validDealers)
+            {
+                var dealerCode = StdParam(item.DealerCode);
+                if (string.IsNullOrEmpty(dealerCode) || !addedDealers.Add(dealerCode)) continue;
+
+                dealerTable.Add(new Crd_CardDealerUseException
+                {
+                    CardNo = strCardNoNew!,
+                    DealerCode = dealerCode,
+                    NetworkID = networkId,
+                    Remark = null,
+                    LogLUDTimeUTC = dtimeSys,
+                    LogLUBy = userCode
+                });
+            }
+
+            // 8.3 Cập nhật Crd_Member: CardStatus = 'PENDING', CardSourceCode = 'UP' (Card.cs:27126-27140)
+            member.CardStatus = "PENDING";
+            member.CardSourceCode = "UP";
+            member.LUDTimeUTC = dtimeSys;
+            member.LUBy = userCode;
+            member.LogLUDTimeUTC = dtimeSys;
+            member.LogLUBy = userCode;
+
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+
+            // Gate Crd_CardController.cs:338-340: SetSuccess(), Data = null
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return PortResult.Fail("Crd_Card_RequestException", "Exception", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Thuật toán sinh mã thẻ hội viên dùng chung cho Crd_Card (RequestException #004) và Crd_CardRank (ApproveRankDown #009)
+    /// — port 1:1 từ GenCardNo trong Card.cs:27641-27744.
+    /// Quy tắc:
+    ///   - DLCode 5 ký tự: prefix = dl + "0"
+    ///   - DLCode 7 ký tự: prefix = dl bỏ dấu '.'
+    ///   - Còn lại: báo lỗi GenCardNo_InvalidGen6ParamPrefixOfCard
+    /// </summary>
+    internal static (string? CardNo, IActionResult? Error) GenCardNo(
+        string memberNo,
+        string? dlCode,
+        IEnumerable<string?> existingCardNos)
+    {
+        var rawDl = dlCode?.Trim() ?? "";
+        string strGen6ParamPrefixOfCard = "";
+        if (rawDl.Length == 5)
+        {
+            strGen6ParamPrefixOfCard = $"{rawDl}0";
+        }
+        else if (rawDl.Length == 7)
+        {
+            strGen6ParamPrefixOfCard = rawDl.Replace(".", "");
+        }
+
+        if (strGen6ParamPrefixOfCard.Length != 6)
+        {
+            var err = PortResult.Fail("GenCardNo_InvalidGen6ParamPrefixOfCard",
+                "Check.DLCode", rawDl,
+                "Check.strGen6ParamPrefixOfCard", strGen6ParamPrefixOfCard,
+                "Check.ErrConditionRaise", "strGen6ParamPrefixOfCard.Length != 6");
+            return (null, err);
+        }
+
+        long nSeqCardNo = 0;
+        foreach (var no in existingCardNos)
+        {
+            if (!string.IsNullOrEmpty(no) && no.Length >= 2 && int.TryParse(no[^2..], out var parsedSeq))
+            {
+                if (parsedSeq + 1 > nSeqCardNo) nSeqCardNo = parsedSeq + 1;
+            }
+        }
+
+        var newCardNo = $"{strGen6ParamPrefixOfCard}{memberNo}{(nSeqCardNo % 100):D2}";
+        return (newCardNo, null);
+    }
+
+    private static string? StdParam(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim().ToUpperInvariant();
+    private static string? StdStr(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim().Normalize();
+    private static string StdFlag(string? s) => s == "1" ? "1" : "0";
+}
+
+/// <summary>
+/// Model request cho action RequestException — port 1:1 từ model RQ_Crd_Card nguồn (Crd_CardController.cs:300, 319-335).
+/// </summary>
+public class RQ_Crd_Card
+{
+    public Crd_Card_RequestException_Input? Crd_Card { get; set; }
+    public List<Crd_CardDealerUseException>? Lst_Crd_CardDealerUseException { get; set; }
+}
+
+/// <summary>
+/// Thông tin thẻ hội viên gửi lên trong yêu cầu đặc cách (Crd_CardController.cs:319, Card.cs:26723-26726).
+/// </summary>
+public class Crd_Card_RequestException_Input
+{
+    public string? CardNo { get; set; }
+    public string? CardTypeUse { get; set; }
+    public string? DLCodeExceptionally { get; set; }
+    public string? Remark { get; set; }
+    public string? MemberNo { get; set; }
+    public string? NetworkID { get; set; }
 }

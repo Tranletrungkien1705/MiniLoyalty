@@ -231,6 +231,7 @@ public class Crd_CardSeeder : IPortSeeder
                 CarNo = "30A-99999",
                 VIN = "VIN000000001",
                 MemberStatus = "APPROVE",
+                RegisStatus = "FINISH",
                 CardTypeUse = "VIP",
                 CardTypeInit = "VIP",
                 EffDateStart = effStart,
