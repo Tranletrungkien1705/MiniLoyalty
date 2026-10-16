@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -27,6 +28,13 @@ public class MstResignReasonSearchReq
     public int Ft_PageSize { get; set; } = 10;
 }
 
+public class MstResignReasonExportReq
+{
+    public string? OrgID { get; set; }
+    public string? KeyWord { get; set; }
+    public string? FlagActive { get; set; }
+}
+
 [ApiController]
 [Route("api/mst_resignreason")]
 [Produces("application/json")]
@@ -34,11 +42,13 @@ public class Mst_ResignReasonControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly IConfiguration _config;
+    private readonly IWebHostEnvironment _env;
 
-    public Mst_ResignReasonControllerPort(AppDbContext db, IConfiguration config)
+    public Mst_ResignReasonControllerPort(AppDbContext db, IConfiguration config, IWebHostEnvironment env)
     {
         _db = db;
         _config = config;
+        _env = env;
     }
 
     [HttpPost("search")]
@@ -530,6 +540,92 @@ public class Mst_ResignReasonControllerPort : ControllerBase
         }
 
         return Ok(new { Success = true, Data = (object?)null }); // Gate :495-496
+    }
+
+    /// <summary>
+    /// Port 1:1 action Export từ gate Mst_ResignReasonController.cs:628-706 (#241).
+    /// Chuỗi gọi: gate Mst_ResignReasonController.Export -> WA_Mst_ResignReason_Get -> WAS_Mst_ResignReason_Get -> Mst_ResignReason_Get -> Mst_ResignReason_GetX (MasterData.cs:24608-25003).
+    ///
+    /// Quy trình nghiệp vụ:
+    ///   1. Tham số: { OrgID, KeyWord, FlagActive } qua JSON body.
+    ///   2. Gọi lại GetXAsync(req.OrgID, null, req.KeyWord, req.FlagActive, 0, 123456000) (gate :649-674).
+    ///      Ft_RecordStart = "0", Ft_RecordCount = 123456000 (:667-668).
+    ///   3. Rỗng: nếu danh sách null hoặc rỗng -> ném ServiceException("Không có dữ liệu") (gate :690-693)
+    ///      -> trả về 400 ErridnLoyalty.Mst_ResignReason_Export kèm Params Message = "Không có dữ liệu".
+    ///   4. Từ điển cột: dùng GetImportDicColums() (gate :679) — dùng từ điển Import cho Export là của nguồn.
+    ///      Gồm 5 cột theo đúng thứ tự nguồn: ReasonID ("Mã lý do (*)"), ResignReason ("Lý do nghỉ việc (*)"),
+    ///      mnnt_NNTFullName ("Tổ chức"), ReasonDesc ("Mô tả"), FlagActive ("Trạng thái") (gate :745-755).
+    ///   5. Sinh đường dẫn file qua PortExcel.GenExcelExportFilePath(webRoot, "Mst_ResignReason") (gate :681).
+    ///   6. Ghi dữ liệu ra Excel bằng PortExcel.ExportToExcelFromList(rows, dicColNames, physicalPath, "Mst_ResignReason") (gate :682).
+    ///   7. Bắt ngoại lệ nếu ghi file lỗi -> PortResult.Fail("Mst_ResignReason_Export", "Exception", ex.Message) (gate :695-699).
+    ///   8. Thành công: trả về JsonResultEntry Data = { Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath } (gate :683-687).
+    /// </summary>
+    [HttpPost("export")]
+    public async Task<IActionResult> Export(
+        [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] MstResignReasonExportReq? req)
+    {
+        var r = req ?? new MstResignReasonExportReq();
+
+        // Gọi GetXAsync(OrgID, null, KeyWord, FlagActive, 0, 123456000) (gate :649-674)
+        // RecordStart = 0, RecordCount = 123456000 (gate :667-668)
+        var (_, rows) = await GetXAsync(r.OrgID, null, r.KeyWord, r.FlagActive, 0, 123456000);
+
+        // Nguồn Mst_ResignReasonController.cs:675, 690-693: nếu danh sách null hoặc Count == 0 -> throw ServiceException("Không có dữ liệu")
+        if (rows == null || rows.Count == 0)
+        {
+            return PortResult.Fail("Mst_ResignReason_Export", "Message", "Không có dữ liệu");
+        }
+
+        // Tạo thư mục và đường dẫn file Excel xuất: GenExcelExportFilePath (gate :681)
+        var webRoot = _env.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = Path.Combine(_env.ContentRootPath, "wwwroot");
+        }
+
+        // Dùng từ điển GetImportDicColums() (gate :679, :745-755) — dùng từ điển Import cho Export là của nguồn
+        var dicColNames = GetImportDicColums();
+        string virtualPath;
+        try
+        {
+            string physicalPath;
+            (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Mst_ResignReason");
+
+            // Ghi danh sách ra file Excel với tên sheet "Mst_ResignReason" (gate :682)
+            PortExcel.ExportToExcelFromList(rows, dicColNames, physicalPath, "Mst_ResignReason");
+        }
+        catch (Exception ex)
+        {
+            // Bắt ngoại lệ và trả Fail (gate :695-699)
+            return PortResult.Fail("Mst_ResignReason_Export", "Exception", ex.Message);
+        }
+
+        // Trả URL tải file: Data = { Url = GetRequestBaseAddress() + url } (gate :684-687)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+            }
+        });
+    }
+
+    /// <summary>
+    /// Từ điển cột xuất Excel: dùng GetImportDicColums() (gate Mst_ResignReasonController.cs:679, :745-755) — dùng từ điển Import cho Export là của nguồn.
+    /// Giữ đúng thứ tự 5 cột từ nguồn:
+    /// ReasonID ("Mã lý do (*)"), ResignReason ("Lý do nghỉ việc (*)"), mnnt_NNTFullName ("Tổ chức"), ReasonDesc ("Mô tả"), FlagActive ("Trạng thái").
+    /// </summary>
+    private static Dictionary<string, string> GetImportDicColums()
+    {
+        return new Dictionary<string, string>
+        {
+            { "ReasonID", "Mã lý do (*)" },
+            { "ResignReason", "Lý do nghỉ việc (*)" },
+            { "mnnt_NNTFullName", "Tổ chức" },
+            { "ReasonDesc", "Mô tả" },
+            { "FlagActive", "Trạng thái" }
+        };
     }
 
     private async Task<(int itemCount, List<object> rows)> GetXAsync(string? orgId, string? reasonId, string? keyWord, string? flagActive, long recordStart, long recordCount)
