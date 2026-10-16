@@ -11,11 +11,13 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục ngày nghỉ phép (Mst_LeaveDay) của dự án nguồn 2022.7.Loyalty (#164).
+// PORT 1:1 — màn danh mục ngày nghỉ phép (Mst_LeaveDay) của dự án nguồn 2022.7.Loyalty (#164, #165 GetAllActive).
 //
 // Nguồn controller (tầng gate):
-//   Mst_LeaveDayController.cs:25-105   Search -> WA_Mst_LeaveDay_Get
+//   Mst_LeaveDayController.cs:25-105   Search -> WA_Mst_LeaveDay_Get (#164)
+//   Mst_LeaveDayController.cs:107-167  GetAllActive -> WA_Mst_LeaveDay_Get (#165 GetAllActive)
 //   Mst_LeaveDayController.cs:171-186  strWhereClause_Mst_LeaveDay (mệnh đề lọc Search)
+//   Mst_LeaveDayController.cs:188-199  strWhereClause_Mst_LeaveDay_Active (mệnh đề lọc GetAllActive, toán tử '=' FlagActive "1")
 // Nguồn API:
 //   MstLeaveDayController.cs:17-88     WA_Mst_LeaveDay_Get
 // Nguồn biz:
@@ -28,10 +30,11 @@ namespace MiniLoyalty.Controllers.Port;
 // GIỮ ĐÚNG NGUỒN:
 //   * Endpoint là POST (nguồn [AcceptVerbs("POST")]).
 //   * Lọc KeyWord: like '%kw%' trên NormalLeaveDay (Mst_LeaveDayController.cs:176-179). CHỈ tìm NormalLeaveDay, KHÔNG tìm LeaveDayCodeSys, Remark.
-//   * Lọc FlagActive: toán tử '=' nguyên giá trị StrValue (Mst_LeaveDayController.cs:180-183), KHÔNG tách dấu phẩy, KHÔNG phải IN.
-//   * OrgID: gate nhận OrgID (:25, :55) nhưng hàm lọc strWhereClause_Mst_LeaveDay (:171-186) KHÔNG dùng -> OrgID KHÔNG lọc gì.
+//   * Lọc FlagActive: toán tử '=' nguyên giá trị StrValue (Search :180-183; GetAllActive :127-130, :195 cố định "1"), KHÔNG tách dấu phẩy, KHÔNG phải IN.
+//   * GetAllActive (#165): gate truyền FlagActive = "1" (:127-130), Ft_RecordStart = "0", Ft_RecordCount = "123456000" (:142-143).
+//   * OrgID: gate nhận OrgID (:25, :55; GetAllActive :119, :140) nhưng hàm lọc strWhereClause_Mst_LeaveDay (:171-186) và strWhereClause_Mst_LeaveDay_Active (:188-199) KHÔNG dùng -> OrgID KHÔNG lọc gì.
 //   * SQL không lọc NetworkID/OrgID trong WHERE (MasterData.cs:30219-30306).
-//   * Chuẩn hoá: gate KHÔNG gọi StdParam/StdStr/StdFlag cho KeyWord/FlagActive (:176-183) -> không Trim/ToUpper.
+//   * Chuẩn hoá: gate KHÔNG gọi StdParam/StdStr/StdFlag cho KeyWord/FlagActive (:176-183, :195) -> không Trim/ToUpper.
 //   * SQL Server không phân biệt hoa/thường -> dùng Like trên ToLower() kèm escape '\'.
 //   * Draft: select distinct identity(bigint,0,1) MyIdxSeq, mld.LeaveDayCodeSys từ Mst_LeaveDay sắp xếp mld.LeaveDayCodeSys asc (MasterData.cs:30220-30229).
 //   * MyCount: Count(0) của draft trước khi cắt trang (MasterData.cs:30232).
@@ -40,11 +43,13 @@ namespace MiniLoyalty.Controllers.Port;
 //   * Select cuối: inner join draft đã cắt trang với Mst_LeaveDay theo LeaveDayCodeSys, sắp xếp theo t.MyIdxSeq asc (MasterData.cs:30259-30269).
 //   * Mỗi dòng trả đúng 11 cột: MyIdxSeq + 10 cột model. MyIdxSeq tính lại từ 0 sau khi lọc.
 //   * PageCount: CHỈ tính khi DataList KHÔNG rỗng (Mst_LeaveDayController.cs:80-88). Khi DataList rỗng -> PageCount = 0.
-//   * DataList rỗng là mảng rỗng `[]`, KHÔNG null (Mst_LeaveDayController.cs:48-51 new List<TModels.Mst_LeaveDay>()).
+//   * DataList rỗng ở Search là mảng rỗng `[]`, KHÔNG null (Mst_LeaveDayController.cs:48-51 new List<TModels.Mst_LeaveDay>()).
+//   * Data ở GetAllActive (#165): danh sách trần (không bọc PageInfo), rỗng thì Data = null (Mst_LeaveDayController.cs:126, :149-154).
 //   * PK = LeaveDayCodeSys (suy từ join/distinct MasterData.cs:30223, :30266 và Mst_LeaveDay_CheckDB :30114, DDL chưa xác minh).
+//   * Tài khoản viết cứng tại Mst_LeaveDayController.cs:135-136 — không chép giá trị (quy ước bảo mật).
 //
 // Bỏ qua có chủ đích (loại Đ):
-//   * CheckGatewayAuthentication / CheckAuthorize (gate Mst_LeaveDayController.cs:34-35),
+//   * CheckGatewayAuthentication / CheckAuthorize (gate Mst_LeaveDayController.cs:34-35, :116-117),
 //     Sys_User_CheckAuthentication (:30374-30378), Sys_Access_CheckDenyV30 (:30381-30385), drAbilityOfUser (:30205, :30217)
 //     đều bị COMMENT ở nguồn -> KHÔNG port (hệ thống đích chưa có hệ phân quyền).
 //   * Ghi RequestLog / ReturnLog (MasterData.cs:30364-30371, :30441-30448).
@@ -98,6 +103,32 @@ public class Mst_LeaveDayControllerPort : ControllerBase
         {
             Success = true,
             Data = new PageInfo<object>(rows, itemCount, pageCount, pageIndex, pageSize)
+        });
+    }
+
+    private const long GetAllActiveRecordStart = 0;
+    private const long GetAllActiveRecordCount = 123456000;
+
+    /// <summary>
+    /// Port 1:1 <c>Mst_LeaveDayController.GetAllActive</c> (nguồn gate Mst_LeaveDayController.cs:107-167, :188-199; API MstLeaveDayController.cs:17-88; biz MasterData.cs:30453-30543, :30323-30451, :30166-30321; #165 GetAllActive).
+    /// Lấy toàn bộ danh mục ngày nghỉ phép có FlagActive = "1" (danh sách trần, không nhận tham số lọc/phân trang từ request).
+    /// </summary>
+    [HttpPost("getallactive")]
+    public async Task<IActionResult> GetAllActive()
+    {
+        // 1. Lọc: FlagActive = "1" cố định với toán tử '=' (nguồn gate Mst_LeaveDayController.cs:127-130, hàm lọc strWhereClause_Mst_LeaveDay_Active :188-199).
+        //    Không nhận từ request; KHÔNG có KeyWord; không lọc OrgID/NetworkID (gate :118-120 đọc header nhưng strWhereClause_Mst_LeaveDay_Active :188-199 và SQL :30219-30270 không dùng).
+        //    Tài khoản viết cứng tại Mst_LeaveDayController.cs:135-136 — không chép giá trị (quy ước bảo mật).
+        // 2. Tái sử dụng GetXAsync với recordStart = 0, recordCount = 123456000 (hằng số Ft_RecordStart/Ft_RecordCount :142-143).
+        // 3. Draft sắp xếp theo LeaveDayCodeSys asc, MyIdxSeq bắt đầu từ 0 (MasterData.cs:30223, :30229).
+        // 4. Data trả về danh sách trần (không bọc PageInfo, không ItemCount), mỗi dòng gồm đúng 11 trường (MyIdxSeq + 10 cột model).
+        // 5. Khi không có dòng nào (hoặc rỗng) -> Data = null (nguồn lst_Mst_LeaveDay khởi tạo null :126, chỉ gán khi Count > 0 :149-152, :154).
+        var (_, rows) = await GetXAsync(null, "1", GetAllActiveRecordStart, GetAllActiveRecordCount);
+
+        return Ok(new
+        {
+            Success = true,
+            Data = rows.Count > 0 ? rows : null
         });
     }
 
