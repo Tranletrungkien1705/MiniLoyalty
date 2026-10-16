@@ -11,11 +11,13 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục giới tính (Mst_Gender) của dự án nguồn 2022.7.Loyalty (#154).
+// PORT 1:1 — màn danh mục giới tính (Mst_Gender) của dự án nguồn 2022.7.Loyalty (#154 Search, #155 GetAllActive).
 //
 // Nguồn controller (tầng gate):
-//   Mst_GenderController.cs:25-105    Search -> WA_Mst_Gender_Get
+//   Mst_GenderController.cs:25-105    Search -> WA_Mst_Gender_Get (#154)
+//   Mst_GenderController.cs:107-167   GetAllActive -> WA_Mst_Gender_Get (#155)
 //   Mst_GenderController.cs:171-195   strWhereClause_Mst_Gender (mệnh đề lọc Search)
+//   Mst_GenderController.cs:197-208   strWhereClause_Mst_Gender_Active (mệnh đề lọc GetAllActive)
 // Nguồn API:
 //   MstGenderController.cs:20-89      WA_Mst_Gender_Get
 // Nguồn biz:
@@ -82,6 +84,25 @@ public class Mst_GenderControllerPort : ControllerBase
         var pageCount = rows.Count == 0 ? 0 : (itemCount % ps == 0 ? itemCount / ps : itemCount / ps + 1);
 
         return Ok(new { Success = true, Data = new PageInfo<object>(rows, itemCount, pageCount, pageIndex, pageSize) });
+    }
+
+    /// <summary>
+    /// Port 1:1 <c>GetAllActive</c> — lấy toàn bộ giới tính đang hoạt động (FlagActive = "1") (#155).
+    /// Nguồn gate: Mst_GenderController.cs:107-167, hàm lọc strWhereClause_Mst_Gender_Active (:197-208).
+    /// Nguồn API: MstGenderController.cs:20-89 (WA_Mst_Gender_Get).
+    /// Nguồn biz: MasterData.cs:29670-29768 (WAS_Mst_Gender_Get) -> :29770-29940 (Mst_Gender_Get) -> :29942-30095 (Mst_Gender_GetX).
+    /// Lưu ý bảo mật: tài khoản viết cứng tại Mst_GenderController.cs:135-136 — không chép giá trị.
+    /// Tái sử dụng GetXAsync với FlagActive = "1", recordStart = 0, recordCount = 123456000 (bài học A.3).
+    /// Data trả về là mảng trần (không bọc PageInfo); khi rỗng (0 dòng) trả null, Success = true (bài học A.5).
+    /// </summary>
+    [HttpPost("getallactive")]
+    public async Task<IActionResult> GetAllActive()
+    {
+        // Tái sử dụng GetXAsync với FlagActive = "1", recordStart = 0, recordCount = 123456000 (bài học A.3).
+        var (_, rows) = await GetXAsync(null, "1", 0, 123456000);
+
+        // Nguồn gate (:126, 149-154): lst_Mst_Gender khởi tạo null, chỉ gán khi Count > 0; Data nhận lst_Mst_Gender (bài học A.5).
+        return Ok(new { Success = true, Data = rows.Count > 0 ? rows : null });
     }
 
     /// <summary>
