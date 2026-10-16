@@ -24,8 +24,17 @@ public class SysAccessSearchReq
 }
 
 /// <summary>
-/// Port 1:1 Sys_AccessController — màn phân quyền truy cập hệ thống (#300 Search, #301 Get).
-/// Nguồn Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Sys_AccessController.cs:27-109, 110-217
+/// DTO tham số cho Sys_AccessController.GetByGroupCode (gate Sys_AccessController.cs:220-285).
+/// Nhận GroupCode qua JSON body (Bài học A.14).
+/// </summary>
+public class SysAccessGetByGroupCodeReq
+{
+    public string? GroupCode { get; set; }
+}
+
+/// <summary>
+/// Port 1:1 Sys_AccessController — màn phân quyền truy cập hệ thống (#300 Search, #301 Get, #302 GetByGroupCode).
+/// Nguồn Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Sys_AccessController.cs:27-109, 110-217, 220-285
 /// Nguồn API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\SysAccessController.cs:20-91 (WA_Sys_Access_Get)
 /// Nguồn BIZ: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\System.cs:757-850 (WAS_Sys_Access_Get)
 ///            D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\System.cs:290-512 (Sys_Access_Get)
@@ -54,7 +63,7 @@ public class Sys_AccessControllerPort : ControllerBase
 
         // Tính recordStart = PageIndex * PageSize (gate :73)
         var start = (long)pageIndex * pageSize;
-        var (itemCount, rows) = await GetXAsync(r.OrgID, r.KeyWord, r.FlagActive, start, pageSize);
+        var (itemCount, rows) = await GetXAsync(r.OrgID, r.KeyWord, r.FlagActive, groupCode: null, start, pageSize);
 
         // Tính pageCount theo gate :87-91. Nếu pageSize = 0 thì quy ước chia 10 hoặc trả 0 khi rỗng.
         // Theo bài học A.7: Khi Ft_PageSize = 0 thì DataList rỗng, PageCount = 0, ItemCount giữ nguyên tổng số.
@@ -72,7 +81,24 @@ public class Sys_AccessControllerPort : ControllerBase
     [HttpPost("get")]
     public async Task<IActionResult> Get()
     {
-        var (_, rows) = await GetXAsync(null, null, null, 0, 123456000);
+        var (_, rows) = await GetXAsync(null, null, null, groupCode: null, 0, 123456000);
+        return Ok(new { Success = true, Data = rows.Count > 0 ? rows : null });
+    }
+
+    /// <summary>
+    /// Port 1:1 Sys_AccessController.GetByGroupCode (gate Sys_AccessController.cs:220-285).
+    /// GroupCode rỗng/null: chặn ngay từ gate, trả Success = true, Data = null (gate :242, :271-272).
+    /// </summary>
+    [HttpPost("getbygroupcode")]
+    public async Task<IActionResult> GetByGroupCode([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] SysAccessGetByGroupCodeReq? req)
+    {
+        var groupCode = req?.GroupCode;
+        if (string.IsNullOrEmpty(groupCode))
+        {
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+
+        var (_, rows) = await GetXAsync(null, null, null, groupCode, 0, 123456000);
         return Ok(new { Success = true, Data = rows.Count > 0 ? rows : null });
     }
 
@@ -104,9 +130,15 @@ public class Sys_AccessControllerPort : ControllerBase
     /// - Sys_Object ĐÃ port ở #317 -> left join thật (so_* lấy từ Sys_Object).
     /// - Phân quyền Sys_Access_CheckDeny (System.cs:332) được coi là GAP trong MiniLoyalty.
     /// </summary>
-    private async Task<(int itemCount, List<object> rows)> GetXAsync(string? orgId, string? keyWord, string? flagActive, long recordStart, long recordCount)
+    private async Task<(int itemCount, List<object> rows)> GetXAsync(string? orgId, string? keyWord, string? flagActive, string? groupCode, long recordStart, long recordCount)
     {
         var q = _db.Set<Sys_Access>().AsNoTracking().AsQueryable();
+
+        // Lọc theo GroupCode nếu có (gate Sys_AccessController.cs:244-247, strWhereClause_Sys_Access :795-810)
+        if (!string.IsNullOrEmpty(groupCode))
+        {
+            q = q.Where(x => EF.Functions.Like(x.GroupCode.ToLower(), PortQuery.Equal(groupCode), PortQuery.Esc));
+        }
 
         // Nguồn gốc: Where 1=1 (KeyWord, OrgID, FlagActive không được gán vào GroupCode/ObjectCode của Sys_AccessUI)
         // Bước 1: Draft sắp xếp theo sa.GroupCode asc, sa.ObjectCode asc (System.cs:368-369)
