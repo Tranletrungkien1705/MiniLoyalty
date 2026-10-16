@@ -70,3 +70,26 @@ public class Mst_DisciplineSeeder : IPortSeeder
         await db.SaveChangesAsync();
     }
 }
+
+/// <summary>
+/// Bảng sinh sequence cho mã hình thức kỷ luật — port 1:1 bảng <c>Seq_DisciplineCode</c> (Seq.cs:28-41, SeqType.DisciplineCode).
+/// PK = AutoId (bigint IDENTITY(1,1) PK tự tăng).
+/// </summary>
+public class Seq_DisciplineCode
+{
+    public long AutoId { get; set; }                       // AutoId — bigint IDENTITY(1,1) PK
+    public string? Remark { get; set; }                    // Remark — Varchar50
+}
+
+/// <summary>
+/// Cấu hình EF cho <see cref="Seq_DisciplineCode"/> — PK AutoId tự tăng.
+/// </summary>
+public class Seq_DisciplineCodeConfig : IEntityTypeConfiguration<Seq_DisciplineCode>
+{
+    public void Configure(EntityTypeBuilder<Seq_DisciplineCode> b)
+    {
+        b.ToTable("Seq_DisciplineCode");
+        b.HasKey(x => x.AutoId);
+        b.Property(x => x.AutoId).ValueGeneratedOnAdd();
+    }
+}
