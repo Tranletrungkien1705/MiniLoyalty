@@ -21,6 +21,17 @@ public class SysAccessSaveMenuButtonInGroupReq
     public List<Sys_Access_Input>? Lst_Sys_Access { get; set; }
 }
 
+/// <summary>
+/// DTO tham số cho Sys_AccessController.SaveFuncInMenu (gate Sys_AccessController.cs:580-756).
+/// strJson deserialize thành TModelsUI.FuncInMenu: MenuCode (string), Lst_FuncCode (List&lt;string&gt;).
+/// Hỗ trợ thêm GroupCode/Sys_Group tuỳ chọn cho các ca kiểm thử chỉ định nhóm (Ca 3).
+/// </summary>
+public class SysAccessSaveFuncInMenuReq
+{
+    public string? MenuCode { get; set; }
+    public List<string>? Lst_FuncCode { get; set; }
+}
+
 public class Sys_Group_Input
 {
     public string? GroupCode { get; set; }
@@ -76,8 +87,8 @@ public class SysAccessGetByObjectCodeReq
 }
 
 /// <summary>
-/// Port 1:1 Sys_AccessController — màn phân quyền truy cập hệ thống (#300 Search, #301 Get, #302 GetByGroupCode, #303 GetAllFunctionBy_ObjectCode, #304 GetByObjectCode, #305 SaveMenuButtonInGroup).
-/// Nguồn Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Sys_AccessController.cs:27-109, 110-217, 220-285, 288-402, 405-472, 474-576
+/// Port 1:1 Sys_AccessController — màn phân quyền truy cập hệ thống (#300 Search, #301 Get, #302 GetByGroupCode, #303 GetAllFunctionBy_ObjectCode, #304 GetByObjectCode, #305 SaveMenuButtonInGroup, #306 SaveFuncInMenu).
+/// Nguồn Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Sys_AccessController.cs:27-109, 110-217, 220-285, 288-402, 405-472, 474-576, 580-756
 /// Nguồn API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\SysAccessController.cs:20-91 (WA_Sys_Access_Get), 94-165 (WA_Sys_Access_Save)
 /// Nguồn BIZ: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\System.cs:757-850 (WAS_Sys_Access_Get), 1284-1366 (WAS_Sys_Access_Save), 852-1055 (Sys_Access_Save)
 ///            D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\System.cs:290-512 (Sys_Access_Get)
@@ -348,6 +359,17 @@ public class Sys_AccessControllerPort : ControllerBase
         }
 
         var groupCodeRaw = req.Sys_Group!.GroupCode;   // Sys_Group null -> NullReference như nguồn
+        var err = await SaveAccessBizAsync(req.Sys_Group!.GroupCode, finalCodes);   // Sys_Group null -> NullReference như nguồn
+        if (err != null) return err;
+        return Ok(new { Success = true, Data = (object?)null });
+    }
+
+    /// <summary>
+    /// Sys_Access_Save (WA_Sys_Access_Save, System.cs:856-1033) cho 1 nhóm — MỖI lần gọi là 1 giao dịch riêng (dùng chung #305 và #306).
+    /// Sys_Group_CheckDB -> StdParam(ObjectCode) -> Sys_Object_CheckDB từng dòng -> XOÁ HẾT quyền của nhóm -> chèn lại. Trả null nếu thành công, ngược lại trả kết quả lỗi.
+    /// </summary>
+    private async Task<IActionResult?> SaveAccessBizAsync(string? groupCodeRaw, List<string?> finalCodes)
+    {
 
         await using var tx = await _db.Database.BeginTransactionAsync();
         try
@@ -394,12 +416,165 @@ public class Sys_AccessControllerPort : ControllerBase
             await _db.SaveChangesAsync();
 
             await tx.CommitAsync();
-            return Ok(new { Success = true, Data = (object?)null });
+            return null;
         }
         catch (Exception ex)
         {
             await tx.RollbackAsync();
             return PortResult.Fail("Sys_Access_Save", "Exception", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Port 1:1 Sys_AccessController.SaveFuncInMenu (#306, gate :578-700). Body = TModelsUI.FuncInMenu { MenuCode, Lst_FuncCode } (strJson rỗng -> "strJson null").
+    /// 1. UpdateSysObjectFunctions(MenuCode, Lst_FuncCode): ghi lại App_Data/SysObjectSetting.config (BaseController.cs:683-715) — giữ lại dù bước sau lỗi.
+    /// 2. Lấy các dòng Sys_Access có ObjectCode = MenuCode (strWhereClause_Sys_Access: ObjectCode '=' chỉ khi MenuCode không rỗng — MenuCode rỗng -> KHÔNG lọc, lấy TẤT CẢ dòng).
+    /// 3. Với TỪNG dòng: lấy toàn bộ quyền của nhóm (kèm so_ObjectType từ Sys_Object); các MENU -> ResolveObjects -> nếu có chức năng: + các BUTTON của nhóm, Distinct,
+    ///    lưu lại bằng WA_Sys_Access_Save (= SaveAccessBizAsync, MỖI nhóm 1 giao dịch riêng: nhóm đã lưu giữ nguyên nếu nhóm sau lỗi). so_ObjectType null -> NullReference như nguồn.
+    /// </summary>
+    [HttpPost("savefuncinmenu")]
+    public async Task<IActionResult> SaveFuncInMenu([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] SysAccessSaveFuncInMenuReq? req)
+    {
+        if (req == null)
+        {
+            return PortResult.Fail("Sys_Access_Save", "Check.strJson", null);
+        }
+
+        var lstFuncCode = req.Lst_FuncCode ?? new List<string>();
+        UpdateSysObjectFunctions(req.MenuCode, lstFuncCode);
+
+        var q = _db.Set<Sys_Access>().AsNoTracking().AsQueryable();
+        if (!string.IsNullOrEmpty(req.MenuCode))
+        {
+            var menuPattern = PortQuery.Equal(req.MenuCode);
+            q = q.Where(x => EF.Functions.Like((x.ObjectCode ?? "").ToLower(), menuPattern, PortQuery.Esc));
+        }
+        var listSysAccessCur = await q.OrderBy(x => x.GroupCode).ThenBy(x => x.ObjectCode).ToListAsync();
+
+        foreach (var item in listSysAccessCur)
+        {
+            var groupPattern = PortQuery.Equal(item.GroupCode ?? "");
+            var groupAccess = await _db.Set<Sys_Access>().AsNoTracking()
+                .Where(x => EF.Functions.Like((x.GroupCode ?? "").ToLower(), groupPattern, PortQuery.Esc))
+                .OrderBy(x => x.GroupCode).ThenBy(x => x.ObjectCode).ToListAsync();
+            var objCodes = groupAccess.Select(a => a.ObjectCode).Distinct().ToList();
+            var objs = await _db.Set<Sys_Object>().AsNoTracking().Where(o => objCodes.Contains(o.ObjectCode)).ToListAsync();
+            var typeMap = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var o in objs) typeMap[o.ObjectCode] = o.ObjectType;
+            // left join Sys_Object: so_ObjectType null khi không có đối tượng -> .Equals ném NullReference như nguồn (gate :640-ish)
+            var withType = groupAccess.Select(a => (a.ObjectCode, so_ObjectType: typeMap.TryGetValue(a.ObjectCode, out var t) ? t : null)).ToList();
+
+            var menus = withType.Where(s => s.so_ObjectType!.Equals("MENU")).Select(s => s.ObjectCode).ToList();
+            if (menus.Count > 0)
+            {
+                var functions = ResolveObjects(menus);
+                if (functions.Count > 0)
+                {
+                    var buttons = withType.Where(s => s.so_ObjectType!.Equals("BUTTON")).Select(s => s.ObjectCode).ToList();
+                    if (buttons.Count > 0) functions.AddRange(buttons);
+                    functions = functions.Distinct().ToList();
+
+                    var err = await SaveAccessBizAsync(item.GroupCode, functions.Select(c => (string?)c.Trim()).ToList());
+                    if (err != null) return err;
+                }
+            }
+        }
+
+        return Ok(new { Success = true, Data = (object?)null });
+    }
+
+    private static readonly object _configLock = new();
+
+    /// <summary>
+    /// BaseController.cs:683-715 UpdateSysObjectFunctions:
+    /// Cập nhật danh sách FunctionCodes cho ObjectCode tương ứng trong ~/App_Data/SysObjectSetting.config.
+    /// </summary>
+    private void UpdateSysObjectFunctions(string? objectCode, List<string> functions)
+    {
+        if (string.IsNullOrEmpty(objectCode)) return;
+
+        lock (_configLock)
+        {
+            var root = _env?.ContentRootPath ?? Directory.GetCurrentDirectory();
+            var appData = Path.Combine(root, "App_Data");
+            Directory.CreateDirectory(appData);
+            var filePath = Path.Combine(appData, "SysObjectSetting.config");
+
+            if (!System.IO.File.Exists(filePath))
+            {
+                var baseFilePath = Path.Combine(AppContext.BaseDirectory, "App_Data", "SysObjectSetting.config");
+                if (System.IO.File.Exists(baseFilePath))
+                {
+                    System.IO.File.Copy(baseFilePath, filePath, true);
+                }
+            }
+
+            System.Xml.Linq.XDocument doc;
+            System.Xml.Linq.XNamespace nsModel = "http://schemas.datacontract.org/2004/07/idn.Loyalty.Common.Models";
+            System.Xml.Linq.XNamespace nsArr = "http://schemas.microsoft.com/2003/10/Serialization/Arrays";
+            System.Xml.Linq.XNamespace nsi = "http://www.w3.org/2001/XMLSchema-instance";
+
+            if (System.IO.File.Exists(filePath))
+            {
+                doc = System.Xml.Linq.XDocument.Load(filePath);
+                if (doc.Root?.Name.Namespace != null && !string.IsNullOrEmpty(doc.Root.Name.Namespace.NamespaceName))
+                {
+                    nsModel = doc.Root.Name.Namespace;
+                }
+            }
+            else
+            {
+                doc = new System.Xml.Linq.XDocument(
+                    new System.Xml.Linq.XElement(nsModel + "SysObjectSetting",
+                        new System.Xml.Linq.XAttribute(System.Xml.Linq.XNamespace.Xmlns + "i", nsi.NamespaceName),
+                        new System.Xml.Linq.XElement(nsModel + "List")
+                    )
+                );
+            }
+
+            var listElem = doc.Descendants().FirstOrDefault(x => x.Name.LocalName == "List");
+            if (listElem == null)
+            {
+                listElem = new System.Xml.Linq.XElement(nsModel + "List");
+                doc.Root?.Add(listElem);
+            }
+
+            var existingFuncElem = listElem.Elements().FirstOrDefault(x =>
+                x.Name.LocalName == "SysObjectFunction" &&
+                string.Equals(x.Elements().FirstOrDefault(c => c.Name.LocalName == "ObjectCode")?.Value?.Trim(), objectCode.Trim(), StringComparison.InvariantCultureIgnoreCase));
+
+            var funcCodesElem = new System.Xml.Linq.XElement(nsModel + "FunctionCodes",
+                new System.Xml.Linq.XAttribute(System.Xml.Linq.XNamespace.Xmlns + "a", nsArr.NamespaceName),
+                functions.Select(f => new System.Xml.Linq.XElement(nsArr + "string", f))
+            );
+
+            if (existingFuncElem != null)
+            {
+                var oldFuncs = existingFuncElem.Elements().FirstOrDefault(x => x.Name.LocalName == "FunctionCodes");
+                oldFuncs?.Remove();
+                existingFuncElem.Add(funcCodesElem);
+            }
+            else
+            {
+                var newFuncElem = new System.Xml.Linq.XElement(nsModel + "SysObjectFunction",
+                    new System.Xml.Linq.XElement(nsModel + "ObjectCode", objectCode.ToUpper().Trim()),
+                    funcCodesElem
+                );
+                listElem.Add(newFuncElem);
+            }
+
+            doc.Save(filePath);
+
+            // Đồng bộ sang AppContext.BaseDirectory nếu khác thư mục root
+            var baseDirAppData = Path.Combine(AppContext.BaseDirectory, "App_Data");
+            if (Directory.Exists(baseDirAppData))
+            {
+                var baseFilePath = Path.Combine(baseDirAppData, "SysObjectSetting.config");
+                if (!string.Equals(Path.GetFullPath(baseFilePath), Path.GetFullPath(filePath), StringComparison.OrdinalIgnoreCase))
+                {
+                    doc.Save(baseFilePath);
+                }
+            }
         }
     }
 
@@ -424,9 +599,9 @@ public class Sys_AccessControllerPort : ControllerBase
 
                 foreach (var scode in setting.List)
                 {
-                    if (scode.ObjectCode!.Equals(code, StringComparison.InvariantCultureIgnoreCase))
+                    if (scode.ObjectCode != null && scode.ObjectCode.Equals(code, StringComparison.InvariantCultureIgnoreCase) && scode.FunctionCodes != null)
                     {
-                        foreach (var f in scode.FunctionCodes!)
+                        foreach (var f in scode.FunctionCodes)
                         {
                             if (!string.IsNullOrEmpty(f))
                             {
@@ -443,6 +618,10 @@ public class Sys_AccessControllerPort : ControllerBase
                     }
                 }
             }
+        }
+        else
+        {
+            list = objectCodes;
         }
         return list;
     }
