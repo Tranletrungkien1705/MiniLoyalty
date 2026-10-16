@@ -11,14 +11,14 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 /// <summary>
-/// Port 1:1 Mst_NNTController.cs — Mst_NNT (#172 Search, #173 GetAllActive)
+/// Port 1:1 Mst_NNTController.cs — Mst_NNT (#172 Search, #173 GetAllActive, #174 GetByMST)
 /// Chuỗi gọi nguồn:
-///   gate: 13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Mst_NNTController.cs:26-187 (Search), :189-289 (GetAllActive), :666-698 (strWhereClause_Mst_NNT)
+///   gate: 13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Mst_NNTController.cs:26-187 (Search), :189-289 (GetAllActive), :291-434 (GetByMST), :666-698 (strWhereClause_Mst_NNT), :700-719 (strWhereClause_Mst_NNT_By_MST)
 ///   API:  11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\MstNNTController.cs:20-89 (WA_Mst_NNT_Get)
 ///   biz:  11.BackEnd\V10\idn.Loyalty.Biz\Master.cs:7933-8030 (WAS_Mst_NNT_Get) -> :8126-8295 (Mst_NNT_Get) -> :21344-21524 (Mst_NNT_GetX)
 ///
 /// Bỏ qua có chủ đích (loại Đ):
-/// - CheckGatewayAuthentication, CheckAuthorize (Mst_NNTController.cs:37-38, :198-199)
+/// - CheckGatewayAuthentication, CheckAuthorize (Mst_NNTController.cs:37-38, :198-199, :302-303)
 /// - WA_Sys_User_GetForCurrentUser (Mst_NNTController.cs:227)
 /// - Sys_User_CheckAuthorize (Master.cs:8199-8212)
 /// - Sys_User_GetAbilityViewOfUser / #tbl_Mst_NNT_ViewAbility (Master.cs:21382-21386)
@@ -112,6 +112,46 @@ public class Mst_NNTControllerPort : ControllerBase
     }
 
     /// <summary>
+    /// Port 1:1 GetByMST action từ gate Mst_NNTController.cs:291-434.
+    /// Chuỗi gọi nguồn:
+    ///   gate: Mst_NNTController.cs:291-434 (GetByMST), :700-719 (strWhereClause_Mst_NNT_By_MST)
+    ///   API:  MstNNTController.cs:20-89 (WA_Mst_NNT_Get)
+    ///   biz:  Master.cs:7933-8030 (WAS_Mst_NNT_Get) -> :8126-8295 (Mst_NNT_Get) -> :21344-21524 (Mst_NNT_GetX)
+    ///
+    /// Nghiệp vụ:
+    /// - Nhận body JSON { MST } (Mst_NNTController.cs:291).
+    /// - Kiểm tra tham số if (MST != null && !TUtils.CUtils.IsNullOrEmpty(MST)) (Mst_NNTController.cs:315).
+    ///   Nếu MST rỗng hoặc null: không truy vấn backend, trả về Success = true, Data = null (Mst_NNTController.cs:314, :420-421).
+    /// - Toán tử lọc MST: '=' (exact match) (Mst_NNTController.cs:707).
+    /// - KHÔNG lọc OrgID và KHÔNG lọc FlagActive (Mst_NNTController.cs:317-320).
+    /// - Lấy 1 bản ghi: Ft_RecordStart = "0", Ft_RecordCount = "1" (Mst_NNTController.cs:332-333).
+    /// - Map dòng đầu tiên Lst_Mst_NNT[0] sang Data; nếu rỗng trả null (Mst_NNTController.cs:339-342, :421).
+    /// </summary>
+    [HttpPost("getbymst")]
+    public async Task<IActionResult> GetByMST([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Mst_NNTGetByMSTReq? req)
+    {
+        // Mst_NNTController.cs:314-315: if (MST != null && !TUtils.CUtils.IsNullOrEmpty(MST))
+        if (string.IsNullOrWhiteSpace(req?.MST))
+        {
+            return Ok(new
+            {
+                Success = true,
+                Data = (object?)null
+            });
+        }
+
+        // Mst_NNTController.cs:317-336: Ft_RecordStart = "0", Ft_RecordCount = "1", chỉ lọc MST
+        var (_, rows) = await GetXAsync(null, null, null, 0, 1, mst: req.MST);
+
+        // Mst_NNTController.cs:339-342, :421: Lst_Mst_NNT[0] -> Data = objMst_NNT; nếu không có -> Data = null
+        return Ok(new
+        {
+            Success = true,
+            Data = rows.Count > 0 ? rows[0] : null
+        });
+    }
+
+    /// <summary>
     /// Hàm truy vấn tương ứng Mst_NNT_GetX (Master.cs:21344-21524):
     /// 1. Draft query (#tbl_Mst_NNT_Filter_Draft, :21401-21412) sắp xếp mnnt.MST asc.
     /// 2. Đếm tổng MyCount (:21415) trên toàn bộ draft.
@@ -123,10 +163,22 @@ public class Mst_NNTControllerPort : ControllerBase
         string? orgId,
         string? flagActive,
         long recordStart,
-        long recordCount)
+        long recordCount,
+        string? mst = null)
     {
         // 1. Khởi tạo truy vấn bảng Mst_NNT (#tbl_Mst_NNT_Filter_Draft, Master.cs:21401-21412)
         var draftQuery = _db.Set<Mst_NNT>().AsNoTracking();
+
+        // 1b. Lọc MST: Mst_NNTController.cs:705-708
+        // sbSql.AddWhereClause(Tbl_Mst_NNT + TblMst_NNT.MST, CUtils.StrValue(data.MST), "=")
+        // Lọc cột MST với toán tử '=' (exact match, không wildcard).
+        if (!string.IsNullOrWhiteSpace(mst))
+        {
+            draftQuery = draftQuery.Where(x => EF.Functions.Like(
+                (x.MST ?? "").ToLower(),
+                PortQuery.Equal(mst),
+                PortQuery.Esc));
+        }
 
         // 2. Lọc KeyWord: Mst_NNTController.cs:671-674
         // sbSql.AddWhereClause(Tbl_Mst_NNT + TblMst_NNT.NNTFullName, "%" + CUtils.StrValue(data.KeyWord) + "%", "like")
@@ -315,6 +367,14 @@ public class Mst_NNTSearchRequest
     public string? FlagActive { get; set; }
     public int Ft_PageIndex { get; set; } = 0;
     public int Ft_PageSize { get; set; } = 10;
+}
+
+/// <summary>
+/// Request model cho action GetByMST — Mst_NNTController.cs:291
+/// </summary>
+public class Mst_NNTGetByMSTReq
+{
+    public string? MST { get; set; }
 }
 
 /// <summary>
