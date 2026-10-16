@@ -11,7 +11,7 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục chính sách sinh nhật (Mst_BirthPolicy) của dự án nguồn 2022.7.Loyalty (#70, #71, #72, #73, #74).
+// PORT 1:1 — màn danh mục chính sách sinh nhật (Mst_BirthPolicy) của dự án nguồn 2022.7.Loyalty (#70, #71, #72, #73, #74, #75).
 //
 // Nguồn controller (tầng gate):
 //   Mst_BirthPolicyController.cs:23-103    Search -> WA_Mst_BirthPolicy_Get (#70)
@@ -21,6 +21,7 @@ namespace MiniLoyalty.Controllers.Port;
 //   Mst_BirthPolicyController.cs:320-335   strWhereClause_Mst_BirthPolicy_By_BirthPolicyNo (mệnh đề lọc GetByBirthPolicyNo)
 //   Mst_BirthPolicyController.cs:339-434   Save -> WA_Mst_BirthPolicy_Save (#73)
 //   Mst_BirthPolicyController.cs:438-530   Update -> WA_Mst_BirthPolicy_Update (#74)
+//   Mst_BirthPolicyController.cs:535-600   Delete -> WA_Mst_BirthPolicy_Save (FlagIsDelete = "1", #75)
 // Nguồn API:
 //   MstBirthPolicyController.cs:168-238    WA_Mst_BirthPolicy_Get
 //   MstBirthPolicyController.cs:22-92      WA_Mst_BirthPolicy_Save
@@ -31,7 +32,7 @@ namespace MiniLoyalty.Controllers.Port;
 //   Master.Loyalty.cs:10877-11085          Mst_BirthPolicy_GetX (bản LIVE)
 //   Master.Loyalty.cs:10507-10604          WAS_Mst_BirthPolicy_Save
 //   Master.Loyalty.cs:10348-10505          Mst_BirthPolicy_Save
-//   Master.Loyalty.cs:9675-10346           Mst_BirthPolicy_SaveX (bản LIVE)
+//   Master.Loyalty.cs:9675-10346           Mst_BirthPolicy_SaveX (bản LIVE, cả ghi mới #73 và xóa bIsDelete = true #75)
 //   Master.Loyalty.cs:11600-11690          WAS_Mst_BirthPolicy_Update
 //   Master.Loyalty.cs:11455-11598          Mst_BirthPolicy_Update
 //   Master.Loyalty.cs:11093-11453          Mst_BirthPolicy_UpdateX (bản LIVE)
@@ -135,6 +136,12 @@ public class MstBirthPolicySaveReq
 /// </summary>
 public class MstBirthPolicyUpdateReq : MstBirthPolicySaveReq
 {
+}
+
+/// <summary>Port 1:1 <c>Delete</c> — body nhận BirthPolicyNo (Mst_BirthPolicyController.cs:535, #75).</summary>
+public class MstBirthPolicyDeleteReq
+{
+    public string? BirthPolicyNo { get; set; }
 }
 
 
@@ -876,6 +883,150 @@ public class Mst_BirthPolicyControllerPort : ControllerBase
         {
             await tx.RollbackAsync();
             return PortResult.Fail("Mst_BirthPolicy_Update", "Exception", ex.Message);
+        }
+    }
+
+    // ============================================================================================
+    // Delete — nguồn gate Mst_BirthPolicyController.cs:535-600 (#75)
+    //   -> API MstBirthPolicyController.cs:22-92 (WA_Mst_BirthPolicy_Save với FlagIsDelete = "1")
+    //   -> BIZ Master.Loyalty.cs:10507-10604 (WAS_Mst_BirthPolicy_Save)
+    //   -> :10348-10505 (Mst_BirthPolicy_Save)
+    //   -> :9675-10346 (Mst_BirthPolicy_SaveX — nhánh bIsDelete = true).
+    //
+    // GIỮ ĐÚNG NGUỒN:
+    //   * Body JSON: { BirthPolicyNo } (nguồn gate Mst_BirthPolicyController.cs:535).
+    //   * BirthPolicyNo rỗng / null / whitespace:
+    //     gate ném ServiceException("invalid_BirthPolicyNo", "invalid_BirthPolicyNo") (:585)
+    //     -> HTTP 400 ErridnLoyalty.invalid_BirthPolicyNo.
+    //   * Nghiệp vụ sau kiểm tra rỗng được tách thành DeleteXAsync(no) chạy trong 1 transaction duy nhất.
+    // ============================================================================================
+    [HttpPost("delete")]
+    public async Task<IActionResult> Delete(
+        [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] MstBirthPolicyDeleteReq? req)
+    {
+        // Kiểm tra BirthPolicyNo rỗng / null / whitespace (gate Mst_BirthPolicyController.cs:554, :585)
+        if (req == null || string.IsNullOrWhiteSpace(req.BirthPolicyNo))
+        {
+            return PortResult.Fail("invalid_BirthPolicyNo", "Check.BirthPolicyNo", req?.BirthPolicyNo);
+        }
+
+        return await DeleteXAsync(req.BirthPolicyNo);
+    }
+
+    /// <summary>
+    /// Nghiệp vụ xóa chính sách sinh nhật (Master.Loyalty.cs:9675-10346, bIsDelete = true) — chạy trong 1 transaction.
+    /// 1. Chuẩn hóa BirthPolicyNo bằng StdParam (Trim().ToUpperInvariant()).
+    ///    CheckDB (:9757-9770): nếu KHÔNG tồn tại -> Thành công, không làm gì cả (bIsDelete -> goto Done, gate :579-580 -> Data null, Success = true).
+    /// 2. Kiểm tra EffDateStart (:9879-9906):
+    ///    Nếu chính sách có EffDateStart <= hôm nay (DateTime.UtcNow.Date) -> ném Mst_BirthPolicy_SaveX_InvalidEffDateStart
+    ///    (CHỈ xóa được chính sách CHƯA bắt đầu hiệu lực: EffDateStart > hôm nay).
+    /// 3. TRƯỚC khi xóa: tìm Dl_After (:9908-9941):
+    ///    Dl = dòng bị xóa.
+    ///    Dl_After = top 1 chính sách CÙNG ParamPrType có LogLUDTimeUTC > LogLUDTimeUTC của dòng bị xóa, order by LogLUDTimeUTC asc.
+    ///    LogLUDTimeUTC so sánh nguyên giá trị.
+    /// 4. Xóa Dtl + header (:10131-10151):
+    ///    FK trỏ tới Mst_BirthPolicy chỉ có Mst_BirthPolicyDtl -> xóa Dtl trước rồi xóa header.
+    /// 5. SAU khi xóa: 2 trường hợp sửa chính sách liền kề (:10272-10318):
+    ///    - TH1: Có Dl_After -> Dl_After.EffDateStart = Dl.EffDateStart
+    ///      (chính sách kế tiếp "lùi" ngày bắt đầu về ngày của dòng bị xóa).
+    ///    - TH2: Không có Dl_After -> chính sách MỚI NHẤT còn lại cùng ParamPrType (top 1 LogLUDTimeUTC desc) -> EffDateEnd = 2100-01-01.
+    /// </summary>
+    private async Task<IActionResult> DeleteXAsync(string no)
+    {
+        var strBirthPolicyNo = StdParam(no);
+        if (strBirthPolicyNo == null)
+        {
+            return PortResult.Fail("invalid_BirthPolicyNo", "Check.BirthPolicyNo", no);
+        }
+
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // 1. Kiểm tra tồn tại trong DB (Master.Loyalty.cs:9757-9770):
+            // Mst_BirthPolicy_CheckDB: nếu KHÔNG tồn tại -> Thành công, không làm gì cả (bIsDelete -> goto Done, gate :579-580 -> Data null, Success = true).
+            // Chuỗi DB: Like + PortQuery.Equal không phân biệt hoa/thường.
+            var dl = await _db.Set<Mst_BirthPolicy>()
+                .FirstOrDefaultAsync(x => EF.Functions.Like((x.BirthPolicyNo ?? "").ToLower(), PortQuery.Equal(strBirthPolicyNo), PortQuery.Esc));
+
+            if (dl == null)
+            {
+                await tx.CommitAsync();
+                return Ok(new { Success = true, Data = (object?)null });
+            }
+
+            // 2. Kiểm tra EffDateStart (Master.Loyalty.cs:9879-9906):
+            // KHÔNG có dòng BirthPolicyNo = x AND EffDateStart > hôm nay (DateTime.UtcNow.Date) -> Mst_BirthPolicy_SaveX_InvalidEffDateStart
+            // CHỈ xóa được chính sách CHƯA bắt đầu hiệu lực (EffDateStart > hôm nay).
+            var today = DateTime.UtcNow.Date;
+            // Nguồn: giữ lại khi `EffDateStart > 'yyyy-MM-dd'` (00:00 hôm nay) ⇒ so NGUYÊN datetime, KHÔNG cắt .Date
+            // (EffDateStart hôm nay 10:00 vẫn xoá được như nguồn).
+            if (dl.EffDateStart <= today)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_BirthPolicy_SaveX_InvalidEffDateStart",
+                    "Check.BirthPolicyNo", strBirthPolicyNo,
+                    "Check.EffDateStart", dl.EffDateStart.ToString("yyyy-MM-dd"));
+            }
+
+            // 3. TRƯỚC khi xóa: tìm Dl_After (Master.Loyalty.cs:9908-9941):
+            // Dl_After = top 1 chính sách CÙNG ParamPrType có LogLUDTimeUTC > LogLUDTimeUTC của dòng bị xóa, order by LogLUDTimeUTC asc.
+            // LogLUDTimeUTC so sánh nguyên giá trị.
+            Mst_BirthPolicy? dlAfter = null;
+            if (dl.LogLUDTimeUTC.HasValue)
+            {
+                dlAfter = await _db.Set<Mst_BirthPolicy>()
+                    .Where(t => EF.Functions.Like((t.ParamPrType ?? "").ToLower(), PortQuery.Equal(dl.ParamPrType ?? ""), PortQuery.Esc)
+                                && t.LogLUDTimeUTC > dl.LogLUDTimeUTC)
+                    .OrderBy(t => t.LogLUDTimeUTC)
+                    .FirstOrDefaultAsync();
+            }
+
+            // Lưu lại ngày bắt đầu và ParamPrType của dòng bị xóa trước khi remove
+            var dlEffDateStart = dl.EffDateStart;
+            var dlParamPrType = dl.ParamPrType;
+
+            // 4. Xóa Dtl + header (Master.Loyalty.cs:10131-10151):
+            // FK trỏ tới Mst_BirthPolicy chỉ có Mst_BirthPolicyDtl -> xóa Dtl trước rồi xóa header.
+            var dtls = await _db.Set<Mst_BirthPolicyDtl>()
+                .Where(d => EF.Functions.Like((d.BirthPolicyNo ?? "").ToLower(), PortQuery.Equal(strBirthPolicyNo), PortQuery.Esc))
+                .ToListAsync();
+            if (dtls.Count > 0)
+            {
+                _db.Set<Mst_BirthPolicyDtl>().RemoveRange(dtls);
+            }
+            _db.Set<Mst_BirthPolicy>().Remove(dl);
+            await _db.SaveChangesAsync();
+
+            // 5. SAU khi xóa: 2 trường hợp sửa chính sách liền kề (Master.Loyalty.cs:10272-10318):
+            // - TH1: Có Dl_After -> Dl_After.EffDateStart = Dl.EffDateStart
+            //   (chính sách kế tiếp "lùi" ngày bắt đầu về ngày của dòng bị xóa).
+            // - TH2: Không có Dl_After -> chính sách MỚI NHẤT còn lại cùng ParamPrType (top 1 LogLUDTimeUTC desc) -> EffDateEnd = 2100-01-01.
+            if (dlAfter != null)
+            {
+                dlAfter.EffDateStart = dlEffDateStart;
+                await _db.SaveChangesAsync();
+            }
+            else
+            {
+                var latestRemaining = await _db.Set<Mst_BirthPolicy>()
+                    .Where(t => EF.Functions.Like((t.ParamPrType ?? "").ToLower(), PortQuery.Equal(dlParamPrType ?? ""), PortQuery.Esc))
+                    .OrderByDescending(t => t.LogLUDTimeUTC)
+                    .FirstOrDefaultAsync();
+
+                if (latestRemaining != null)
+                {
+                    latestRemaining.EffDateEnd = new DateTime(2100, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+                    await _db.SaveChangesAsync();
+                }
+            }
+
+            await tx.CommitAsync();
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return PortResult.Fail("Mst_BirthPolicy_Save", "Exception", ex.Message);
         }
     }
 
