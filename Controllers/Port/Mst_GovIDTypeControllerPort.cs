@@ -11,12 +11,13 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục loại giấy tờ tuỳ thân (Mst_GovIDType) của dự án nguồn 2022.7.Loyalty (#156, #157).
+// PORT 1:1 — màn danh mục loại giấy tờ tuỳ thân (Mst_GovIDType) của dự án nguồn 2022.7.Loyalty (#156, #157, #158).
 //
 // Nguồn controller (tầng gate):
 //   Mst_GovIDTypeController.cs:26-106   Search -> WA_Mst_GovIDType_Get (#156)
 //   Mst_GovIDTypeController.cs:108-171  GetByGovIDType -> WA_Mst_GovIDType_Get (#157)
-//   Mst_GovIDTypeController.cs:435-459  strWhereClause_Mst_GovIDType (mệnh đề lọc Search)
+//   Mst_GovIDTypeController.cs:173-233  GetAllActive -> WA_Mst_GovIDType_Get (#158)
+//   Mst_GovIDTypeController.cs:435-459  strWhereClause_Mst_GovIDType (mệnh đề lọc Search, GetAllActive)
 //   Mst_GovIDTypeController.cs:461-476  strWhereClause_Mst_GovIDType_By_GovIDType (mệnh đề lọc GetByGovIDType)
 // Nguồn API:
 //   MstGovIDTypeController.cs:21-90     WA_Mst_GovIDType_Get
@@ -29,6 +30,12 @@ namespace MiniLoyalty.Controllers.Port;
 //
 // GIỮ ĐÚNG NGUỒN:
 //   * Endpoint là POST (nguồn [AcceptVerbs("POST")]).
+//   * GetAllActive (gate :173-233, #158):
+//     - Gate gọi strWhereClause_Mst_GovIDType với duy nhất FlagActive = "1" (:193-196); không truyền KeyWord.
+//     - Hàm lọc dùng toán tử IN (:448-456) => IN ('1'); sắp xếp GovIDType asc theo SQL biz (Master.cs:32516).
+//     - Ft_RecordStart = 0, Ft_RecordCount = 123456000 theo quy ước lấy hết (gate :208-209 chưa xác minh giá trị thật).
+//     - KHÔNG lọc OrgID/NetworkID (gate :205-206 chỉ đưa vào request; biz SQL Master.cs:32508-32534 không lọc).
+//     - Data là MẢNG TRẦN (không PageInfo, không MyIdxSeq), null nếu rỗng hoặc Count == 0 (gate :215-220).
 //   * GetByGovIDType (gate :108-171, #157):
 //     - GovIDType rỗng hoặc null (string.IsNullOrEmpty, gate :128) -> không truy vấn DB, trả Success = true, Data = null (gate :157-158).
 //     - Lọc GovIDType bằng toán tử '=' (gate :466-469) không wildcard, collation SQL Server không phân biệt hoa thường (Like + PortQuery.Equal).
@@ -141,6 +148,29 @@ public class Mst_GovIDTypeControllerPort : ControllerBase
         {
             Success = true,
             Data = data
+        });
+    }
+
+    /// <summary>
+    /// Port 1:1 <c>Mst_GovIDTypeController.GetAllActive</c> (nguồn gate Mst_GovIDTypeController.cs:173-233, #158).
+    /// </summary>
+    [HttpPost("getallactive")]
+    public async Task<IActionResult> GetAllActive([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] object? _ = null)
+    {
+        // Gate Mst_GovIDTypeController.cs:193-196 gọi strWhereClause_Mst_GovIDType với duy nhất FlagActive = "1", không truyền KeyWord.
+        // Hàm lọc :448-456 dùng toán tử IN ('1').
+        // Không lọc OrgID/NetworkID (gate :205-206 chỉ đưa vào request, SQL biz Master.cs:32508-32534 không lọc).
+        // Ft_RecordStart = 0, Ft_RecordCount = 123456000 theo quy ước lấy hết (gate :208-209 chưa xác minh giá trị thật).
+        // Sắp xếp GovIDType asc theo SQL biz Master.cs:32516.
+        // Tái sử dụng GetXAsync có sẵn theo bài học A.3.
+        var (_, rows) = await GetXAsync(null, "1", 0, 123456000);
+
+        // Gate :215-220: Data = lst_Mst_GovIDType (mảng trần, null nếu rỗng hoặc Count == 0), SetSuccess() -> Success = true.
+        // Đúng 7 trường theo model nguồn TModels.Mst_GovIDType (Mst_GovIDType.cs:9-24), không MyIdxSeq, không PageInfo.
+        return Ok(new
+        {
+            Success = true,
+            Data = rows.Count > 0 ? rows : null
         });
     }
 
