@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
@@ -12,7 +14,7 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục phòng ban (Mst_Department) của dự án nguồn 2022.7.Loyalty (#122, #123, #124, #125, #126, #127, #128).
+// PORT 1:1 — màn danh mục phòng ban (Mst_Department) của dự án nguồn 2022.7.Loyalty (#122, #123, #124, #125, #126, #127, #128, #129).
 //
 // Nguồn controller (tầng gate):
 //   Mst_DepartmentController.cs:30-109   Search -> WA_Mst_Department_Get (#122)
@@ -22,6 +24,8 @@ namespace MiniLoyalty.Controllers.Port;
 //   Mst_DepartmentController.cs:374-443  Update -> WA_Mst_Department_Update (#126)
 //   Mst_DepartmentController.cs:446-515  Delete -> WA_Mst_Department_Delete (#127)
 //   Mst_DepartmentController.cs:516-580  DeleteMultiple -> WA_Mst_Department_Delete (#128)
+//   Mst_DepartmentController.cs:584-730  Import -> WA_Mst_Department_Create (#129)
+//   Mst_DepartmentController.cs:864-873  GetImportDicColumsTemplate
 //   Mst_DepartmentController.cs:877-905  strWhereClause_Mst_Department (mệnh đề lọc Search, GetAllActive)
 //   Mst_DepartmentController.cs:907-926  strWhereClause_Mst_Department_By_DepartmentCode (mệnh đề lọc GetByDepartmentCode)
 // Nguồn API:
@@ -124,7 +128,19 @@ namespace MiniLoyalty.Controllers.Port;
 //     - Lặp tuần tự (:547-564), mỗi phần tử gọi WA_Mst_Department_Delete trong 1 transaction riêng (DeleteXAsync).
 //     - KHÔNG kiểm tra DepartmentCode rỗng và KHÔNG kiểm OrgID ở gate (khác Delete đơn #127): mã rỗng -> CheckDB -> ErridnLoyalty.Mst_Department_CheckDB_DepartmentNotFound.
 //     - Lỗi ở phần tử thứ k dừng ngay, các phần tử TRƯỚC k ĐÃ XÓA ("xóa một phần" là hành vi nguồn).
-//     - Thành công: Data = null.
+//   * Import (#129): [HttpPost("import")], [Consumes("multipart/form-data")], IFormFile? file (gate Mst_DepartmentController.cs:584-730).
+//     GIẢ ĐỊNH (kế thừa Data/PortExcel.cs): ExcelImportNew là DLL không có mã ⇒ giả định dòng 1 = tiêu đề, dữ liệu từ A2;
+//     ánh xạ theo thứ tự 3 cột của GetImportDicColumsTemplate (:864-873): DepartmentName, DepartmentCodeParent, DepartmentDesc (DepartmentCode bị comment ở nguồn :868).
+//     Kiểm tra file upload: file thiếu/rỗng hoặc đuôi != ".xlsx" -> Fail("Mst_Department_Import", "Message", "File excel import không hợp lệ") (:606-621).
+//     Bảng không có dòng -> Fail("Mst_Department_Import", "Message", "File excel import không có dữ liệu") (:625, :713-716).
+//     Số cột dòng tiêu đề != 3 -> Fail("Mst_Department_Import", "Message", "File excel import không hợp lệ") (:627-631).
+//     Kiểm tra TẤT CẢ các dòng trước khi tạo (:635-660): DepartmentName rỗng -> Fail("Mst_Department_Import", "Message", "Tên bộ phận không được trống") (:642-646).
+//     Các kiểm tra Code, Parent, MST, trùng lặp bị comment ở nguồn (:637-651, :664-679) -> không port.
+//     Lưu từng dòng: mỗi dòng 1 transaction riêng biệt (hành vi "import một phần": lỗi dòng k dừng ngay, các dòng trước k đã lưu);
+//     DepartmentCode = Guid.NewGuid().ToString() (:689) (khác Create đơn dùng seq DPMCODE..., Import không qua seq; qua StdParam thành GUID IN HOA 36 ký tự);
+//     OrgID/MST client gửi ("ALL") bị bỏ qua, thực tế lấy theo cấu hình Biz_OrgID giống #125;
+//     gọi CreateXAsync lưu dữ liệu và gọi UpdBUAsync cập nhật cấu trúc BU toàn bảng.
+//     Thành công Data = null (:710-711).
 //   * Cột tính md_DepartmentNameParent: left join Mst_Department f on t.DepartmentCodeParent = f.DepartmentCode (:30512-30513),
 //     lấy tên phòng ban cấp trên f.DepartmentName (null nếu không có cấp trên).
 //   * Cột tính ss_QtyStaff: nguồn left join count StaffCode từ Staff_MapDepartment group by DepartmentCode (:30490-30499, :30506).
@@ -735,6 +751,162 @@ public class Mst_DepartmentControllerPort : ControllerBase
             Success = true,
             Data = (object?)null
         });
+    }
+
+    // ============================================================================================
+    // Import — nguồn gate Mst_DepartmentController.cs:584-730 (#129) -> API WA_Mst_Department_Create
+    // (MstDepartmentController.cs:91-160) -> biz WAS_Mst_Department_Create (Master.cs:29702-29785)
+    // -> Mst_Department_Create (Master.cs:29786-29935) -> Mst_Department_CreateX (Master.cs:30569-30726).
+    //
+    // GIẢ ĐỊNH (kế thừa từ Data/PortExcel.cs):
+    //   - DLL ExcelImportNew của nguồn không có mã ⇒ giả định định dạng file Excel:
+    //     dòng 1 = tiêu đề (đúng theo GetImportDicColumsTemplate sinh ra), dữ liệu bắt đầu từ ô A2 (firstDataRow = 2).
+    //   - Cột ánh xạ theo vị trí: cột 1 = DepartmentName, cột 2 = DepartmentCodeParent, cột 3 = DepartmentDesc
+    //     (GetImportDicColumsTemplate có 3 cột: DepartmentName -> "Tên phòng ban (*)", DepartmentCodeParent -> "Phòng ban cấp trên",
+    //      DepartmentDesc -> "Mô tả"; cột DepartmentCode bị comment ở nguồn :868 nên không có trong file).
+    //
+    // Quy trình và thứ tự kiểm tra:
+    //   1. Kiểm tra file upload: gate Mst_DepartmentController.cs:606-621
+    //      - Thiếu file hoặc file rỗng hoặc đuôi file != ".xlsx" -> Fail("Mst_Department_Import", "Message", "File excel import không hợp lệ")
+    //   2. Đọc file bằng PortExcel.ReadSheet(stream, new[] { "DepartmentName", "DepartmentCodeParent", "DepartmentDesc" }):
+    //      - Bảng không có dòng dữ liệu (rows == null || rows.Count == 0) -> Fail("Mst_Department_Import", "Message", "File excel import không có dữ liệu") (:625, :713-716)
+    //      - Số cột tiêu đề != GetImportDicColumsTemplate().Count (3 cột) -> Fail("Mst_Department_Import", "Message", "File excel import không hợp lệ") (:627-631)
+    //   3. Kiểm tra TẤT CẢ các dòng TRƯỚC khi tạo (#region["Check null"] :635-660):
+    //      - DepartmentName rỗng / khoảng trắng -> Fail("Mst_Department_Import", "Message", "Tên bộ phận không được trống") (:642-646)
+    //        (nguồn ném ServiceException("Tên bộ phận không được trống") — GIỮ NGUYÊN VĂN).
+    //      - Các kiểm tra Code, Parent, MST, trùng lặp bị comment ở nguồn (:637-651, :664-679) -> không port.
+    //      Nếu có bất kỳ dòng nào vi phạm, dừng ngay và KHÔNG có dòng nào được tạo vào CSDL.
+    //   4. Lưu từng dòng tuần tự (hành vi "import một phần"):
+    //      - Mỗi dòng gán item.DepartmentCode = Guid.NewGuid().ToString() (:689)
+    //        (KHÁC Create đơn: Create đơn lấy seq DPMCODE..., Import KHÔNG qua seq mà sinh Guid mới;
+    //         qua StdParam trong CreateXAsync mã trở thành GUID IN HOA 36 ký tự).
+    //      - Gọi CreateXAsync trong 1 transaction riêng cho mỗi dòng (gate :687-708).
+    //      - OrgID và MST client gửi ("ALL") bị bỏ qua, thực tế lấy từ cấu hình Biz_OrgID giống Create đơn #125.
+    //      - CreateXAsync thực hiện kiểm tra DB, lưu dòng Mst_Department và gọi UpdBUAsync cập nhật cấu trúc BU toàn bảng.
+    //      - Nếu dòng thứ k gặp lỗi, transaction dòng k bị rollback, vòng lặp dừng ngay lập tức, trả về đúng lỗi của CreateXAsync cho dòng k.
+    //      - CÁC DÒNG TRƯỚC k ĐÃ ĐƯỢC COMMIT VÀO DB (không rollback các dòng đã tạo trước đó — "import một phần").
+    //      - Các dòng sau k không được duyệt.
+    //   5. Thành công: trả Ok({ Success = true, Data = null }) (:710-711).
+    //
+    // Bỏ qua có chủ đích (loại Đ):
+    //   - CheckGatewayAuthentication, CheckAuthorize (:595-596)
+    //   - Nguồn lưu file tạm xuống đĩa (FileUtils.SaveTempFile :616) -> đọc trực tiếp từ stream qua ClosedXML
+    //   - Session người dùng orgUserUI (:594, :690-692, :698-702).
+    // ============================================================================================
+    [HttpPost("import")]
+    [Consumes("multipart/form-data")]
+    public async Task<IActionResult> Import(IFormFile? file)
+    {
+        // 1. Kiểm tra file upload: gate Mst_DepartmentController.cs:606-621
+        if (file == null || file.Length == 0)
+        {
+            return PortResult.Fail("Mst_Department_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+        if (ext != ".xlsx")
+        {
+            return PortResult.Fail("Mst_Department_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        // 2. Đọc bảng tính bằng PortExcel.ReadSheet (giả định định dạng file Excel từ PortExcel)
+        int columnCount;
+        List<Dictionary<string, string?>> rows;
+        try
+        {
+            using var stream = file.OpenReadStream();
+            (columnCount, rows) = PortExcel.ReadSheet(stream, new[] { "DepartmentName", "DepartmentCodeParent", "DepartmentDesc" });
+        }
+        catch
+        {
+            return PortResult.Fail("Mst_Department_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        // Kiểm tra có dữ liệu hay không: gate Mst_DepartmentController.cs:625, :713-716 (table == null || table.Rows.Count == 0)
+        if (rows.Count == 0)
+        {
+            return PortResult.Fail("Mst_Department_Import", "Message", "File excel import không có dữ liệu");
+        }
+
+        // Kiểm tra số cột dòng tiêu đề so với GetImportDicColumsTemplate().Count (3 cột): gate Mst_DepartmentController.cs:627-631
+        if (columnCount != GetImportDicColumsTemplate().Count)
+        {
+            return PortResult.Fail("Mst_Department_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        // 3. Kiểm tra TẤT CẢ các dòng TRƯỚC khi tạo (Check null: gate Mst_DepartmentController.cs:635-660)
+        foreach (var r in rows)
+        {
+            var departmentName = r.GetValueOrDefault("DepartmentName");
+            if (string.IsNullOrWhiteSpace(departmentName))
+            {
+                return PortResult.Fail("Mst_Department_Import", "Message", "Tên bộ phận không được trống");
+            }
+        }
+
+        // 4. Lưu từng dòng tuần tự: mỗi dòng 1 transaction riêng (hành vi "import một phần": gate Mst_DepartmentController.cs:687-708)
+        foreach (var r in rows)
+        {
+            var name = r.GetValueOrDefault("DepartmentName");
+            var parent = r.GetValueOrDefault("DepartmentCodeParent");
+            var desc = r.GetValueOrDefault("DepartmentDesc");
+
+            // Nguồn :689 item.DepartmentCode = Guid.NewGuid().ToString() (khác Create đơn dùng seq DPMCODE...)
+            // Mã Guid đi qua StdParam trong CreateXAsync -> IN HOA 36 ký tự.
+            await using var tx = await _db.Database.BeginTransactionAsync();
+            try
+            {
+                var err = await CreateXAsync(
+                    Guid.NewGuid().ToString(),
+                    null, // OrgID client gửi bị bỏ qua, lấy từ Biz_OrgID giống Create đơn #125
+                    parent,
+                    "ALL", // MST truyền "ALL", nhưng CreateXAsync lấy theo Biz_OrgID
+                    name,
+                    desc,
+                    DateTime.UtcNow,
+                    "port"
+                );
+
+                if (err != null)
+                {
+                    // Lỗi ở dòng k -> thoát ngay, rollback dòng k, trả đúng lỗi của CreateXAsync, các dòng trước k đã tạo thành công
+                    await tx.RollbackAsync();
+                    return err;
+                }
+
+                await tx.CommitAsync();
+            }
+            catch (Exception)
+            {
+                await tx.RollbackAsync();
+                throw;
+            }
+        }
+
+        // Thành công: gate Mst_DepartmentController.cs:710-711
+        return Ok(new
+        {
+            Success = true,
+            Data = (object?)null
+        });
+    }
+
+    /// <summary>
+    /// Từ điển cột mẫu Import Excel: gate Mst_DepartmentController.cs:864-873 (GetImportDicColumsTemplate).
+    /// Giữ đúng thứ tự 3 cột từ nguồn:
+    /// 1. DepartmentName ("Tên phòng ban (*)")
+    /// 2. DepartmentCodeParent ("Phòng ban cấp trên")
+    /// 3. DepartmentDesc ("Mô tả")
+    /// Cột DepartmentCode bị comment ở nguồn (:868) nên không có trong file mẫu.
+    /// </summary>
+    private static Dictionary<string, string> GetImportDicColumsTemplate()
+    {
+        return new Dictionary<string, string>
+        {
+            { "DepartmentName", "Tên phòng ban (*)" },
+            { "DepartmentCodeParent", "Phòng ban cấp trên" },
+            { "DepartmentDesc", "Mô tả" }
+        };
     }
 
     /// <summary>
