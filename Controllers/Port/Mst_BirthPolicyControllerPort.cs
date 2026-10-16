@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using MiniLoyalty.Data;
@@ -11,17 +14,18 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục chính sách sinh nhật (Mst_BirthPolicy) của dự án nguồn 2022.7.Loyalty (#70, #71, #72, #73, #74, #75).
+// PORT 1:1 — màn danh mục chính sách sinh nhật (Mst_BirthPolicy) của dự án nguồn 2022.7.Loyalty (#70, #71, #72, #73, #74, #75, #76).
 //
 // Nguồn controller (tầng gate):
 //   Mst_BirthPolicyController.cs:23-103    Search -> WA_Mst_BirthPolicy_Get (#70)
 //   Mst_BirthPolicyController.cs:104-213   GetAllActive -> WA_Mst_BirthPolicy_Get (#71)
 //   Mst_BirthPolicyController.cs:214-290   GetByBirthPolicyNo -> WA_Mst_BirthPolicy_Get (#72)
-//   Mst_BirthPolicyController.cs:294-319   strWhereClause_Mst_BirthPolicy (mệnh đề lọc Search / GetAllActive)
+//   Mst_BirthPolicyController.cs:294-319   strWhereClause_Mst_BirthPolicy (mệnh đề lọc Search / GetAllActive / Export)
 //   Mst_BirthPolicyController.cs:320-335   strWhereClause_Mst_BirthPolicy_By_BirthPolicyNo (mệnh đề lọc GetByBirthPolicyNo)
 //   Mst_BirthPolicyController.cs:339-434   Save -> WA_Mst_BirthPolicy_Save (#73)
 //   Mst_BirthPolicyController.cs:438-530   Update -> WA_Mst_BirthPolicy_Update (#74)
 //   Mst_BirthPolicyController.cs:535-600   Delete -> WA_Mst_BirthPolicy_Save (FlagIsDelete = "1", #75)
+//   Mst_BirthPolicyController.cs:604-683   Export -> WA_Mst_BirthPolicy_Get (#76)
 // Nguồn API:
 //   MstBirthPolicyController.cs:168-238    WA_Mst_BirthPolicy_Get
 //   MstBirthPolicyController.cs:22-92      WA_Mst_BirthPolicy_Save
@@ -144,6 +148,17 @@ public class MstBirthPolicyDeleteReq
     public string? BirthPolicyNo { get; set; }
 }
 
+/// <summary>
+/// Body request của Export (nguồn gate Mst_BirthPolicyController.cs:604, #76).
+/// Nhận OrgID, KeyWord, FlagActive; EmptyBodyBehavior.Allow.
+/// </summary>
+public class MstBirthPolicyExportReq
+{
+    public string? OrgID { get; set; }
+    public string? KeyWord { get; set; }
+    public string? FlagActive { get; set; }
+}
+
 
 [ApiController]
 [Route("api/mst_birthpolicy")]
@@ -152,11 +167,13 @@ public class Mst_BirthPolicyControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly IConfiguration _config;
+    private readonly IWebHostEnvironment _env;
 
-    public Mst_BirthPolicyControllerPort(AppDbContext db, IConfiguration config)
+    public Mst_BirthPolicyControllerPort(AppDbContext db, IConfiguration config, IWebHostEnvironment env)
     {
         _db = db;
         _config = config;
+        _env = env;
     }
 
     /// <summary>
@@ -1030,6 +1047,102 @@ public class Mst_BirthPolicyControllerPort : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Port 1:1 <c>Mst_BirthPolicyController.Export</c> (nguồn gate Mst_BirthPolicyController.cs:604-683, #76).
+    /// Chuỗi gọi: gate Export -> WA_Mst_BirthPolicy_Get (MstBirthPolicyController.cs:168-238)
+    /// -> BIZ WAS_Mst_BirthPolicy_Get (Master.Loyalty.cs:10606-10719)
+    /// -> BIZ Mst_BirthPolicy_Get (Master.Loyalty.cs:10720-10876)
+    /// -> BIZ Mst_BirthPolicy_GetX (Master.Loyalty.cs:10877-11085).
+    ///
+    /// Hành vi Export:
+    ///   - Body nhận { OrgID, KeyWord, FlagActive }, EmptyBodyBehavior.Allow (gate :604).
+    ///   - Lọc qua strWhereClause_Mst_BirthPolicy (gate :625-630, :294-319):
+    ///     * KeyWord like '%kw%' trên BirthPolicyNo (:299-302)
+    ///     * FlagActive IN ('val1','val2',...) (:308-316)
+    ///     * OrgID không dùng trong hàm lọc (:294-319) -> bỏ qua OrgID
+    ///   - Phân trang lấy toàn bộ dữ liệu: Ft_RecordStart = "0", Ft_RecordCount = "123456000" (gate :643-644).
+    ///   - Gọi GetXAsync(req.KeyWord, req.FlagActive, 0, 123456000).
+    ///   - Nếu danh sách rỗng (rows == null || rows.Count == 0):
+    ///     ném ServiceException("Không có dữ liệu") (gate :668) -> trả 400 ErridnLoyalty.Mst_BirthPolicy_Export.
+    ///   - Lấy từ điển 4 cột từ GetImportDicColums() (gate :655, :686-696):
+    ///     1. BirthPolicyNo -> "Mã chương trình (*)"
+    ///     2. EffDateStart -> "Ngày hiệu lực"
+    ///     3. ParamPrType -> "Loại ưu đãi (*)"
+    ///     4. FlagActive -> "Trạng thái"
+    ///   - Sinh đường dẫn file qua PortExcel.GenExcelExportFilePath(webRoot, "Mst_BirthPolicy") (gate :657).
+    ///   - Tên sheet: "Mst_BirthPolicy" (gate :658).
+    ///   - Ghi file qua PortExcel.ExportToExcelFromList(rows, dicColNames, physicalPath, "Mst_BirthPolicy") (gate :658).
+    ///   - Trả URL tải file với Success = true, Data = { Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath } (gate :659-664).
+    ///
+    /// Bỏ qua có chủ đích:
+    ///   - CheckGatewayAuthentication, CheckAuthorize (gate :614-615)
+    ///   - Sys_User_CheckAuthorize (Master.Loyalty.cs:10786-10799)
+    ///   - Ghi RequestLog/ReturnLog (Master.Loyalty.cs:10765-10772, :10866-10873)
+    /// </summary>
+    [HttpPost("export")]
+    public async Task<IActionResult> Export(
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] MstBirthPolicyExportReq? req)
+    {
+        req ??= new MstBirthPolicyExportReq();
+
+        // Nguồn gate Mst_BirthPolicyController.cs:625-630, :643-644:
+        // strWhereClause_Mst_BirthPolicy (:294-319) lọc KeyWord (like '%kw%') và FlagActive (in).
+        // OrgID truyền vào nhưng hàm lọc không dùng -> bỏ qua OrgID.
+        // Ft_RecordStart = "0", Ft_RecordCount = "123456000", Rt_Cols_Mst_BirthPolicy = "*".
+        var (_, rows) = await GetXAsync(req.KeyWord, req.FlagActive, 0, 123456000);
+
+        // Nguồn :651, :668: nếu danh sách rỗng -> throw ServiceException("Không có dữ liệu") -> 400 ErridnLoyalty.Mst_BirthPolicy_Export
+        if (rows == null || rows.Count == 0)
+        {
+            return PortResult.Fail("Mst_BirthPolicy_Export", "Message", "Không có dữ liệu");
+        }
+
+        // Tạo thư mục và đường dẫn file Excel xuất: BaseController.GenExcelExportFilePath (:657)
+        var webRoot = _env.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = Path.Combine(_env.ContentRootPath, "wwwroot");
+        }
+
+        // Lấy từ điển 4 cột: Mst_BirthPolicyController.cs:655 gọi GetImportDicColums() (4 cột)
+        var dicColNames = GetImportDicColums();
+        var (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Mst_BirthPolicy");
+
+        // Ghi danh sách ra file Excel: ExcelExport.ExportToExcelFromList (:658) với sheet "Mst_BirthPolicy"
+        PortExcel.ExportToExcelFromList(rows, dicColNames, physicalPath, "Mst_BirthPolicy");
+
+        // Trả URL tải file: Data = { Url = GetRequestBaseAddress() + url } (:659-664)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+            }
+        });
+    }
+
+    #region DicColums
+    /// <summary>
+    /// Từ điển 4 cột xuất Excel: gate Mst_BirthPolicyController.cs:655, 686-696 (GetImportDicColums).
+    /// Giữ đúng thứ tự 4 cột từ nguồn:
+    /// 1. BirthPolicyNo -> "Mã chương trình (*)"
+    /// 2. EffDateStart -> "Ngày hiệu lực"
+    /// 3. ParamPrType -> "Loại ưu đãi (*)"
+    /// 4. FlagActive -> "Trạng thái"
+    /// Lưu ý: GetImportDicColumsTemplate (:698-704) chép nhầm cột CarBrand và KHÔNG có action ExportTemplate trong ledger -> không port.
+    /// </summary>
+    private static Dictionary<string, string> GetImportDicColums()
+    {
+        return new Dictionary<string, string>
+        {
+            { "BirthPolicyNo", "Mã chương trình (*)" },
+            { "EffDateStart", "Ngày hiệu lực" },
+            { "ParamPrType", "Loại ưu đãi (*)" },
+            { "FlagActive", "Trạng thái" }
+        };
+    }
+    #endregion
 
     private static string? StdParam(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim().ToUpperInvariant();
     private static string? StdStr(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
