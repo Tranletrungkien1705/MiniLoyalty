@@ -4,7 +4,7 @@ Nguồn mẫu số: `D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.Web
 
 **Mẫu số (N)**: 337
 
-**Tiến độ hiện tại**: 139/337 (41.25%)
+**Tiến độ hiện tại**: 140/337 (41.54%)
 
 Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã có` (đã port từ trước, có bằng chứng) · `Bỏ` (scaffold/không nghiệp vụ, ghi lý do) · `Cần xem tay`.
 
@@ -192,7 +192,7 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 180 | Mst_OrgController/GetAllOrg_bk | Bỏ | - |
 | 181 | Mst_OrgController/GetAllOrg | Chưa làm | - |
 | 182 | Mst_OrgController/GetOrgsNotInSolution | Chưa làm | - |
-| 183 | Mst_ParamPromotionController/Search | Chưa làm | - |
+| 183 | Mst_ParamPromotionController/Search | Đã làm | 2972960 |
 | 184 | Mst_ParamPromotionController/GetAllActive | Chưa làm | - |
 | 185 | Mst_ParamPromotionController/GetByPrProgramCode | Chưa làm | - |
 | 186 | Mst_ParamPromotionController/Save | Chưa làm | - |
