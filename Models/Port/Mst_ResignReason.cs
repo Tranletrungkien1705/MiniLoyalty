@@ -45,10 +45,10 @@ public class Mst_ResignReasonSeeder : IPortSeeder
 
         var now = new DateTime(2026, 10, 10, 10, 0, 0, DateTimeKind.Utc);
         db.Set<Mst_ResignReason>().AddRange(
-            new Mst_ResignReason { OrgID = "1000", ReasonID = "R01", ResignReason = "Nghỉ hưu", FlagActive = "1", NetworkID = "DEMO", LogLUBy = "seed", LogLUDTimeUTC = now },
-            new Mst_ResignReason { OrgID = "1000", ReasonID = "R02", ResignReason = "Chuyển công tác", FlagActive = "1", NetworkID = "DEMO", LogLUBy = "seed", LogLUDTimeUTC = now },
-            new Mst_ResignReason { OrgID = "1000", ReasonID = "R03", ResignReason = "Việc gia đình", FlagActive = "0", NetworkID = "DEMO", LogLUBy = "seed", LogLUDTimeUTC = now },
-            new Mst_ResignReason { OrgID = "2000", ReasonID = "R01", ResignReason = "Du học", FlagActive = "1", NetworkID = "DEMO", LogLUBy = "seed", LogLUDTimeUTC = now }
+            new Mst_ResignReason { OrgID = "4020320001", ReasonID = "R01", ResignReason = "Nghỉ hưu", FlagActive = "1", NetworkID = "DEMO", LogLUBy = "seed", LogLUDTimeUTC = now },
+            new Mst_ResignReason { OrgID = "4020320001", ReasonID = "R02", ResignReason = "Chuyển công tác", FlagActive = "1", NetworkID = "DEMO", LogLUBy = "seed", LogLUDTimeUTC = now },
+            new Mst_ResignReason { OrgID = "4020320001", ReasonID = "R03", ResignReason = "Việc gia đình", FlagActive = "0", NetworkID = "DEMO", LogLUBy = "seed", LogLUDTimeUTC = now },
+            new Mst_ResignReason { OrgID = "4020320002", ReasonID = "R01", ResignReason = "Du học", FlagActive = "1", NetworkID = "DEMO", LogLUBy = "seed", LogLUDTimeUTC = now }
         );
         await db.SaveChangesAsync();
     }

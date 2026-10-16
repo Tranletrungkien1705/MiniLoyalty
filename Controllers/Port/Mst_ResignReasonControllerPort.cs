@@ -186,6 +186,116 @@ public class Mst_ResignReasonControllerPort : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Port 1:1 Mst_ResignReasonController.Update (gate :313-379) -> WA_Mst_ResignReason_Update -> Mst_ResignReason_UpdateX (MasterData.cs:25351-25484).
+    /// </summary>
+    [HttpPost("update")]
+    public async Task<IActionResult> Update([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] Mst_ResignReason? req)
+    {
+        // Body rỗng -> ném lỗi (Mst_ResignReasonController.cs:326-328) -> catch ném mã mặc định
+        if (req == null)
+        {
+            return PortResult.Fail("Mst_ResignReason_Update", "Check.strJson", null);
+        }
+
+        // Cột update từ gate (Mst_ResignReasonController.cs:344-347)
+        var strFt_Cols_Upd = "Mst_ResignReason.ResignReason,Mst_ResignReason.ReasonDesc,Mst_ResignReason.FlagActive,".ToUpper();
+
+        // Chuẩn hoá input (MasterData.cs:25391-25404)
+        var strOrgID = string.IsNullOrWhiteSpace(req.OrgID) ? null : req.OrgID.Trim().ToUpper();
+        var strReasonID = string.IsNullOrWhiteSpace(req.ReasonID) ? null : req.ReasonID.Trim().ToUpper();
+        var strResignReason = string.IsNullOrWhiteSpace(req.ResignReason) ? null : req.ResignReason.Trim();
+        var strReasonDesc = string.IsNullOrWhiteSpace(req.ReasonDesc) ? null : req.ReasonDesc.Trim();
+        var strFlagActive = req.FlagActive == "1" ? "1" : "0"; // StdFlag
+        var strRemark = string.IsNullOrWhiteSpace(req.Remark) ? null : req.Remark.Trim();
+
+        var bUpd_ResignReason = strFt_Cols_Upd.Contains("MST_RESIGNREASON.RESIGNREASON");
+        var bUpd_ReasonDesc = strFt_Cols_Upd.Contains("MST_RESIGNREASON.REASONDESC");
+        var bUpd_FlagActive = strFt_Cols_Upd.Contains("MST_RESIGNREASON.FLAGACTIVE");
+        var bUpd_Remark = strFt_Cols_Upd.Contains("MST_RESIGNREASON.REMARK");
+
+        await using var tx = await _db.Database.BeginTransactionAsync(); // MasterData.cs:25529
+        try
+        {
+            // Mst_ResignReason_CheckDB (OrgID, ReasonID, "1", "") (:25412-25420)
+            var oldRecord = await _db.Set<Mst_ResignReason>().AsNoTracking()
+                .FirstOrDefaultAsync(x => EF.Functions.Like((x.OrgID ?? "").ToLower(), PortQuery.Equal(strOrgID ?? ""), PortQuery.Esc)
+                                       && EF.Functions.Like((x.ReasonID ?? "").ToLower(), PortQuery.Equal(strReasonID ?? ""), PortQuery.Esc));
+            if (oldRecord == null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_ResignReason_CheckDB_ReasonIDNotFound", "Check.OrgID", strOrgID, "Check.ReasonID", strReasonID);
+            }
+            var strResignReason_DB = (oldRecord.ResignReason ?? "").Trim();
+
+            // Mst_Org_CheckDB (OrgID, "1", "1") (:25423-25429)
+            var org = await _db.Set<Mst_Org>().AsNoTracking()
+                .FirstOrDefaultAsync(x => EF.Functions.Like((x.OrgID ?? "").ToLower(), PortQuery.Equal(strOrgID ?? ""), PortQuery.Esc));
+            if (org == null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_Org_CheckDB_OrgNotFound", "Check.OrgID", strOrgID);
+            }
+            if (!"1".Contains(org.FlagActive ?? ""))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_Org_CheckDB_FlagActiveNotMatched", "Check.OrgID", strOrgID,
+                    "Check.strFlagActiveListToCheck", "1", "DB.FlagActive", org.FlagActive);
+            }
+
+            // Check ResignReason invalid (:25431-25441)
+            if (string.IsNullOrEmpty(strResignReason))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_ResignReason_UpdateX_InvalidResignReason", "Check.strResignReason", strResignReason);
+            }
+
+            // Mst_ResignReason_CheckResignReason (OrgID, ResignReason, "0", "") (:25443-25456)
+            if (bUpd_ResignReason && !string.Equals(strResignReason, strResignReason_DB, StringComparison.OrdinalIgnoreCase))
+            {
+                var nameExist = await _db.Set<Mst_ResignReason>().AsNoTracking()
+                    .AnyAsync(x => EF.Functions.Like((x.OrgID ?? "").ToLower(), PortQuery.Equal(strOrgID ?? ""), PortQuery.Esc)
+                                && EF.Functions.Like((x.ResignReason ?? "").ToLower(), PortQuery.Equal(strResignReason), PortQuery.Esc));
+                if (nameExist)
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Mst_ResignReason_CheckResignReason_ResignReasonExist", "Check.OrgID", strOrgID, "Check.ResignReason", strResignReason);
+                }
+            }
+
+            // Save Mst_ResignReason (:25462-25481)
+            // Khoá lấy từ dòng THẬT trong DB (CheckDB khớp không phân biệt hoa/thường như SQL Server; WHERE của EF trên SQLite thì có phân biệt)
+            var recordToUpdate = new Mst_ResignReason { OrgID = oldRecord.OrgID, ReasonID = oldRecord.ReasonID };
+            _db.Set<Mst_ResignReason>().Attach(recordToUpdate);
+
+            if (bUpd_ResignReason) recordToUpdate.ResignReason = strResignReason;
+            if (bUpd_ReasonDesc) recordToUpdate.ReasonDesc = strReasonDesc;
+            if (bUpd_FlagActive) recordToUpdate.FlagActive = strFlagActive;
+            if (bUpd_Remark) recordToUpdate.Remark = strRemark;
+
+            recordToUpdate.LogLUDTimeUTC = DateTime.UtcNow;
+            recordToUpdate.LogLUBy = "port";
+
+            var entry = _db.Entry(recordToUpdate);
+            if (bUpd_ResignReason) entry.Property(x => x.ResignReason).IsModified = true;
+            if (bUpd_ReasonDesc) entry.Property(x => x.ReasonDesc).IsModified = true;
+            if (bUpd_FlagActive) entry.Property(x => x.FlagActive).IsModified = true;
+            if (bUpd_Remark) entry.Property(x => x.Remark).IsModified = true;
+            entry.Property(x => x.LogLUDTimeUTC).IsModified = true;
+            entry.Property(x => x.LogLUBy).IsModified = true;
+
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+
+            return Ok(new { Success = true, Data = (object?)null }); // Mst_ResignReasonController.cs:365-366
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return PortResult.Fail("Mst_ResignReason_Update", "Exception", ex.Message); // MasterData.cs:25595
+        }
+    }
+
     private async Task<(int itemCount, List<object> rows)> GetXAsync(string? orgId, string? reasonId, string? keyWord, string? flagActive, long recordStart, long recordCount)
     {
         var q = _db.Set<Mst_ResignReason>().AsNoTracking().AsQueryable();
