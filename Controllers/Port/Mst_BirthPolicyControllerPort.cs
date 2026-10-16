@@ -82,6 +82,43 @@ public class MstBirthPolicyGetByBirthPolicyNoReq
     public string? BirthPolicyNo { get; set; }
 }
 
+/// <summary>
+/// DTO header chính sách sinh nhật trong request Save (nguồn gate Mst_BirthPolicyController.cs:339-434, Master.Loyalty.cs:10565-10572).
+/// </summary>
+public class MstBirthPolicySaveHeaderReq
+{
+    public string? BirthPolicyNo { get; set; }
+    public string? ParamPrType { get; set; }
+    public string? BirthPolicyName { get; set; }
+    public string? EffDateStart { get; set; }
+    public string? FlagActive { get; set; }
+    public string? FlagPoint { get; set; }
+    public string? FlagVoucher { get; set; }
+    public string? Remark { get; set; }
+}
+
+/// <summary>
+/// DTO chi tiết chính sách sinh nhật trong request Save (nguồn Master.Loyalty.cs:10021-10087).
+/// </summary>
+public class MstBirthPolicySaveDtlReq
+{
+    public string? CardType { get; set; }
+    public double? Point { get; set; }
+    public object? VoucherValue { get; set; }
+    public object? VoucherExpireDays { get; set; }
+    public string? Remark { get; set; }
+}
+
+/// <summary>
+/// Body của action Save: { Mst_BirthPolicy: { ... }, Lst_Mst_BirthPolicyDtl: [ ... ] }
+/// (nguồn gate Mst_BirthPolicyController.cs:339-434).
+/// </summary>
+public class MstBirthPolicySaveReq
+{
+    public MstBirthPolicySaveHeaderReq? Mst_BirthPolicy { get; set; }
+    public List<MstBirthPolicySaveDtlReq>? Lst_Mst_BirthPolicyDtl { get; set; }
+}
+
 [ApiController]
 [Route("api/mst_birthpolicy")]
 [Produces("application/json")]
@@ -202,6 +239,370 @@ public class Mst_BirthPolicyControllerPort : ControllerBase
         });
     }
 
+    // ============================================================================================
+    // Save — nguồn gate Mst_BirthPolicyController.cs:339-434 (#73)
+    //   -> API MstBirthPolicyController.cs:22-92 (WA_Mst_BirthPolicy_Save)
+    //   -> BIZ Master.Loyalty.cs:10507-10604 (WAS_Mst_BirthPolicy_Save)
+    //   -> :10348-10505 (Mst_BirthPolicy_Save)
+    //   -> :9675-10346 (Mst_BirthPolicy_SaveX — bản LIVE).
+    //
+    // GIỮ ĐÚNG NGUỒN:
+    //   * Body JSON: { Mst_BirthPolicy: { ... }, Lst_Mst_BirthPolicyDtl: [ ... ] }
+    //   * Body rỗng hoàn toàn -> ServiceException("strJson null") -> mã mặc định Mst_BirthPolicy_Save (KHÔNG tăng seq).
+    //   * seq tăng cả khi lỗi: Lấy sequence trong transaction RIÊNG đã commit độc lập (gate Mst_BirthPolicyController.cs:373-397,
+    //     SeqType.BirthPolicyNo — Seq.cs:139: bảng Seq_BirthPolicyNo, format "{0}BIRTHPOLICYNO.{3}.{1:00000}{2}", max 100000)
+    //     qua bảng Seq_BirthPolicyNo rồi gán vào header (:395). Do đó sequence tăng MỖI LẦN GỌI vượt qua bước body rỗng,
+    //     KỂ CẢ KHI LƯU LỖI SAU ĐÓ.
+    //     Body {} (thiếu Mst_BirthPolicy) -> NullReference SAU khi lấy seq -> Mst_BirthPolicy_Save (seq ĐÃ tăng).
+    //   * Gate ép FlagActive = '1' (:415).
+    //   * Chuẩn hóa (Master.Loyalty.cs:9732-9741):
+    //     - BirthPolicyNo StdParam (Trim().ToUpper())
+    //     - BirthPolicyName StdStr (Trim(), rỗng -> null)
+    //     - ParamPrType StdStr (Trim(), rỗng -> null — KHÔNG viết hoa)
+    //     - EffDateStart StdDate (yyyy-MM-dd)
+    //     - Remark StdStr
+    //     - EffDateEnd = 2100-01-01 CỐ ĐỊNH
+    //     - FlagActive/FlagPoint/FlagVoucher StdFlag ("1" nếu "1", còn lại "0")
+    //     - Convert.ToDateTime(EffDateStart) rồi AddDays(-1) (:9745-9746): thiếu hoặc sai định dạng date -> NÉM lỗi NGAY -> Mst_BirthPolicy_Save.
+    //   * Kiểm DÚNG THỨ TỰ:
+    //     a. (:9797-9809): (FlagPoint == '1') == (FlagVoucher == '1') (cả hai HOẶC không cái nào) -> Mst_BirthPolicy_SaveX_InvalidFlagPointVoucher.
+    //     b. (:9836-9863): tồn tại Mst_BirthPolicy cùng ParamPrType và EffDateStart >= EffDateStart mới -> Mst_BirthPolicy_SaveX_InvalidEffDateStart.
+    //     c. (:9867-9873): Mst_ParamPromotionType_CheckDB(ParamPrType, "1", "1") (:13024-13085)
+    //        - không có -> Mst_ParamPromotionType_CheckDB_ParamPrTypeNotFound;
+    //        - FlagActive không thuộc "1" -> Mst_ParamPromotionType_CheckDB_FlagActiveNotMatched (NULL/rỗng vẫn qua).
+    //   * Chi tiết Dtl (:10021-10087):
+    //     - Lst Dtl null -> danh sách rỗng (:10542-10543, không lỗi).
+    //     - CardType StdParam (Trim().ToUpper()).
+    //     - Point/VoucherValue/VoucherExpireDays/Remark giữ nguyên (Remark không trim).
+    //     - VoucherValue / VoucherExpireDays khác rỗng -> Convert.ToDouble (sai -> ..._Save);
+    //       < 0 -> Mst_BirthPolicy_SaveX_InvalidValue;
+    //       VoucherValue > 0 && VoucherExpireDays <= 0 -> Mst_BirthPolicy_SaveX_InvalidValue.
+    //     - FK CardType -> Mst_CardType (FK_MstCardTp_MstBirthPolicyDtl) -> GIẢ LẬP: không có -> Mst_BirthPolicy_Save.
+    //     - Trùng CardType -> vi phạm PK (BirthPolicyNo, CardType) -> Mst_BirthPolicy_Save (kiểm sau vòng lặp).
+    //   * Lưu: 1 transaction duy nhất (:10389, commit :10468), lỗi -> rollback + PortResult.Fail. Thành công -> Data = null.
+    //   * Header insert (:10159-10188): BirthPolicyNo, ParamPrType, NetworkID (_config["Biz_NetworkID"] ?? "1001"),
+    //     BirthPolicyName, EffDateStart, EffDateEnd, Remark, FlagActive, FlagPoint, FlagVoucher, LogLUDTimeUTC now, LogLUBy "port".
+    //     (UpdateDTime/UpdateBy KHÔNG ghi).
+    //   * Dtl insert (:10195-10216): BirthPolicyNo, CardType, NetworkID, Point, VoucherValue, VoucherExpireDays, Remark, LogLUDTimeUTC, LogLUBy.
+    //     (KHÔNG có VoucherPointVCLimit).
+    //   * Cập nhật chương trình TRƯỚC (:10246-10270):
+    //     top 1 Mst_BirthPolicy khác BirthPolicyNo mới, CÙNG ParamPrType, order by LogLUDTimeUTC desc
+    //     -> EffDateEnd = EffDateStart mới - 1 ngày.
+    // ============================================================================================
+    [HttpPost("save")]
+    public async Task<IActionResult> Save(
+        [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] MstBirthPolicySaveReq? req)
+    {
+        // 0. Body rỗng / null: gate :349-356 ném ServiceException("strJson null") -> mã mặc định Mst_BirthPolicy_Save.
+        // Bước này xảy ra TRƯỚC khi gọi sequence nên KHÔNG tăng seq.
+        if (req == null)
+        {
+            return PortResult.Fail("Mst_BirthPolicy_Save", "Check.strJson", null);
+        }
+
+        // 1. Seq tăng cả khi lỗi: Lấy sequence trong transaction RIÊNG đã commit độc lập (gate Mst_BirthPolicyController.cs:373-397,
+        // SeqType.BirthPolicyNo — Seq.cs:139: bảng Seq_BirthPolicyNo, format "{0}BIRTHPOLICYNO.{3}.{1:00000}{2}", max 100000).
+        // Nhờ transaction riêng, mã sequence đã tăng sẽ không bị rollback kể cả khi bước lưu sau bị lỗi.
+        var seq = await PortSeq.NextAsync<Seq_BirthPolicyNo>(_db);
+        var birthPolicyNo = PortSeq.Build("{0}BIRTHPOLICYNO.{3}.{1:00000}{2}", "", seq, 100000, "", DateTime.UtcNow);
+
+        // Header null (client gửi `{}` thiếu Mst_BirthPolicy):
+        // Nguồn gate :395 gán objMst_BirthPolicy.BirthPolicyNo ném NullReferenceException SAU khi lấy seq -> mã mặc định Mst_BirthPolicy_Save (seq ĐÃ tăng).
+        if (req.Mst_BirthPolicy == null)
+        {
+            return PortResult.Fail("Mst_BirthPolicy_Save", "Check.Mst_BirthPolicy", null);
+        }
+
+        var header = req.Mst_BirthPolicy;
+        var strBirthPolicyNo = StdParam(birthPolicyNo);
+        var strBirthPolicyName = StdStr(header.BirthPolicyName);
+        var strParamPrType = StdStr(header.ParamPrType); // StdStr: KHÔNG viết hoa (Master.Loyalty.cs:9737)
+        var strRemark = StdStr(header.Remark);
+        var strFlagActive = "1"; // Gate ép FlagActive = '1' (:415)
+        var strFlagPoint = StdFlag(header.FlagPoint);
+        var strFlagVoucher = StdFlag(header.FlagVoucher);
+
+        // 2. Kiểm tra EffDateStart (Master.Loyalty.cs:9745-9746):
+        // Dt = Convert.ToDateTime(objEffDateStart);
+        // strEffDateEndPre = TUtils.CUtils.StdDate(Dt.AddDays(-1).ToString("yyyy-MM-dd"));
+        // Nếu thiếu (Convert.ToDateTime(null) -> MinValue -> AddDays(-1) ném lỗi) hoặc sai định dạng date -> mã mặc định Mst_BirthPolicy_Save.
+        DateTime dtEffDateStart;
+        try
+        {
+            if (string.IsNullOrWhiteSpace(header.EffDateStart))
+            {
+                throw new ArgumentException("EffDateStart is required");
+            }
+            dtEffDateStart = Convert.ToDateTime(header.EffDateStart);
+            var _ = dtEffDateStart.AddDays(-1);
+        }
+        catch
+        {
+            return PortResult.Fail("Mst_BirthPolicy_Save", "Check.EffDateStart", header.EffDateStart);
+        }
+
+        // 3. Kiểm DÚNG THỨ TỰ:
+        // a. (:9797-9809): (FlagPoint == '1') == (FlagVoucher == '1') (cả hai HOẶC không cái nào) -> Mst_BirthPolicy_SaveX_InvalidFlagPointVoucher
+        if ((strFlagPoint == "1") == (strFlagVoucher == "1"))
+        {
+            return PortResult.Fail("Mst_BirthPolicy_SaveX_InvalidFlagPointVoucher",
+                "Check.FlagPoint", strFlagPoint,
+                "Check.FlagVoucher", strFlagVoucher,
+                "Expect", "Chi duoc chon 1 loai tang: FlagPoint hoac FlagVoucher = '1' (khong ca hai, khong ca khong)");
+        }
+
+        // b. (:9836-9863): tồn tại Mst_BirthPolicy cùng ParamPrType và EffDateStart >= EffDateStart mới -> Mst_BirthPolicy_SaveX_InvalidEffDateStart
+        var existsNewerOrEqual = await _db.Set<Mst_BirthPolicy>().AsNoTracking()
+            .AnyAsync(t => EF.Functions.Like((t.ParamPrType ?? "").ToLower(), PortQuery.Equal(strParamPrType ?? ""), PortQuery.Esc)
+                           && t.EffDateStart >= dtEffDateStart.Date);
+        if (existsNewerOrEqual)
+        {
+            return PortResult.Fail("Mst_BirthPolicy_SaveX_InvalidEffDateStart",
+                "Check.BirthPolicyNo", strBirthPolicyNo,
+                "Check.EffDateStart", dtEffDateStart.ToString("yyyy-MM-dd"));
+        }
+
+        // c. (:9867-9873): Mst_ParamPromotionType_CheckDB(ParamPrType, "1", "1") (:13024-13085)
+        // Tra cứu Mst_ParamPromotionType trong DB (so sánh Like + PortQuery.Equal không phân biệt hoa/thường)
+        var promotionType = await _db.Set<Mst_ParamPromotionType>().AsNoTracking()
+            .FirstOrDefaultAsync(x => EF.Functions.Like((x.ParamPrType ?? "").ToLower(), PortQuery.Equal(strParamPrType ?? ""), PortQuery.Esc));
+
+        if (promotionType == null)
+        {
+            return PortResult.Fail("Mst_ParamPromotionType_CheckDB_ParamPrTypeNotFound",
+                "Check.ParamPrType", strParamPrType);
+        }
+
+        // FlagActive không thuộc "1" (nhưng null hoặc rỗng vẫn qua — như #230)
+        if (!"1".Contains(promotionType.FlagActive ?? ""))
+        {
+            return PortResult.Fail("Mst_ParamPromotionType_CheckDB_FlagActiveNotMatched",
+                "Check.ParamPrType", strParamPrType,
+                "Check.strFlagActiveListToCheck", "1",
+                "DB.FlagActive", promotionType.FlagActive);
+        }
+
+        // 4. Kiểm tra Dtl (Master.Loyalty.cs:10021-10087):
+        var dtlInputList = req.Lst_Mst_BirthPolicyDtl ?? new List<MstBirthPolicySaveDtlReq>();
+        var networkId = _config["Biz_NetworkID"] ?? "1001";
+        var now = DateTime.UtcNow;
+        var newDtls = new List<Mst_BirthPolicyDtl>();
+
+        for (int nScan = 0; nScan < dtlInputList.Count; nScan++)
+        {
+            var drScan = dtlInputList[nScan];
+            var strCardType = StdParam(drScan.CardType);
+
+            // VoucherValue / VoucherExpireDays khác rỗng -> Convert.ToDouble (sai -> ..._Save)
+            double dVoucherValue = 0;
+            double? rawVoucherValue = null;
+            if (drScan.VoucherValue != null)
+            {
+                try
+                {
+                    if (drScan.VoucherValue is System.Text.Json.JsonElement je)
+                    {
+                        if (je.ValueKind == System.Text.Json.JsonValueKind.Number)
+                        {
+                            rawVoucherValue = je.GetDouble();
+                        }
+                        else if (je.ValueKind == System.Text.Json.JsonValueKind.String)
+                        {
+                            var s = je.GetString();
+                            if (!string.IsNullOrWhiteSpace(s)) rawVoucherValue = Convert.ToDouble(s);
+                        }
+                        else if (je.ValueKind != System.Text.Json.JsonValueKind.Null && je.ValueKind != System.Text.Json.JsonValueKind.Undefined)
+                        {
+                            rawVoucherValue = Convert.ToDouble(je.ToString());
+                        }
+                    }
+                    else
+                    {
+                        var s = drScan.VoucherValue.ToString();
+                        if (!string.IsNullOrWhiteSpace(s)) rawVoucherValue = Convert.ToDouble(drScan.VoucherValue);
+                    }
+                }
+                catch
+                {
+                    return PortResult.Fail("Mst_BirthPolicy_Save", "Check.VoucherValue", drScan.VoucherValue);
+                }
+            }
+            if (rawVoucherValue.HasValue)
+            {
+                dVoucherValue = rawVoucherValue.Value;
+            }
+
+            double dVoucherExpireDays = 0;
+            int? rawVoucherExpireDays = null;
+            if (drScan.VoucherExpireDays != null)
+            {
+                try
+                {
+                    if (drScan.VoucherExpireDays is System.Text.Json.JsonElement je)
+                    {
+                        if (je.ValueKind == System.Text.Json.JsonValueKind.Number)
+                        {
+                            rawVoucherExpireDays = je.GetInt32();
+                            dVoucherExpireDays = rawVoucherExpireDays.Value;
+                        }
+                        else if (je.ValueKind == System.Text.Json.JsonValueKind.String)
+                        {
+                            var s = je.GetString();
+                            if (!string.IsNullOrWhiteSpace(s))
+                            {
+                                dVoucherExpireDays = Convert.ToDouble(s);
+                                rawVoucherExpireDays = Convert.ToInt32(dVoucherExpireDays);
+                            }
+                        }
+                        else if (je.ValueKind != System.Text.Json.JsonValueKind.Null && je.ValueKind != System.Text.Json.JsonValueKind.Undefined)
+                        {
+                            dVoucherExpireDays = Convert.ToDouble(je.ToString());
+                            rawVoucherExpireDays = Convert.ToInt32(dVoucherExpireDays);
+                        }
+                    }
+                    else
+                    {
+                        var s = drScan.VoucherExpireDays.ToString();
+                        if (!string.IsNullOrWhiteSpace(s))
+                        {
+                            dVoucherExpireDays = Convert.ToDouble(drScan.VoucherExpireDays);
+                            rawVoucherExpireDays = Convert.ToInt32(dVoucherExpireDays);
+                        }
+                    }
+                }
+                catch
+                {
+                    return PortResult.Fail("Mst_BirthPolicy_Save", "Check.VoucherExpireDays", drScan.VoucherExpireDays);
+                }
+            }
+
+            // < 0 -> Mst_BirthPolicy_SaveX_InvalidValue
+            if (dVoucherValue < 0 || dVoucherExpireDays < 0)
+            {
+                return PortResult.Fail("Mst_BirthPolicy_SaveX_InvalidValue",
+                    "Check.CardType", drScan.CardType,
+                    "Check.VoucherValue", drScan.VoucherValue,
+                    "Check.VoucherExpireDays", drScan.VoucherExpireDays,
+                    "Check.ErrCoditional", "VoucherValue < 0 or VoucherExpireDays < 0");
+            }
+
+            // VoucherValue > 0 && VoucherExpireDays <= 0 -> Mst_BirthPolicy_SaveX_InvalidValue
+            if (dVoucherValue > 0 && dVoucherExpireDays <= 0)
+            {
+                return PortResult.Fail("Mst_BirthPolicy_SaveX_InvalidValue",
+                    "Check.CardType", drScan.CardType,
+                    "Check.VoucherValue", drScan.VoucherValue,
+                    "Check.VoucherExpireDays", drScan.VoucherExpireDays,
+                    "Check.ErrCoditional", "VoucherValue > 0 but VoucherExpireDays <= 0");
+            }
+
+            // FK CardType -> Mst_CardType (FK_MstCardTp_MstBirthPolicyDtl) -> GIẢ LẬP: không có -> Mst_BirthPolicy_Save
+            var cardTypeExists = await _db.Set<Mst_CardType>().AsNoTracking()
+                .AnyAsync(x => EF.Functions.Like((x.CardType ?? "").ToLower(), PortQuery.Equal(strCardType ?? ""), PortQuery.Esc));
+            if (!cardTypeExists)
+            {
+                return PortResult.Fail("Mst_BirthPolicy_Save", "Check.CardType", strCardType);
+            }
+
+            // Point, VoucherValue, VoucherExpireDays, Remark giữ nguyên (Remark không trim) (:10021-10028)
+            newDtls.Add(new Mst_BirthPolicyDtl
+            {
+                BirthPolicyNo = birthPolicyNo,
+                CardType = strCardType!,
+                NetworkID = networkId,
+                Point = drScan.Point,
+                VoucherValue = rawVoucherValue,
+                VoucherExpireDays = rawVoucherExpireDays,
+                VoucherPointVCLimit = null, // Nguồn insert không có cột này (:10195-10216)
+                Remark = drScan.Remark, // Giữ nguyên
+                LogLUBy = "port",
+                LogLUDTimeUTC = now
+            });
+        }
+
+        // Kiểm tra trùng CardType -> PK -> ..._Save (kiểm tra sau vòng lặp)
+        var distinctCardTypes = newDtls.Select(x => x.CardType).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+        if (distinctCardTypes < newDtls.Count)
+        {
+            return PortResult.Fail("Mst_BirthPolicy_Save", "Check.DuplicateCardType", null);
+        }
+
+        // 5. Lưu dữ liệu — 1 transaction duy nhất (Master.Loyalty.cs:10389, commit :10468)
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // Xóa Dtl + header cùng BirthPolicyNo (:10131-10151)
+            var existingDtls = await _db.Set<Mst_BirthPolicyDtl>()
+                .Where(x => x.BirthPolicyNo == birthPolicyNo).ToListAsync();
+            if (existingDtls.Count > 0)
+            {
+                _db.Set<Mst_BirthPolicyDtl>().RemoveRange(existingDtls);
+            }
+
+            var existingHeader = await _db.Set<Mst_BirthPolicy>()
+                .Where(x => x.BirthPolicyNo == birthPolicyNo).FirstOrDefaultAsync();
+            if (existingHeader != null)
+            {
+                _db.Set<Mst_BirthPolicy>().Remove(existingHeader);
+            }
+            await _db.SaveChangesAsync();
+
+            // Insert header (:10159-10188)
+            var newHeader = new Mst_BirthPolicy
+            {
+                BirthPolicyNo = birthPolicyNo,
+                ParamPrType = strParamPrType,
+                NetworkID = networkId,
+                BirthPolicyName = strBirthPolicyName,
+                EffDateStart = DateTime.SpecifyKind(dtEffDateStart.Date, DateTimeKind.Utc),
+                EffDateEnd = new DateTime(2100, 1, 1, 0, 0, 0, DateTimeKind.Utc), // Cố định 2100-01-01
+                Remark = strRemark,
+                FlagActive = strFlagActive,
+                FlagPoint = strFlagPoint,
+                FlagVoucher = strFlagVoucher,
+                LogLUDTimeUTC = now,
+                LogLUBy = "port",
+                UpdateDTime = null,
+                UpdateBy = null,
+            };
+            _db.Set<Mst_BirthPolicy>().Add(newHeader);
+
+            // Insert Dtl (:10195-10216)
+            if (newDtls.Count > 0)
+            {
+                _db.Set<Mst_BirthPolicyDtl>().AddRange(newDtls);
+            }
+            await _db.SaveChangesAsync();
+
+            // 6. Cập nhật chương trình TRƯỚC (:10246-10270):
+            // top 1 Mst_BirthPolicy khác BirthPolicyNo mới, CÙNG ParamPrType, order by LogLUDTimeUTC desc
+            // -> EffDateEnd = EffDateStart mới - 1 ngày
+            var preProgram = await _db.Set<Mst_BirthPolicy>()
+                .Where(t => t.BirthPolicyNo != birthPolicyNo &&
+                            EF.Functions.Like((t.ParamPrType ?? "").ToLower(), PortQuery.Equal(strParamPrType ?? ""), PortQuery.Esc))
+                .OrderByDescending(t => t.LogLUDTimeUTC)
+                .FirstOrDefaultAsync();
+
+            if (preProgram != null)
+            {
+                preProgram.EffDateEnd = DateTime.SpecifyKind(dtEffDateStart.Date.AddDays(-1), DateTimeKind.Utc);
+                await _db.SaveChangesAsync();
+            }
+
+            await tx.CommitAsync();
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return PortResult.Fail("Mst_BirthPolicy_Save", "Exception", ex.Message);
+        }
+    }
+
+    private static string? StdParam(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim().ToUpperInvariant();
+    private static string? StdStr(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+    private static string StdFlag(string? s) => s == "1" ? "1" : "0";
+
     /// <summary>
     /// Overload giữ nguyên tương thích cho Search (#70) và GetAllActive (#71).
     /// </summary>
@@ -301,6 +702,8 @@ public class Mst_BirthPolicyControllerPort : ControllerBase
                     x.EffDateStart,
                     x.EffDateEnd,
                     x.FlagActive,
+                    x.FlagPoint,
+                    x.FlagVoucher,
                     x.Remark,
                     x.UpdateDTime,
                     x.UpdateBy,

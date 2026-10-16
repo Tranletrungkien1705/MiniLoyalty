@@ -44,6 +44,8 @@ public class Mst_BirthPolicy
     public DateTime EffDateStart { get; set; }                   // Ngày bắt đầu hiệu lực — MyDateTime NOT NULL
     public DateTime EffDateEnd { get; set; }                     // Ngày kết thúc hiệu lực — MyDateTime NOT NULL
     public string? FlagActive { get; set; }                      // Cờ hoạt động '1'/'0' — MyStatus
+    public string? FlagPoint { get; set; }                       // Loại tặng điểm '1'/'0' — GAP: DB thật có cột (không có script trong repo)
+    public string? FlagVoucher { get; set; }                     // Loại tặng voucher '1'/'0' — GAP: DB thật có cột (không có script trong repo)
     public string? Remark { get; set; }                          // Ghi chú — Varchar400
     public DateTime? UpdateDTime { get; set; }                   // Thời điểm cập nhật — MyDateTime NULL
     public string? UpdateBy { get; set; }                        // Người cập nhật — Varchar50 NULL
@@ -234,3 +236,99 @@ public class Mst_BirthPolicySeeder : IPortSeeder
         await db.SaveChangesAsync();
     }
 }
+
+/// <summary>
+/// Bảng sinh sequence cho mã chính sách sinh nhật — port 1:1 bảng <c>Seq_BirthPolicyNo</c>.
+/// DDL: Seq.cs:139, bảng Seq_BirthPolicyNo, format "{0}BIRTHPOLICYNO.{3}.{1:00000}{2}", max 100000.
+/// PK = AutoId (bigint IDENTITY(1,1) PK tự tăng).
+/// </summary>
+public class Seq_BirthPolicyNo
+{
+    public long AutoId { get; set; }                       // AutoId — bigint IDENTITY(1,1) PK
+    public string? Remark { get; set; }                    // Remark — Varchar50
+}
+
+/// <summary>
+/// Cấu hình EF cho <see cref="Seq_BirthPolicyNo"/> — PK AutoId tự tăng.
+/// </summary>
+public class Seq_BirthPolicyNoConfig : IEntityTypeConfiguration<Seq_BirthPolicyNo>
+{
+    public void Configure(EntityTypeBuilder<Seq_BirthPolicyNo> b)
+    {
+        b.ToTable("Seq_BirthPolicyNo");
+        b.HasKey(x => x.AutoId);
+        b.Property(x => x.AutoId).ValueGeneratedOnAdd();
+    }
+}
+
+/// <summary>
+/// Bảng danh mục loại chương trình khuyến mãi/ưu đãi — port 1:1 bảng <c>Mst_ParamPromotionType</c>.
+/// DDL: 20221026.CreateDatabase.sql:346-361 (7 cột).
+/// PK = ParamPrType tại 20221026.CreateDatabase.sql:358-360.
+/// </summary>
+public class Mst_ParamPromotionType
+{
+    public string ParamPrType { get; set; } = "";             // Mã loại ưu đãi — Varchar50 NOT NULL (PK)
+    public string NetworkID { get; set; } = "";               // NetworkID — Varchar50 NOT NULL
+    public string ParamPrTypeName { get; set; } = "";         // Tên loại ưu đãi — Varchar200 NOT NULL
+    public string? FlagActive { get; set; }                   // Cờ hoạt động '1'/'0' — MyStatus
+    public string? Remark { get; set; }                       // Ghi chú — Varchar400
+    public DateTime? LogLUDTimeUTC { get; set; }              // Thời điểm cập nhật UTC — MyDateTime
+    public string? LogLUBy { get; set; }                      // Người cập nhật — Varchar50
+}
+
+/// <summary>
+/// Cấu hình EF cho <see cref="Mst_ParamPromotionType"/> — tên bảng + PK ParamPrType
+/// + các cột NOT NULL đúng DDL nguồn 20221026.CreateDatabase.sql:346-361.
+/// </summary>
+public class Mst_ParamPromotionTypeConfig : IEntityTypeConfiguration<Mst_ParamPromotionType>
+{
+    public void Configure(EntityTypeBuilder<Mst_ParamPromotionType> b)
+    {
+        b.ToTable("Mst_ParamPromotionType");
+        b.HasKey(x => x.ParamPrType);
+        b.Property(x => x.ParamPrType).IsRequired();
+        b.Property(x => x.NetworkID).IsRequired();
+        b.Property(x => x.ParamPrTypeName).IsRequired();
+    }
+}
+
+/// <summary>
+/// Seeder dữ liệu mẫu cho bảng <see cref="Mst_ParamPromotionType"/>.
+/// Thứ tự Order => 12 (danh mục Mst_* dùng 10–99).
+/// </summary>
+public class Mst_ParamPromotionTypeSeeder : IPortSeeder
+{
+    public int Order => 12; // Danh mục Mst_* dùng 10–99
+
+    public async Task SeedAsync(AppDbContext db)
+    {
+        if (!await db.Set<Mst_ParamPromotionType>().AnyAsync())
+        {
+            db.Set<Mst_ParamPromotionType>().AddRange(
+                new Mst_ParamPromotionType
+                {
+                    ParamPrType = "NGAYSINHNHAT",
+                    NetworkID = "DEMO",
+                    ParamPrTypeName = "Ngày sinh nhật",
+                    FlagActive = "1",
+                    Remark = "Loại ưu đãi ngày sinh nhật",
+                    LogLUBy = "seed",
+                    LogLUDTimeUTC = new DateTime(2026, 10, 10, 10, 0, 0, DateTimeKind.Utc),
+                },
+                new Mst_ParamPromotionType
+                {
+                    ParamPrType = "OLDTYPE",
+                    NetworkID = "DEMO",
+                    ParamPrTypeName = "Loại cũ",
+                    FlagActive = "0",
+                    Remark = "Loại ưu đãi cũ không hoạt động",
+                    LogLUBy = "seed",
+                    LogLUDTimeUTC = new DateTime(2026, 10, 10, 10, 0, 0, DateTimeKind.Utc),
+                }
+            );
+            await db.SaveChangesAsync();
+        }
+    }
+}
+
