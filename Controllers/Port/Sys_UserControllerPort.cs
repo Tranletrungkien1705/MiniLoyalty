@@ -250,11 +250,14 @@ public class Sys_UserCreateReq
 
     /// <summary>User thực hiện thao tác (nếu không truyền qua Header WAUserCode)</summary>
     public string? WAUserCode { get; set; }
+
+    /// <summary>Mã đại lý - Sys_User.cs:80, Gate Sys_UserController.cs:714</summary>
+    public string? mdcpo_DLCPCode { get; set; }
 }
 
 /// <summary>
-/// Controller Port 1:1 cho Sys_UserController — hạng mục #323 (Search), #324 (GetByUserCode), #325 (GetByMST), #327 (GetForCurrentUser), #328 (GetAllActive), #329 (Create).
-/// Nguồn Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Sys_UserController.cs:498-561, 565-683
+/// Controller Port 1:1 cho Sys_UserController — hạng mục #323 (Search), #324 (GetByUserCode), #325 (GetByMST), #327 (GetForCurrentUser), #328 (GetAllActive), #329 (Create), #330 (CreateCP).
+/// Nguồn Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Sys_UserController.cs:498-561, 565-683, 685-837
 /// Nguồn API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\SysUserController.cs:199-270, 421-492
 /// Nguồn Biz LIVE: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\System.cs:8365-8478, 7987-8363 (Sys_User_Get_New20191104), 11222-11323 (WAS_Sys_User_Create), 9218-9391, 10160-10828 (Sys_User_CreateForNetworkX_New20200110)
 /// Route: api/sys_user
@@ -894,6 +897,60 @@ public class Sys_UserControllerPort : ControllerBase
             return PortResult.Fail("Sys_User_Create", "Check.strJson", null);
         }
 
+        req.UserCode = req.EMail; // gate Sys_UserController.cs:594: objSys_User.UserCode = objSys_User.EMail
+
+        return await CreateXAsync(req);
+    }
+
+    /// <summary>
+    /// Port 1:1 CreateCP action từ gate Sys_UserController.cs:685-837 (#330).
+    /// Chuỗi gọi: Gate Sys_UserController.cs:685 -> WA_Sys_User_Create (SysUserController.cs:421)
+    ///            -> WAS_Sys_User_Create (System.cs:11222) -> Sys_User_Create_New20200110 (System.cs:9218)
+    ///            -> Sys_User_CreateForNetworkX_New20200110 (System.cs:10160-10828).
+    /// Khác với Create (#329):
+    /// 1. Gán EMail = UserCode (gate dòng 716), trong khi Create gán UserCode = EMail (gate dòng 594).
+    /// 2. Hỗ trợ tra cứu MST qua mdcpo_DLCPCode trên Map_DealerCP_Org join Mst_DealerCP (FlagActive="1") và Mst_NNT (gate dòng 714, 726-756).
+    /// 3. flagExist = "1" -> gán mật khẩu mặc định từ PassDefault hoặc "idocNet@123".
+    /// 4. Dịch vụ ngoài Inos bỏ qua có chủ đích (GAP).
+    /// </summary>
+    [HttpPost("createcp")]
+    public async Task<IActionResult> CreateCP([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Sys_UserCreateReq? req)
+    {
+        // 0. Body rỗng / null: gate Sys_UserController.cs:698-701 ném ServiceException("strJson null") -> Fail("Sys_User_Create", "Check.strJson", null)
+        if (req == null)
+        {
+            return PortResult.Fail("Sys_User_Create", "Check.strJson", null);
+        }
+
+        // 1. Gate Sys_UserController.cs:716: objSys_User.EMail = objSys_User.UserCode
+        req.EMail = req.UserCode;
+
+        // 2. Tra cứu MST từ DLCPCode nếu được truyền (Gate Sys_UserController.cs:714, 726-756)
+        var dlcpCode = req.mdcpo_DLCPCode;   // gate :714 chỉ đọc objSys_User.mdcpo_DLCPCode
+        if (!string.IsNullOrWhiteSpace(dlcpCode))
+        {
+            var dlcpPattern = PortQuery.Equal(dlcpCode.Trim());
+            var faPattern = PortQuery.Equal("1");
+
+            var foundMst = await (
+                from mdcpo in _db.Set<Map_DealerCP_Org>().AsNoTracking()
+                join mdcp in _db.Set<Mst_DealerCP>().AsNoTracking()
+                    on mdcpo.DLCPCode equals mdcp.DLCPCode
+                join mo in _db.Set<Mst_Org>().AsNoTracking()
+                    on mdcpo.OrgID equals mo.OrgID
+                join mnnt in _db.Set<Mst_NNT>().AsNoTracking()
+                    on mo.OrgID equals mnnt.OrgID
+                where EF.Functions.Like((mdcpo.DLCPCode ?? "").ToLower(), dlcpPattern, PortQuery.Esc)
+                   && EF.Functions.Like((mdcp.FlagActive ?? "").ToLower(), faPattern, PortQuery.Esc)
+                orderby mdcpo.LogLUDTimeUTC descending, mnnt.MST ascending
+                select mnnt.MST
+            ).FirstOrDefaultAsync();
+
+            if (!string.IsNullOrEmpty(foundMst))
+            {
+                req.MST = foundMst;
+            }
+        }
 
         return await CreateXAsync(req);
     }
@@ -904,9 +961,9 @@ public class Sys_UserControllerPort : ControllerBase
     public async Task<IActionResult> CreateXAsync(Sys_UserCreateReq req)
     {
         // 1. Chuẩn hoá đầu vào:
-        // Gate dòng 594: objSys_User.UserCode = objSys_User.EMail
-        // Nếu client không truyền EMail (hoặc rỗng) -> UserCode bị rỗng/null
-        var rawUserCode = req.EMail;
+        // Gate dòng 594: objSys_User.UserCode = objSys_User.EMail (Create)
+        // Gate dòng 716: objSys_User.EMail = objSys_User.UserCode (CreateCP)
+        var rawUserCode = !string.IsNullOrEmpty(req.UserCode) ? req.UserCode : req.EMail;
         var strUserCode = StdParam(rawUserCode);
 
         // Guard 1: strUserCode rỗng hoặc null -> ném ngoại lệ Sys_User_Create_InvalidUserCode (System.cs:10235-10245)
