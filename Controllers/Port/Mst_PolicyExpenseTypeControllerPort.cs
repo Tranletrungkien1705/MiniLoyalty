@@ -10,12 +10,14 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục chính sách loại chi phí (Mst_PolicyExpenseType) của dự án nguồn 2022.7.Loyalty (#190, #191).
+// PORT 1:1 — màn danh mục chính sách loại chi phí (Mst_PolicyExpenseType) của dự án nguồn 2022.7.Loyalty (#190, #191, #192).
 //
 // Nguồn controller (tầng gate):
 //   Mst_PolicyExpenseTypeController.cs:23-103  Search -> WA_Mst_PolicyExpenseType_Get (#190)
 //   Mst_PolicyExpenseTypeController.cs:104-213 GetAllActive -> WA_Mst_PolicyExpenseType_Get (#191)
+//   Mst_PolicyExpenseTypeController.cs:214-277 GetByPolicyExpenseTypeNo -> WA_Mst_PolicyExpenseType_Get (#192)
 //   Mst_PolicyExpenseTypeController.cs:281-298 strWhereClause_Mst_PolicyExpenseType (mệnh đề lọc Search / GetAllActive)
+//   Mst_PolicyExpenseTypeController.cs:299-315 strWhereClause_Mst_PolicyExpenseType_By_PolicyExpenseTypeNo (mệnh đề lọc GetByPolicyExpenseTypeNo)
 // Nguồn API:
 //   MstPolicyExpenseTypeController.cs:96-164   WA_Mst_PolicyExpenseType_Get
 // Nguồn biz:
@@ -24,11 +26,18 @@ namespace MiniLoyalty.Controllers.Port;
 //   Master.Loyalty.cs:8757-8929                Mst_PolicyExpenseType_GetX (SQL draft :8814-8824, SQL select cuối :8856-8867)
 //
 // ĐẶC ĐIỂM VÀ QUY TẮC NGHIỆP VỤ NGUỒN:
-//   * Endpoint là POST (nguồn gate Mst_PolicyExpenseTypeController.cs:23).
+//   * Endpoint là POST (nguồn gate Mst_PolicyExpenseTypeController.cs:23, :104, :214).
 //   * Tham số lọc Search: KeyWord, FlagActive, Ft_PageIndex = 0, Ft_PageSize = 10 (gate :23).
 //   * KeyWord KHÔNG lọc: hàm lọc strWhereClause_Mst_PolicyExpenseType (:281-298) CHỈ xử lý FlagActive
 //     (tách dấu phẩy -> toan tử IN :289-294), hoàn toàn không có nhánh nào lọc KeyWord.
-//   * Phân trang ở gate: Ft_RecordStart = (pageIndex * pageSize).ToString(), Ft_RecordCount = pageSize.ToString() (:49-50).
+//   * Action GetByPolicyExpenseTypeNo (#192):
+//     - Nhận PolicyExpenseTypeNo (gate :214). Nếu PolicyExpenseTypeNo null hoặc rỗng -> không truy vấn (:234), trả Data = null (:264), Success = true (:263).
+//     - Hàm lọc strWhereClause_Mst_PolicyExpenseType_By_PolicyExpenseTypeNo (:299-315): lọc PolicyExpenseTypeNo bằng toán tử '=' (:306).
+//     - Nhánh FlagActive (:309-312) không truyền tại gate (:236-239) -> KHÔNG lọc FlagActive (bản ghi inactive FlagActive = '0' như PET06 vẫn lấy được).
+//     - OrgID và NetworkID nhận ở Request.Headers (:225-226) nhưng không lọc vào Ft_WhereClause (:304-312).
+//     - Phân trang Ft_RecordStart = "0", Ft_RecordCount = "1" (:251-252), Rt_Cols_Mst_PolicyExpenseType = "*" (:255).
+//     - Kết quả: nếu Lst_Mst_PolicyExpenseType không rỗng -> Data = Lst_Mst_PolicyExpenseType[0] (object đơn lẻ, không phải mảng, không phải PageInfo); rỗng -> Data = null.
+//   * Phân trang ở gate cho Search: Ft_RecordStart = (pageIndex * pageSize).ToString(), Ft_RecordCount = pageSize.ToString() (:49-50).
 //   * Nghiệp vụ 2 bước trong Mst_PolicyExpenseType_GetX:
 //     1. Bước 1 DRAFT (#tbl_Mst_PolicyExpenseType_Filter_Draft, :8814-8824):
 //        select distinct identity(bigint, 0, 1) MyIdxSeq, mpet.PolicyExpenseTypeNo, mpet.ExpenseType, mpet.LogLUDTimeUTC
@@ -68,6 +77,14 @@ public class MstPolicyExpenseTypeSearchReq
     public string? FlagActive { get; set; }          // Cờ hoạt động, danh sách phân cách dấu phẩy (lọc IN) — :288-295
     public int Ft_PageIndex { get; set; } = 0;       // Trang (0-based) — :23, :44
     public int Ft_PageSize { get; set; } = 10;       // Số dòng/trang — :23, :45
+}
+
+/// <summary>
+/// Port 1:1 body request cho <c>Mst_PolicyExpenseTypeController.GetByPolicyExpenseTypeNo</c> (Mst_PolicyExpenseTypeController.cs:214-277, #192).
+/// </summary>
+public class MstPolicyExpenseTypeGetByPolicyExpenseTypeNoReq
+{
+    public string? PolicyExpenseTypeNo { get; set; }
 }
 
 [ApiController]
@@ -129,17 +146,59 @@ public class Mst_PolicyExpenseTypeControllerPort : ControllerBase
     }
 
     /// <summary>
+    /// Port 1:1 <c>Mst_PolicyExpenseTypeController.GetByPolicyExpenseTypeNo</c> (nguồn gate Mst_PolicyExpenseTypeController.cs:214-277, #192).
+    /// - Body JSON nhận PolicyExpenseTypeNo (EmptyBodyBehavior.Allow).
+    /// - Khi PolicyExpenseTypeNo null hoặc whitespace -> trả về ngay Data = null, Success = true (không truy vấn DB, khớp gate :234, :263-264).
+    /// - Khi có PolicyExpenseTypeNo: gọi strWhereClause_Mst_PolicyExpenseType_By_PolicyExpenseTypeNo (:299-315) lọc PolicyExpenseTypeNo bằng '=' (:306).
+    ///   Không phân biệt hoa/thường trên SQLite (dùng Like không wildcard, escape chuẩn qua PortQuery.Equal).
+    /// - KHÔNG lọc FlagActive (gate :236-239 không truyền FlagActive) -> bản ghi FlagActive = '0' (như PET06) vẫn lấy được.
+    /// - OrgID và NetworkID không lọc vào where clause (:304-312).
+    /// - Phân trang: Ft_RecordStart = "0", Ft_RecordCount = "1" (:251-252) -> lấy tối đa 1 dòng.
+    /// - Kết quả: nếu có dòng trả về Data = rows[0] (object đơn lẻ), nếu không có dòng trả về Data = null (:258-264).
+    /// </summary>
+    [HttpPost("getbypolicyexpensetypeno")]
+    public async Task<IActionResult> GetByPolicyExpenseTypeNo(
+        [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] MstPolicyExpenseTypeGetByPolicyExpenseTypeNoReq? req)
+    {
+        var policyExpenseTypeNo = req?.PolicyExpenseTypeNo;
+
+        // PolicyExpenseTypeNo rỗng -> nguồn không truy vấn (:234), Data = null (:264), Success = true (:263).
+        if (string.IsNullOrWhiteSpace(policyExpenseTypeNo))
+        {
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+
+        // Lấy 1 dòng theo PolicyExpenseTypeNo (Ft_RecordStart = "0", Ft_RecordCount = "1" — gate :251-252).
+        var (_, rows) = await GetXAsync(null, 0, 1, policyExpenseTypeNo: policyExpenseTypeNo);
+
+        // Nguồn: Data = objMst_PolicyExpenseType = Lst_Mst_PolicyExpenseType[0] khi có dòng, ngược lại null (:258-264).
+        return Ok(new
+        {
+            Success = true,
+            Data = rows.Count > 0 ? rows[0] : null
+        });
+    }
+
+    /// <summary>
     /// Port 1:1 hàm nghiệp vụ <c>Mst_PolicyExpenseType_GetX</c> (Master.Loyalty.cs:8757-8929).
     /// Thực hiện ĐÚNG 2 bước:
-    /// - Bước 1: Draft từ Mst_PolicyExpenseType (lọc FlagActive IN tách dấu phẩy, order by LogLUDTimeUTC desc, cắt trang).
+    /// - Bước 1: Draft từ Mst_PolicyExpenseType (lọc PolicyExpenseTypeNo '=' không phân biệt hoa/thường nếu có, lọc FlagActive IN tách dấu phẩy nếu có, order by LogLUDTimeUTC desc, cắt trang).
     /// - Bước 2: Select cuối từ draft page inner join Mst_PolicyExpenseType, left join Mst_ExpenseType lấy ExpenseTypeName, order by LogLUDTimeUTC desc.
     /// </summary>
-    private async Task<(int ItemCount, List<object> Rows)> GetXAsync(string? flagActiveCsv, long recordStart, long recordCount)
+    private async Task<(int ItemCount, List<object> Rows)> GetXAsync(string? flagActiveCsv, long recordStart, long recordCount, string? policyExpenseTypeNo = null)
     {
         // -----------------------------------------------------------------------------------------
         // BƯỚC 1: DRAFT (#tbl_Mst_PolicyExpenseType_Filter_Draft, Master.Loyalty.cs:8814-8824)
         // -----------------------------------------------------------------------------------------
         var qPolicy = _db.Set<Mst_PolicyExpenseType>().AsNoTracking();
+
+        // Lọc PolicyExpenseTypeNo: toán tử '=' không phân biệt hoa/thường (gate Mst_PolicyExpenseTypeController.cs:306).
+        // Dùng PortQuery.Equal (không wildcard, escape chuẩn) và PortQuery.Esc (bẫy #18/#31, PORT_RULES §3).
+        if (!string.IsNullOrWhiteSpace(policyExpenseTypeNo))
+        {
+            var petNo = PortQuery.Equal(policyExpenseTypeNo);
+            qPolicy = qPolicy.Where(x => EF.Functions.Like(x.PolicyExpenseTypeNo.ToLower(), petNo, PortQuery.Esc));
+        }
 
         // Lọc FlagActive: danh sách phân cách dấu phẩy -> IN ('a','b') (gate Mst_PolicyExpenseTypeController.cs:288-295).
         // So sánh không phân biệt hoa/thường (bẫy #18/#31, PORT_RULES §3).
