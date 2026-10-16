@@ -19,6 +19,7 @@ namespace MiniLoyalty.Controllers.Port;
 //   - Create (#310)
 //   - Update (#311)
 //   - Delete (#312)
+//   - DeleteMultiple (#313)
 //
 // Nguồn gate: Sys_GroupController.cs:27-135 (Search), 136-243 (GetAllActive), 244-310 (GetByGroupCode) -> WA_Sys_Group_Get
 //   - Search: Nhận OrgID, KeyWord, FlagActive, Ft_PageIndex = 0, Ft_PageSize = 10
@@ -43,6 +44,10 @@ namespace MiniLoyalty.Controllers.Port;
 //     Tạo RQ_Sys_Group -> WA_Sys_Group_Delete -> WAS_Sys_Group_Delete -> Sys_Group_Delete (System.cs:3453-3566).
 //     Mở transaction -> Sys_Group_CheckDB (FlagExist = Yes) -> Sys_UserInGroup_Delete_ByGroup -> Delete Sys_Group -> Commit.
 //     Trả Success = true, Data = null (:518-519).
+//   - Gate DeleteMultiple (:544-608): Body rỗng -> throw ServiceException("strJson null") -> 400 ErridnLoyalty.Sys_Group_Delete.
+//     Lặp tuần tự danh sách nhóm (:575-592), mỗi phần tử gọi WA_Sys_Group_Delete trong 1 transaction riêng biệt.
+//     "xóa một phần" là hành vi nguồn: lỗi ở phần tử thứ k -> dừng lại, trả mã lỗi của phần tử thứ k, các phần tử trước k đã commit.
+//     Mảng rỗng [] -> Success = true, Data = null (:594-595).
 //
 // Nguồn API: SysGroupController.cs:20-91 (Get), 94-165 (Create), 168-239 (Update), 242-313 (Delete)
 // Nguồn biz: System.cs:2510-2625 (WAS_Sys_Group_Get), 2938-3018 (WAS_Sys_Group_Create), 3368-3451 (WAS_Sys_Group_Update), 3019-3163 (Sys_Group_Update), 3726-3805 (WAS_Sys_Group_Delete), 3453-3566 (Sys_Group_Delete)
@@ -533,28 +538,106 @@ public class Sys_GroupControllerPort : ControllerBase
             return PortResult.Fail("invalid_GroupCode", "Check.GroupCode", req?.GroupCode);
         }
 
-        // 1. Mở transaction (System.cs:3480 _cf.db.BeginTransaction())
+        var err = await DeleteXAsync(req.GroupCode);
+        if (err != null)
+        {
+            return err;
+        }
+
+        // Gate Sys_GroupController.cs:518-519: SetSuccess(), Data = null
+        return Ok(new
+        {
+            Success = true,
+            Data = (object?)null
+        });
+    }
+
+    /// <summary>
+    /// Port 1:1 DeleteMultiple action từ gate Sys_GroupController.cs:544-608 (#313).
+    /// Chuỗi gọi: gate Sys_GroupController.DeleteMultiple -> WA_Sys_Group_Delete (SysGroupController.cs:242-313)
+    /// -> WAS_Sys_Group_Delete (System.cs:3726-3805) -> Sys_Group_Delete (System.cs:3453-3566).
+    ///
+    /// Quy trình nghiệp vụ:
+    ///   0. Body rỗng / null: gate Sys_GroupController.cs:558-560:
+    ///      if (string.IsNullOrEmpty(strJson)) throw new ServiceException("strJson null") -> bắt lỗi trả về 400 ErridnLoyalty.Sys_Group_Delete (Check.strJson).
+    ///   1. Lặp tuần tự qua danh sách nhóm (Sys_GroupController.cs:575-592).
+    ///      Mỗi phần tử chạy trong một transaction riêng biệt tại biz Sys_Group_Delete (System.cs:3480 _cf.db.BeginTransaction()).
+    ///      "xóa một phần" là hành vi nguồn: nếu phần tử thứ k gặp lỗi -> dừng lặp và trả lỗi ngay,
+    ///      các phần tử trước k đã commit thành công vào DB và KHÔNG bị rollback,
+    ///      các phần tử sau k không được xử lý.
+    ///   2. Nếu body mảng rỗng [] -> vòng lặp không chạy, trả về Success = true, Data = null (gate :594-595).
+    ///   3. Không kiểm tra GroupCode rỗng ở gate (khác Delete đơn): phần tử có GroupCode rỗng hoặc không tồn tại sẽ bị
+    ///      Sys_Group_CheckDB bắt và ném ErridnLoyalty.Sys_Group_CheckDB_GroupCodeNotFound.
+    ///   4. Thành công trả Success = true, Data = null (gate :594-595).
+    /// </summary>
+    [HttpPost("deletemultiple")]
+    public async Task<IActionResult> DeleteMultiple(
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] List<Sys_GroupDeleteReq>? req)
+    {
+        // 0. Body rỗng / null (gate Sys_GroupController.cs:558-560):
+        // if (!string.IsNullOrEmpty(strJson)) { ... } else { throw new ServiceException("strJson null"); }
+        // Bắt lỗi trả về lỗi mặc định của Biz Delete (ErridnLoyalty.Sys_Group_Delete)
+        if (req == null)
+        {
+            return PortResult.Fail("Sys_Group_Delete", "Check.strJson", null);
+        }
+
+        // 1. Lặp tuần tự qua từng phần tử (gate Sys_GroupController.cs:575-592).
+        // Mỗi phần tử chạy trong 1 transaction riêng biệt (hàm DeleteXAsync).
+        // "xóa một phần" là hành vi nguồn: nếu phần tử thứ k gặp lỗi -> dừng lặp và trả lỗi ngay,
+        // các phần tử trước k đã commit thành công vào DB và KHÔNG bị rollback,
+        // các phần tử sau k không được xử lý.
+        foreach (var item in req)
+        {
+            var err = await DeleteXAsync(item?.GroupCode);
+            if (err != null)
+            {
+                return err;
+            }
+        }
+
+        // 2. Mảng rỗng hoặc xóa hết thành công: trả Success = true, Data = null (gate Sys_GroupController.cs:594-595)
+        return Ok(new
+        {
+            Success = true,
+            Data = (object?)null
+        });
+    }
+
+    /// <summary>
+    /// Thực hiện nghiệp vụ xóa 1 bản ghi Sys_Group trong 1 transaction riêng biệt.
+    /// Nguồn: biz Sys_Group_Delete (System.cs:3453-3566).
+    /// Dùng chung cho action Delete (#312) và DeleteMultiple (#313).
+    /// </summary>
+    private async Task<IActionResult?> DeleteXAsync(string? rawGroupCode)
+    {
+        // 1. Mở transaction cho mỗi phần tử (System.cs:3480 _cf.db.BeginTransaction())
         await using var tx = await _db.Database.BeginTransactionAsync();
         try
         {
-            // 2. Chuẩn hoá GroupCode theo CUtils.StdParam (System.cs:3498): Trim, ToUpper
-            var strGroupCode = StdParam(req.GroupCode)!;
+            // 2. Chuẩn hoá GroupCode theo CUtils.StdParam (System.cs:3498): Trim, ToUpper, rỗng -> null
+            var strGroupCode = StdParam(rawGroupCode);
 
-            // 3. Sys_Group_CheckDB (System.cs:3503-3509, 1566-1576) với FlagExist = Yes
+            // 3. Sys_Group_CheckDB (System.cs:3503-3509, 1546-1576) với FlagExist = Yes
             // So sánh chuỗi trên SQLite không phân biệt hoa thường theo chuẩn: Like + PortQuery.Equal
-            var groupCodePattern = PortQuery.Equal(strGroupCode);
-            var matchedGroup = await _db.Set<Sys_Group>()
-                .FirstOrDefaultAsync(x => EF.Functions.Like((x.GroupCode ?? "").ToLower(), groupCodePattern, PortQuery.Esc));
+            Sys_Group? matchedGroup = null;
+            if (!string.IsNullOrEmpty(strGroupCode))
+            {
+                var groupCodePattern = PortQuery.Equal(strGroupCode);
+                matchedGroup = await _db.Set<Sys_Group>()
+                    .FirstOrDefaultAsync(x => EF.Functions.Like((x.GroupCode ?? "").ToLower(), groupCodePattern, PortQuery.Esc));
+            }
 
             if (matchedGroup == null)
             {
                 await tx.RollbackAsync();
-                return PortResult.Fail("Sys_Group_CheckDB_GroupCodeNotFound", "Check.GroupCodeNotFound", strGroupCode);
+                return PortResult.Fail("Sys_Group_CheckDB_GroupCodeNotFound", "Check.GroupCodeNotFound", strGroupCode ?? rawGroupCode);
             }
 
             // 4. Xóa bảng phụ Sys_UserInGroup_Delete_ByGroup(strGroupCode) (System.cs:3511, 14126-14141)
+            var groupCodeMatchPattern = PortQuery.Equal(strGroupCode!);
             var usersInGroup = await _db.Set<Sys_UserInGroup>()
-                .Where(x => EF.Functions.Like((x.GroupCode ?? "").ToLower(), groupCodePattern, PortQuery.Esc))
+                .Where(x => EF.Functions.Like((x.GroupCode ?? "").ToLower(), groupCodeMatchPattern, PortQuery.Esc))
                 .ToListAsync();
             if (usersInGroup.Count > 0)
             {
@@ -568,12 +651,7 @@ public class Sys_GroupControllerPort : ControllerBase
             // 6. Commit transaction (System.cs:3532)
             await tx.CommitAsync();
 
-            // Gate Sys_GroupController.cs:518-519: SetSuccess(), Data = null
-            return Ok(new
-            {
-                Success = true,
-                Data = (object?)null
-            });
+            return null;
         }
         catch (Exception ex)
         {
