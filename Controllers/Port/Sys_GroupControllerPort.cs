@@ -20,6 +20,7 @@ namespace MiniLoyalty.Controllers.Port;
 //   - Update (#311)
 //   - Delete (#312)
 //   - DeleteMultiple (#313)
+//   - Import (#314)
 //
 // Nguồn gate: Sys_GroupController.cs:27-135 (Search), 136-243 (GetAllActive), 244-310 (GetByGroupCode) -> WA_Sys_Group_Get
 //   - Search: Nhận OrgID, KeyWord, FlagActive, Ft_PageIndex = 0, Ft_PageSize = 10
@@ -48,6 +49,13 @@ namespace MiniLoyalty.Controllers.Port;
 //     Lặp tuần tự danh sách nhóm (:575-592), mỗi phần tử gọi WA_Sys_Group_Delete trong 1 transaction riêng biệt.
 //     "xóa một phần" là hành vi nguồn: lỗi ở phần tử thứ k -> dừng lại, trả mã lỗi của phần tử thứ k, các phần tử trước k đã commit.
 //     Mảng rỗng [] -> Success = true, Data = null (:594-595).
+//   - Gate Import (:612-753): Nhận file upload qua multipart/form-data.
+//     Đuôi file khác .xlsx -> throw ServiceException("File excel import không hợp lệ") (:636-640).
+//     Đọc Excel: table rỗng -> throw ServiceException("File excel import không có dữ liệu") (:653, :738-740).
+//     Số cột table != GetImportDicColumsTemplate().Count -> throw ServiceException("File excel import không hợp lệ") (:655-659).
+//     Vòng lặp 1: kiểm tra rỗng GroupCode ("Mã nhóm người dùng không được trống"), GroupName ("Tên nhóm người dùng không được trống") cho TẤT CẢ các dòng trước khi tạo (:662-684).
+//     Vòng lặp 2: gọi WA_Sys_Group_Create tuần tự cho từng dòng (mỗi dòng 1 transaction riêng, :705-731). Lỗi ở dòng k -> dừng ngay, trả lỗi dòng k (import một phần).
+//     Thành công: Data = null (:733-735).
 //
 // Nguồn API: SysGroupController.cs:20-91 (Get), 94-165 (Create), 168-239 (Update), 242-313 (Delete)
 // Nguồn biz: System.cs:2510-2625 (WAS_Sys_Group_Get), 2938-3018 (WAS_Sys_Group_Create), 3368-3451 (WAS_Sys_Group_Update), 3019-3163 (Sys_Group_Update), 3726-3805 (WAS_Sys_Group_Delete), 3453-3566 (Sys_Group_Delete)
@@ -320,7 +328,120 @@ public class Sys_GroupControllerPort : ControllerBase
             return PortResult.Fail("Sys_Group_Create", "Check.strJson", null);   // gate :324-330 ServiceException("strJson null") -> mã mặc định Sys_Group_Create
         }
 
+        var err = await CreateXAsync(req.GroupCode, req.GroupName, req.MST);
+        if (err != null) return err;
 
+        return Ok(new
+        {
+            Success = true,
+            Data = (object?)null
+        });
+    }
+
+    /// <summary>
+    /// Port 1:1 Sys_GroupController.Import (gate Sys_GroupController.cs:612-753, #314) -> WA_Sys_Group_Create -> WAS_Sys_Group_Create -> Sys_Group_Create_New20191102 (zTemp.cs:1034-1251).
+    /// - Nhận file upload qua multipart/form-data.
+    /// - Tham số orgId nhận từ form ([FromForm] string? orgId) hoặc header OrgID (do nguồn lấy OrgID từ session user orgUserUI.OrgId :626).
+    /// - Thiếu file hoặc file rỗng hoặc đuôi khác .xlsx -> Fail("Sys_Group_Import", "Message", "File excel import không hợp lệ") (gate :636-641).
+    /// - Đọc sheet bằng PortExcel.ReadSheet với 3 cột: GroupCode, GroupName, MST (giả định theo đề bài #314 do excerpt thiếu GetImportDicColumsTemplate; thực tế nguồn gate :885-893 có 2 cột GroupCode, GroupName).
+    /// - Không có dòng dữ liệu (rows.Count == 0) -> Fail("Sys_Group_Import", "Message", "File excel import không có dữ liệu") (gate :653, :738-740).
+    /// - Số cột dòng tiêu đề != 3 -> Fail("Sys_Group_Import", "Message", "File excel import không hợp lệ") (gate :655-659).
+    /// - Vòng lặp 1 (kiểm tra trước, gate :662-684):
+    ///   * dr[TblSys_Group.GroupCode] rỗng -> Fail("Sys_Group_Import", "Message", "Mã nhóm người dùng không được trống") (:665-668).
+    ///   * dr[TblSys_Group.GroupName] rỗng -> Fail("Sys_Group_Import", "Message", "Tên nhóm người dùng không được trống") (:670-673).
+    ///   Nếu lỗi ở bước này: dừng ngay, KHÔNG có dòng nào được tạo (kiểm trước).
+    /// - Vòng lặp 2 (lưu dữ liệu từng dòng, gate :705-731):
+    ///   Gọi CreateXAsync(groupCode, groupName, null) độc lập cho từng dòng (1 transaction riêng cho mỗi dòng).
+    ///   Lỗi ở dòng k -> trả về lỗi của dòng k ngay lập tức (hành vi import một phần: các dòng trước k đã commit thành công, dòng k và các dòng sau không được tạo).
+    /// - Thành công: trả { Success = true, Data = null } (gate :733-735).
+    /// </summary>
+    [HttpPost("import")]
+    [Consumes("multipart/form-data")]
+    public async Task<IActionResult> Import([FromForm] string? orgId, IFormFile? file)
+    {
+        // 1. Kiểm tra file upload: gate Sys_GroupController.cs:636-641
+        if (file == null || file.Length == 0)
+        {
+            return PortResult.Fail("Sys_Group_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+        if (ext != ".xlsx")
+        {
+            return PortResult.Fail("Sys_Group_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        // 2. Đọc bảng tính bằng PortExcel.ReadSheet (gate Sys_GroupController.cs:652)
+        // Template 2 cột theo NGUỒN (quyết định Claude 16/10, xem conflicts\314_conflict.md): GroupCode, GroupName; MST không lấy từ Excel (biz lấy MST của người dùng đăng nhập).
+        // (Lưu ý: Mã nguồn thật Sys_GroupController.cs:885-893 GetImportDicColumsTemplate trả về 2 cột: GroupCode, GroupName).
+        int columnCount;
+        List<Dictionary<string, string?>> rows;
+        try
+        {
+            using var stream = file.OpenReadStream();
+            (columnCount, rows) = PortExcel.ReadSheet(stream, new[] { "GroupCode", "GroupName" });   // GetImportDicColumsTemplate (Sys_GroupController.cs:885-893): GroupCode, GroupName (FlagActive bị comment)
+        }
+        catch
+        {
+            return PortResult.Fail("Sys_Group_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        // Kiểm tra có dữ liệu hay không (gate Sys_GroupController.cs:653, :738-740)
+        if (rows.Count == 0)
+        {
+            return PortResult.Fail("Sys_Group_Import", "Message", "File excel import không có dữ liệu");
+        }
+
+        // Kiểm tra số cột dòng tiêu đề so với template (3 cột theo giả định đề bài #314, gate :655-659)
+        if (columnCount != 2)   // GetImportDicColumsTemplate().Count = 2
+        {
+            return PortResult.Fail("Sys_Group_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        // 3. Vòng lặp 1: Kiểm tra TẤT CẢ các dòng TRƯỚC khi tạo (#region["Check null"] gate :662-684)
+        foreach (var r in rows)
+        {
+            var groupCode = r.GetValueOrDefault("GroupCode");
+            if (string.IsNullOrWhiteSpace(groupCode))
+            {
+                return PortResult.Fail("Sys_Group_Import", "Message", "Mã nhóm người dùng không được trống");
+            }
+
+            var groupName = r.GetValueOrDefault("GroupName");
+            if (string.IsNullOrWhiteSpace(groupName))
+            {
+                return PortResult.Fail("Sys_Group_Import", "Message", "Tên nhóm người dùng không được trống");
+            }
+        }
+
+        // 4. Vòng lặp 2: Lưu từng dòng tuần tự (gate Sys_GroupController.cs:705-731)
+        // Mỗi dòng gọi CreateXAsync trong 1 transaction riêng biệt. Gặp lỗi đầu tiên -> return lỗi đó luôn (import một phần).
+        foreach (var r in rows)
+        {
+            var groupCode = r.GetValueOrDefault("GroupCode");
+            var groupName = r.GetValueOrDefault("GroupName");
+            var err = await CreateXAsync(groupCode, groupName, null);
+            if (err != null)
+            {
+                return err;
+            }
+        }
+
+        return Ok(new
+        {
+            Success = true,
+            Data = (object?)null
+        });
+    }
+
+    /// <summary>
+    /// Thực hiện nghiệp vụ tạo mới 1 nhóm người dùng trong 1 transaction riêng biệt.
+    /// Nguồn: biz Sys_Group_Create_New20191102 (zTemp.cs:1034-1251).
+    /// Dùng chung cho action Create (#310) và Import (#314).
+    /// Trả về null nếu thành công; trả về IActionResult (PortResult.Fail) nếu thất bại (transaction đã rollback).
+    /// </summary>
+    private async Task<IActionResult?> CreateXAsync(string? groupCode, string? groupName, string? mst)
+    {
         // 1. Mở transaction (zTemp.cs:1072 _cf.db.BeginTransaction())
         await using var tx = await _db.Database.BeginTransactionAsync();
         try
@@ -328,10 +449,11 @@ public class Sys_GroupControllerPort : ControllerBase
             // 2. Chuẩn hoá tham số (zTemp.cs:1135-1136, TUtils.CUtils):
             // GroupCode -> StdParam (Trim + ToUpper, rỗng -> null)
             // GroupName -> string.Format("{0}", objGroupName).Trim()
-            var strGroupCode = StdParam(req.GroupCode);
-            var strGroupName = string.Format("{0}", req.GroupName).Trim();
+            var strGroupCode = StdParam(groupCode);
+            var strGroupName = string.Format("{0}", groupName).Trim();
 
-            // 3. Kiểm tra chuỗi rỗng (zTemp.cs:1142-1144, 1161-1163):
+            // 3. Kiểm tra chuỗi rỗng:
+            // strGroupCode rỗng hoặc null -> ErridnLoyalty.Sys_Group_Create_InvalidGroupCode (zTemp.cs:1142-1151)
             if (string.IsNullOrEmpty(strGroupCode))
             {
                 await tx.RollbackAsync();
@@ -349,17 +471,17 @@ public class Sys_GroupControllerPort : ControllerBase
                 return PortResult.Fail("Sys_Group_CheckDB_GroupCodeExist", "Check.GroupCodeExist", strGroupCode);
             }
 
-            // Sys_User_CheckDB: User thực hiện phải tồn tại và active (zTemp.cs:1175-1181)
-            // Lấy MST từ Sys_User (zTemp.cs:1183)
-            // GAP: Entity Sys_User chưa có trong hệ thống đích (chưa port #323-336), gán MST = req.MST nếu có, ngược lại null.
-                        if (strGroupName.Length < 1)
+            // strGroupName dài < 1 -> ErridnLoyalty.Sys_Group_Create_InvalidGroupName (zTemp.cs:1161-1170)
+            if (strGroupName.Length < 1)
             {
                 await tx.RollbackAsync();
                 return PortResult.Fail("Sys_Group_Create_InvalidGroupName", "Check.strGroupName", strGroupName);
             }
 
-            // MST: nguồn lấy từ Sys_User của người dùng đang đăng nhập (Sys_User_CheckDB -> dtDB_Sys_User.Rows[0]["MST"], :1175-1183); đích chưa có session/Sys_User -> nhận MST tuỳ chọn trong body (GAP)
-            var strMST = !string.IsNullOrWhiteSpace(req.MST) ? StdParam(req.MST) : null;
+            // Sys_User_CheckDB: User thực hiện phải tồn tại và active (zTemp.cs:1175-1181)
+            // Lấy MST từ Sys_User (zTemp.cs:1183)
+            // GAP: Entity Sys_User chưa có trong hệ thống đích (chưa port #323-336), gán MST = mst nếu có, ngược lại null.
+            var strMST = !string.IsNullOrWhiteSpace(mst) ? StdParam(mst) : null;
 
             // NetworkID từ cấu hình theo luật A.13 / đề bài line 66 (bảng Sys_Group nguồn không có cột NetworkID)
             var networkID = _config?["Biz_NetworkID"] ?? "1001";
@@ -382,11 +504,7 @@ public class Sys_GroupControllerPort : ControllerBase
             // 6. Commit transaction (zTemp.cs:1214)
             await tx.CommitAsync();
 
-            return Ok(new
-            {
-                Success = true,
-                Data = (object?)null
-            });
+            return null;
         }
         catch (Exception ex)
         {
