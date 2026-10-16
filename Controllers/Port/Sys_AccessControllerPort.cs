@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Xml.Linq;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
@@ -9,6 +11,26 @@ using MiniLoyalty.Data;
 using MiniLoyalty.Models.Port;
 
 namespace MiniLoyalty.Controllers.Port;
+
+/// <summary>
+/// Body của Sys_AccessController.SaveMenuButtonInGroup = RQ_Sys_Access (gate :474-576): Sys_Group.GroupCode + Lst_Sys_Access[{ObjectCode, so_ObjectType}].
+/// </summary>
+public class SysAccessSaveMenuButtonInGroupReq
+{
+    public Sys_Group_Input? Sys_Group { get; set; }
+    public List<Sys_Access_Input>? Lst_Sys_Access { get; set; }
+}
+
+public class Sys_Group_Input
+{
+    public string? GroupCode { get; set; }
+}
+
+public class Sys_Access_Input
+{
+    public string? ObjectCode { get; set; }
+    public string? so_ObjectType { get; set; }
+}
 
 /// <summary>
 /// DTO tham số tìm kiếm cho Sys_AccessController.Search (gate Sys_AccessController.cs:27-109).
@@ -54,10 +76,10 @@ public class SysAccessGetByObjectCodeReq
 }
 
 /// <summary>
-/// Port 1:1 Sys_AccessController — màn phân quyền truy cập hệ thống (#300 Search, #301 Get, #302 GetByGroupCode, #303 GetAllFunctionBy_ObjectCode, #304 GetByObjectCode).
-/// Nguồn Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Sys_AccessController.cs:27-109, 110-217, 220-285, 288-402, 405-472
-/// Nguồn API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\SysAccessController.cs:20-91 (WA_Sys_Access_Get)
-/// Nguồn BIZ: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\System.cs:757-850 (WAS_Sys_Access_Get)
+/// Port 1:1 Sys_AccessController — màn phân quyền truy cập hệ thống (#300 Search, #301 Get, #302 GetByGroupCode, #303 GetAllFunctionBy_ObjectCode, #304 GetByObjectCode, #305 SaveMenuButtonInGroup).
+/// Nguồn Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Sys_AccessController.cs:27-109, 110-217, 220-285, 288-402, 405-472, 474-576
+/// Nguồn API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\SysAccessController.cs:20-91 (WA_Sys_Access_Get), 94-165 (WA_Sys_Access_Save)
+/// Nguồn BIZ: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\System.cs:757-850 (WAS_Sys_Access_Get), 1284-1366 (WAS_Sys_Access_Save), 852-1055 (Sys_Access_Save)
 ///            D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\System.cs:290-512 (Sys_Access_Get)
 /// </summary>
 [ApiController]
@@ -66,10 +88,12 @@ public class SysAccessGetByObjectCodeReq
 public class Sys_AccessControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly Microsoft.AspNetCore.Hosting.IWebHostEnvironment? _env;
 
-    public Sys_AccessControllerPort(AppDbContext db)
+    public Sys_AccessControllerPort(AppDbContext db, Microsoft.AspNetCore.Hosting.IWebHostEnvironment? env = null)
     {
         _db = db;
+        _env = env;
     }
 
     /// <summary>
@@ -283,4 +307,178 @@ public class Sys_AccessControllerPort : ControllerBase
 
         return (itemCount, rows);
     }
+
+    /// <summary>
+    /// Port 1:1 Sys_AccessController.SaveMenuButtonInGroup (#305, gate :474-576) -> WA_Sys_Access_Save -> Sys_Access_Save (System.cs:856-1033).
+    /// Body = RQ_Sys_Access: { Sys_Group: { GroupCode }, Lst_Sys_Access: [ { ObjectCode, so_ObjectType } ] }.
+    /// Gate: Lst rỗng/null -> danh sách rỗng (sẽ xoá hết quyền của nhóm); mỗi phần tử so_ObjectType.Equals("MENU"/"BUTTON") (PHÂN BIỆT hoa/thường, :530-537);
+    ///   listObjectCode = ResolveObjects(menus) (menu + FunctionCodes của menu trong SysObjectSetting.config, :539); NẾU có kết quả: + buttons, Distinct,
+    ///   Lst = {ObjectCode.Trim(), GroupCode = Sys_Group.GroupCode.Trim()} (:540-559); NẾU rỗng (không có menu / không có cấu hình): GIỮ NGUYÊN Lst client gửi (LỖI NGUỒN giữ nguyên).
+    /// Biz: Sys_Group_CheckDB(GroupCode, Yes) -> StdParam(ObjectCode) từng dòng -> Sys_Object_CheckDB(ObjectCode, Yes, "1") từng dòng -> XOÁ HẾT Sys_Access của nhóm rồi chèn lại (:990-1012).
+    /// Lỗi bất ngờ (vd so_ObjectType null -> NullReference như nguồn) do PortExceptionFilter trả 400. Kiểm tra quyền Sys_Access_CheckDenyV30 loại Đ (chưa có phân quyền).
+    /// </summary>
+    [HttpPost("savemenubuttoningroup")]
+    public async Task<IActionResult> SaveMenuButtonInGroup([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] SysAccessSaveMenuButtonInGroupReq? req)
+    {
+        // gate :498-505: strJson rỗng -> ServiceException("strJson null") -> mã mặc định Sys_Access_Save
+        if (req == null)
+        {
+            return PortResult.Fail("Sys_Access_Save", "Check.strJson", null);
+        }
+
+        var lst = req.Lst_Sys_Access ?? new List<Sys_Access_Input>();
+        var listMenu = new List<string>();
+        var listButton = new List<string>();
+        foreach (var item in lst)
+        {
+            if (item.so_ObjectType!.Equals("MENU")) listMenu.Add(item.ObjectCode!);
+            else if (item.so_ObjectType.Equals("BUTTON")) listButton.Add(item.ObjectCode!);
+        }
+
+        var listObjectCode = ResolveObjects(listMenu);
+        List<string?> finalCodes;
+        if (listObjectCode.Count > 0)
+        {
+            if (listButton.Count > 0) listObjectCode.AddRange(listButton);
+            finalCodes = listObjectCode.Distinct().Select(it => (string?)it.Trim()).ToList();
+        }
+        else
+        {
+            finalCodes = lst.Select(x => x.ObjectCode).ToList();   // giữ nguyên Lst của client (gate :540-559 chỉ thay khi listObjectCode không rỗng)
+        }
+
+        var groupCodeRaw = req.Sys_Group!.GroupCode;   // Sys_Group null -> NullReference như nguồn
+
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // Sys_Group_CheckDB(GroupCode, "1") (System.cs:910-915)
+            var strGroupCode = StdParam(groupCodeRaw);
+            var dbGroup = await _db.Set<Sys_Group>().AsNoTracking()
+                .FirstOrDefaultAsync(x => EF.Functions.Like((x.GroupCode ?? "").ToLower(), PortQuery.Equal(strGroupCode ?? ""), PortQuery.Esc));
+            if (dbGroup == null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Sys_Group_CheckDB_GroupCodeNotFound", "Check.GroupCodeNotFound", strGroupCode);
+            }
+
+            // StdParam(ObjectCode) cả bảng rồi Sys_Object_CheckDB(ObjectCode, "1", "1") từng dòng theo thứ tự (:952-972)
+            var objCodes = finalCodes.Select(c => StdParam(c)).ToList();
+            foreach (var objCode in objCodes)
+            {
+                var dbObj = await _db.Set<Sys_Object>().AsNoTracking()
+                    .FirstOrDefaultAsync(x => EF.Functions.Like((x.ObjectCode ?? "").ToLower(), PortQuery.Equal(objCode ?? ""), PortQuery.Esc));
+                if (dbObj == null)
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Sys_Object_CheckDB_ObjectCodeNotFound", "Check.ObjectCodeNotFound", objCode);
+                }
+                if (!"1".Contains(dbObj.FlagActive ?? ""))
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Sys_Object_CheckDB_FlagActiveNotMatched", "Check.ObjectCode", objCode,
+                        "Check.FlagActiveListToCheck", "1", "DB.FlagActive", dbObj.FlagActive);
+                }
+            }
+
+            // Clear All + Insert All (:988-1012): GroupCode = mã nhóm trong DB, LogLU = nhóm (LogLUDTimeUTC = bây giờ, LogLUBy = người dùng)
+            var existing = await _db.Set<Sys_Access>().Where(x => x.GroupCode == dbGroup.GroupCode).ToListAsync();
+            _db.Set<Sys_Access>().RemoveRange(existing);
+            await _db.SaveChangesAsync();
+
+            var now = DateTime.UtcNow;
+            foreach (var objCode in objCodes)
+            {
+                _db.Set<Sys_Access>().Add(new Sys_Access { GroupCode = dbGroup.GroupCode, ObjectCode = objCode!, LogLUDTimeUTC = now, LogLUBy = "port" });
+            }
+            await _db.SaveChangesAsync();
+
+            await tx.CommitAsync();
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return PortResult.Fail("Sys_Access_Save", "Exception", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// BaseController.cs:717-767 ResolveObjects: menu + các FunctionCodes của menu (SysObjectSetting.config); mã chức năng tách theo dấu phẩy; loại trùng theo Dictionary (phân biệt hoa/thường).
+    /// Không có cấu hình (setting null) -> danh sách rỗng (kể cả menu).
+    /// </summary>
+    private List<string> ResolveObjects(List<string> objectCodes)
+    {
+        var list = new List<string>();
+        var setting = GetSysObjectSetting();
+        var dic = new Dictionary<string, bool>();
+        if (setting != null && setting.List != null)
+        {
+            foreach (var code in objectCodes)
+            {
+                if (!dic.ContainsKey(code))
+                {
+                    dic.Add(code, true);
+                    list.Add(code);
+                }
+
+                foreach (var scode in setting.List)
+                {
+                    if (scode.ObjectCode!.Equals(code, StringComparison.InvariantCultureIgnoreCase))
+                    {
+                        foreach (var f in scode.FunctionCodes!)
+                        {
+                            if (!string.IsNullOrEmpty(f))
+                            {
+                                if (!dic.ContainsKey(f))
+                                {
+                                    dic.Add(f, true);
+                                    foreach (var strCode in f.Split(','))
+                                    {
+                                        list.Add(strCode);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// BaseController.cs:654-669 GetSysObjectSetting: đọc cấu hình ~/App_Data/SysObjectSetting.config.
+    /// </summary>
+    private SysObjectSettingModel? GetSysObjectSetting()
+    {
+        var root = _env?.ContentRootPath ?? Directory.GetCurrentDirectory();
+        var filePath = Path.Combine(root, "App_Data", "SysObjectSetting.config");
+        if (!System.IO.File.Exists(filePath))
+        {
+            filePath = Path.Combine(AppContext.BaseDirectory, "App_Data", "SysObjectSetting.config");
+            if (!System.IO.File.Exists(filePath)) return null;
+        }
+
+        var doc = System.Xml.Linq.XDocument.Load(filePath);
+        var items = new List<SysObjectSettingItem>();
+        foreach (var e in doc.Descendants().Where(x => x.Name.LocalName == "SysObjectFunction"))
+        {
+            var code = e.Elements().FirstOrDefault(x => x.Name.LocalName == "ObjectCode")?.Value;
+            var funcs = e.Elements().FirstOrDefault(x => x.Name.LocalName == "FunctionCodes")?.Elements().Select(x => x.Value).ToList();
+            items.Add(new SysObjectSettingItem { ObjectCode = code, FunctionCodes = funcs });
+        }
+        return new SysObjectSettingModel { List = items };
+    }
+
+    /// <summary>
+    /// Chuẩn hoá chuỗi mã theo CUtils.StdParam: Trim, viết HOA, rỗng -> null.
+    /// </summary>
+    private static string? StdParam(object? s)
+    {
+        if (s == null) return null;
+        var str = s.ToString()?.Trim().ToUpperInvariant();
+        return string.IsNullOrEmpty(str) ? null : str;
+    }
 }
+
