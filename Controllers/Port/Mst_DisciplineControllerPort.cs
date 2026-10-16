@@ -10,13 +10,14 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục hình thức kỷ luật (Mst_Discipline) của dự án nguồn 2022.7.Loyalty (#132, #133).
+// PORT 1:1 — màn danh mục hình thức kỷ luật (Mst_Discipline) của dự án nguồn 2022.7.Loyalty (#132, #133, #134).
 //
 // Nguồn controller (tầng gate):
 //   Mst_DisciplineController.cs:26-106         Search -> WA_Mst_Discipline_Get (#132)
 //   Mst_DisciplineController.cs:108-171        GetByDisciplineCode -> WA_Mst_Discipline_Get (#133)
+//   Mst_DisciplineController.cs:173-233        GetAllActive -> WA_Mst_Discipline_Get (#134)
 //   Mst_DisciplineController.cs:523-538        strWhereClause_Mst_Discipline (mệnh đề lọc Search)
-//   Mst_DisciplineController.cs:540-555        strWhereClause_Mst_Discipline_By_DisciplineCode (mệnh đề lọc GetByDisciplineCode)
+//   Mst_DisciplineController.cs:540-555        strWhereClause_Mst_Discipline_By_DisciplineCode (mệnh đề lọc GetByDisciplineCode, GetAllActive)
 // Nguồn API:
 //   MstDisciplineController.cs:17-88          WA_Mst_Discipline_Get
 // Nguồn biz:
@@ -27,7 +28,7 @@ namespace MiniLoyalty.Controllers.Port;
 // GIỮ ĐÚNG NGUỒN:
 //   * Endpoint là POST (nguồn [AcceptVerbs("POST")]).
 //   * Lọc KeyWord: like '%kw%' trên DisciplineName (Mst_DisciplineController.cs:530).
-//   * Lọc FlagActive: toán tử '=' (Mst_DisciplineController.cs:534) — KHÔNG IN.
+//   * Lọc FlagActive: toán tử '=' (Mst_DisciplineController.cs:534, :551) — KHÔNG IN.
 //     Không tách dấu phẩy; "0,1" -> so sánh bằng chuỗi "0,1" -> 0 dòng.
 //   * OrgID truyền vào (:26, :56) nhưng strWhereClause_Mst_Discipline (:523-538) KHÔNG dùng OrgID -> không lọc.
 //   * Chia trang theo md.DisciplineCode asc (MasterData.cs:34016), select cuối sắp theo t.MyIdxSeq asc (MasterData.cs:34055).
@@ -38,10 +39,12 @@ namespace MiniLoyalty.Controllers.Port;
 //     DisciplineCode rỗng -> Data null, không truy vấn (:128, :158). Ngược lại lọc DisciplineCode = (Like + PortQuery.Equal, :547).
 //     FlagActive không truyền (:130-133) nên hàng FlagActive '0' vẫn lấy.
 //     Ft_RecordStart = "0", Ft_RecordCount = "1" (:145-146). Trả Lst_Mst_Discipline[0] hoặc null (:152-155).
+//   * GetAllActive: [HttpPost("getallactive")], không body, Ft_RecordStart = "0", Ft_RecordCount = "123456000" (gate :208-209).
+//     FlagActive = "1" (toán tử '=', gate :195, :551). Trả Data là mảng trần list Mst_Discipline (null nếu rỗng) (gate :192, :215-220).
 //
 // Bỏ qua có chủ đích (loại Đ):
-//   - CheckGatewayAuthentication: gate :35, :117, API :40-45
-//   - CheckAuthorize: gate :36, :118 (hệ thống đích chưa có hệ phân quyền)
+//   - CheckGatewayAuthentication: gate :35, :117, :182, API :40-45
+//   - CheckAuthorize: gate :36, :118, :183 (hệ thống đích chưa có hệ phân quyền)
 //   - Ghi RequestLog/ReturnLog: MasterData.cs:34152-34159, 34229-34236
 //   - Sys_Access_CheckDenyV30, Sys_User_CheckAuthentication
 // ============================================================================================
@@ -89,8 +92,26 @@ public class Mst_DisciplineControllerPort : ControllerBase
         // PageCount = 0 khi DataList rỗng, ngược lại ceil(ItemCount / ps) với ps = PageSize (PageSize=0 thì 10) — gate :81-89.
         var ps = pageSize == 0 ? 10 : pageSize;
         var pageCount = rows.Count == 0 ? 0 : (itemCount % ps == 0 ? itemCount / ps : itemCount / ps + 1);
-
         return Ok(new { Success = true, Data = new PageInfo<object>(rows, itemCount, pageCount, pageIndex, pageSize) });
+    }
+
+    /// <summary>
+    /// Port 1:1 <c>Mst_DisciplineController.GetAllActive</c> (nguồn gate Mst_DisciplineController.cs:173-233, #134).
+    /// Nguồn gọi <c>strWhereClause_Mst_Discipline_By_DisciplineCode</c> với <c>FlagActive = "1"</c> (:193-196) ⇒ lọc
+    /// <c>FlagActive = '1'</c> (:195, toán tử '=' tại :551).
+    /// Không body: RecordStart = "0", RecordCount = "123456000" (nguồn Ft_RecordStart/Ft_RecordCount :208-209).
+    /// Trả <c>Ok(new { Success = true, Data = ... })</c> — Data là MẢNG TRẦN, rỗng thì <c>null</c>
+    /// (nguồn :192 khởi tạo null, :215-218 chỉ gán khi có dòng, :220 trả thẳng lst_Mst_Discipline).
+    /// </summary>
+    [HttpPost("getallactive")]
+    public async Task<IActionResult> GetAllActive()
+    {
+        // Nguồn: Ft_RecordStart = "0", Ft_RecordCount = "123456000" (gate :208-209).
+        // FlagActive = "1" (gate :195) ⇒ lọc toán tử '=' (:551); không body.
+        var (_, rows) = await GetXAsync(null, "1", 0, 123456000);
+
+        // Nguồn :220: Data = lst_Mst_Discipline (mảng trần); rỗng ⇒ null (:192, :215-218).
+        return Ok(new { Success = true, Data = rows.Count > 0 ? rows : null });
     }
 
     // ============================================================================================
@@ -119,7 +140,7 @@ public class Mst_DisciplineControllerPort : ControllerBase
     }
 
     /// <summary>
-    /// Lọc + đếm + chia trang theo DisciplineCode asc — dùng cho Search, GetByDisciplineCode.
+    /// Lọc + đếm + chia trang theo DisciplineCode asc — dùng cho Search, GetByDisciplineCode, GetAllActive.
     /// Trả (itemCount, rows): itemCount = tổng số dòng sau lọc (MyCount, SQL :34020); rows = trang đã cắt kèm MyIdxSeq 0-based (:34050).
     /// </summary>
     private async Task<(int itemCount, List<object> rows)> GetXAsync(string? keyWord, string? flagActive, long recordStart, long recordCount, string? disciplineCodeEqual = null)
