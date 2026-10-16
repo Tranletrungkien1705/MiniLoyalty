@@ -2,8 +2,10 @@ namespace MiniLoyalty.Controllers.Port;
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
@@ -282,8 +284,8 @@ public class Sys_UserDeleteReq
 }
 
 /// <summary>
-/// Controller Port 1:1 cho Sys_UserController — hạng mục #323 (Search), #324 (GetByUserCode), #325 (GetByMST), #327 (GetForCurrentUser), #328 (GetAllActive), #329 (Create), #330 (CreateCP), #331 (Update), #332 (Delete), #333 (DeleteMultiple).
-/// Nguồn Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Sys_UserController.cs:498-561, 565-683, 685-837, 841-912, 916-976, 978-1042
+/// Controller Port 1:1 cho Sys_UserController — hạng mục #323 (Search), #324 (GetByUserCode), #325 (GetByMST), #327 (GetForCurrentUser), #328 (GetAllActive), #329 (Create), #330 (CreateCP), #331 (Update), #332 (Delete), #333 (DeleteMultiple), #334 (Import).
+/// Nguồn Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Sys_UserController.cs:498-561, 565-683, 685-837, 841-912, 916-976, 978-1042, 1046-1235
 /// Nguồn API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\SysUserController.cs:199-270, 421-492, 569-640, 643-714
 /// Nguồn Biz LIVE: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\System.cs:8365-8478, 7987-8363 (Sys_User_Get_New20191104), 11222-11323 (WAS_Sys_User_Create), 9218-9391, 10160-10828 (Sys_User_CreateForNetworkX_New20200110), 12524-12617 (WAS_Sys_User_Update), 12243-12523 (Sys_User_Update_New20191226), 13092-13171 (WAS_Sys_User_Delete), 12619-12732 (Sys_User_Delete)
 /// Route: api/sys_user
@@ -1438,6 +1440,163 @@ public class Sys_UserControllerPort : ControllerBase
         }
 
         // 3. Mảng rỗng hoặc xóa hết thành công: trả Success = true, Data = null (gate Sys_UserController.cs:1028-1029)
+        return Ok(new
+        {
+            Success = true,
+            Data = (object?)null
+        });
+    }
+
+    /// <summary>
+    /// Port 1:1 Sys_UserController.Import (gate Sys_UserController.cs:1046-1235, #334) -> WA_Sys_User_Create (SysUserController.cs:421-492) -> WAS_Sys_User_Create (System.cs:11222-11323) -> Sys_User_Create_New20200110 (System.cs:9218-9391) -> Sys_User_CreateForNetworkX_New20200110 (System.cs:10160-10828).
+    /// - Nhận file upload qua multipart/form-data.
+    /// - Tham số orgId nhận từ form ([FromForm] string? orgId) hoặc header OrgID (do nguồn lấy OrgID từ session user orgUserUI.OrgId :1060).
+    /// - Thiếu file hoặc file rỗng hoặc đuôi khác .xlsx -> Fail("Sys_User_Import", "Message", "File excel import không hợp lệ") (gate :1070-1074).
+    /// - Đọc sheet bằng PortExcel.ReadSheet với 4 cột: UserCode, UserName, UserPassword, mdcpo_DLCPCode.
+    ///   Giả định template gồm 4 cột theo đúng thứ tự khai báo trong GetImportDicColumsTemplate() (gate Sys_UserController.cs:1371-1390):
+    ///   UserCode ("Tài khoản (*)"), UserName ("Tên người dùng (*)"), UserPassword ("Mật khẩu (*)"), mdcpo_DLCPCode ("Mã đại lý (*)").
+    /// - Không có dòng dữ liệu (rows.Count == 0) -> Fail("Sys_User_Import", "Message", "File excel import không có dữ liệu") (gate :1087, :1220-1221).
+    /// - Số cột dòng tiêu đề != 4 -> Fail("Sys_User_Import", "Message", "File excel import không hợp lệ") (gate :1089-1093).
+    /// - Vòng lặp 1: Kiểm tra TẤT CẢ các dòng TRƯỚC khi tạo (gate :1096-1133 #region["Check null"]):
+    ///   * dr[TblSys_User.UserCode] rỗng -> Fail("Sys_User_Import", "Message", "Mã người dùng không được trống") (:1099-1103).
+    ///   * dr[TblSys_User.UserName] rỗng -> Fail("Sys_User_Import", "Message", "Tên người dùng không được trống") (:1104-1108).
+    ///   * dr[TblSys_User.UserPassword] rỗng -> Fail("Sys_User_Import", "Message", "Mật khẩu không được trống") (:1109-1113).
+    ///   * dr[TblSys_User.mdcpo_DLCPCode] rỗng -> Fail("Sys_User_Import", "Message", "Mã đại lý không được trống") (:1119-1123).
+    ///   Nếu lỗi ở bước này: dừng ngay, KHÔNG có dòng nào được tạo (kiểm trước).
+    /// - Vòng lặp 2: Lưu dữ liệu từng dòng (gate :1159-1213):
+    ///   * Tra cứu mã đại lý qua Map_DealerCP_Org join Mst_DealerCP (FlagActive = "1") và Mst_NNT (gate :1161-1186) để lấy MST (mnnt_MST).
+    ///   * Không tìm thấy đại lý -> Fail("invalid_DLCPCode", "Check.DLCPCode", dlcpCode, "Message", "invalid_DLCPCode") (gate :1210).
+    ///   * Gọi CreateXAsync với UserCode, UserName, UserPassword, EMail = UserCode, MST = mnnt_MST, mdcpo_DLCPCode độc lập cho từng dòng (1 transaction riêng cho mỗi dòng).
+    ///   * Lỗi ở dòng k -> trả về lỗi của dòng k ngay lập tức (hành vi import một phần: các dòng trước k đã commit thành công, dòng k và các dòng sau không được tạo).
+    /// - Thành công: trả { Success = true, Data = null } (gate :1215-1216).
+    /// </summary>
+    [HttpPost("import")]
+    [Consumes("multipart/form-data")]
+    public async Task<IActionResult> Import([FromForm] string? orgId, IFormFile? file)
+    {
+        // 1. Kiểm tra file upload (gate Sys_UserController.cs:1070-1083)
+        // Thiếu file hoặc file rỗng -> Fail("Sys_User_Import", "Message", "File excel import không hợp lệ")
+        if (file == null || file.Length == 0)
+        {
+            return PortResult.Fail("Sys_User_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        // Đuôi file khác .xlsx -> Fail("Sys_User_Import", "Message", "File excel import không hợp lệ") (gate :1070-1074)
+        var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+        if (ext != ".xlsx")
+        {
+            return PortResult.Fail("Sys_User_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        // 2. Đọc bảng tính bằng PortExcel.ReadSheet (gate Sys_UserController.cs:1086)
+        // Giả định template 4 cột theo đúng hàm GetImportDicColumsTemplate() tại gate Sys_UserController.cs:1371-1390:
+        // UserCode ("Tài khoản (*)"), UserName ("Tên người dùng (*)"), UserPassword ("Mật khẩu (*)"), mdcpo_DLCPCode ("Mã đại lý (*)")
+        int columnCount;
+        List<Dictionary<string, string?>> rows;
+        try
+        {
+            using var stream = file.OpenReadStream();
+            (columnCount, rows) = PortExcel.ReadSheet(stream, new[] { "UserCode", "UserName", "UserPassword", "mdcpo_DLCPCode" });
+        }
+        catch
+        {
+            return PortResult.Fail("Sys_User_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        // Kiểm tra có dữ liệu hay không (gate Sys_UserController.cs:1087, 1220-1221)
+        if (rows.Count == 0)
+        {
+            return PortResult.Fail("Sys_User_Import", "Message", "File excel import không có dữ liệu");
+        }
+
+        // Kiểm tra số cột dòng tiêu đề so với template (gate Sys_UserController.cs:1089-1093: table.Columns.Count != GetImportDicColumsTemplate().Count)
+        // Giả định 4 cột: UserCode, UserName, UserPassword, mdcpo_DLCPCode
+        if (columnCount != 4)
+        {
+            return PortResult.Fail("Sys_User_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        // 3. Vòng lặp 1: Kiểm tra TẤT CẢ các dòng TRƯỚC khi tạo (gate Sys_UserController.cs:1096-1133 #region["Check null"])
+        // Nếu có dòng vi phạm -> dừng ngay, KHÔNG có dòng nào được tạo vào CSDL (kiểm trước)
+        foreach (var r in rows)
+        {
+            var userCode = r.GetValueOrDefault("UserCode");
+            if (string.IsNullOrWhiteSpace(userCode))
+            {
+                return PortResult.Fail("Sys_User_Import", "Message", "Mã người dùng không được trống");
+            }
+
+            var userName = r.GetValueOrDefault("UserName");
+            if (string.IsNullOrWhiteSpace(userName))
+            {
+                return PortResult.Fail("Sys_User_Import", "Message", "Tên người dùng không được trống");
+            }
+
+            var userPassword = r.GetValueOrDefault("UserPassword");
+            if (string.IsNullOrWhiteSpace(userPassword))
+            {
+                return PortResult.Fail("Sys_User_Import", "Message", "Mật khẩu không được trống");
+            }
+
+            var dlcpCode = r.GetValueOrDefault("mdcpo_DLCPCode");
+            if (string.IsNullOrWhiteSpace(dlcpCode))
+            {
+                return PortResult.Fail("Sys_User_Import", "Message", "Mã đại lý không được trống");
+            }
+        }
+
+        // 4. Vòng lặp 2: Lưu từng dòng tuần tự (gate Sys_UserController.cs:1159-1213)
+        // Mỗi dòng gọi CreateXAsync trong 1 transaction riêng biệt.
+        // Gặp lỗi đầu tiên -> return lỗi đó luôn (import một phần: các dòng trước đó đã commit thành công).
+        foreach (var r in rows)
+        {
+            var userCode = r.GetValueOrDefault("UserCode")?.Trim();
+            var userName = r.GetValueOrDefault("UserName")?.Trim();
+            var userPassword = r.GetValueOrDefault("UserPassword");
+            var dlcpCode = r.GetValueOrDefault("mdcpo_DLCPCode")?.Trim();
+
+            // Tra cứu mã đại lý qua Map_DealerCP_Org join Mst_DealerCP (FlagActive = "1") và Mst_NNT (gate Sys_UserController.cs:1161-1186)
+            var dlcpPattern = PortQuery.Equal(dlcpCode!);
+            var faPattern = PortQuery.Equal("1");
+
+            var foundMst = await (
+                from mdcpo in _db.Set<Map_DealerCP_Org>().AsNoTracking()
+                join mdcp in _db.Set<Mst_DealerCP>().AsNoTracking()
+                    on mdcpo.DLCPCode equals mdcp.DLCPCode
+                join mo in _db.Set<Mst_Org>().AsNoTracking()
+                    on mdcpo.OrgID equals mo.OrgID
+                join mnnt in _db.Set<Mst_NNT>().AsNoTracking()
+                    on mo.OrgID equals mnnt.OrgID
+                where EF.Functions.Like((mdcpo.DLCPCode ?? "").ToLower(), dlcpPattern, PortQuery.Esc)
+                   && EF.Functions.Like((mdcp.FlagActive ?? "").ToLower(), faPattern, PortQuery.Esc)
+                orderby mdcpo.LogLUDTimeUTC descending, mnnt.MST ascending
+                select mnnt.MST
+            ).FirstOrDefaultAsync();
+
+            if (string.IsNullOrEmpty(foundMst))
+            {
+                // Gate Sys_UserController.cs:1210: throw new ServiceException("invalid_DLCPCode", "invalid_DLCPCode")
+                return PortResult.Fail("invalid_DLCPCode", "Check.DLCPCode", dlcpCode, "Message", "invalid_DLCPCode");
+            }
+
+            var createReq = new Sys_UserCreateReq
+            {
+                UserCode = userCode,
+                UserName = userName,
+                UserPassword = userPassword,
+                EMail = userCode, // gate Sys_UserController.cs:1191: item.EMail = item.UserCode
+                MST = foundMst,   // gate Sys_UserController.cs:1192: item.MST = objRT_Map_DealerCP_Org.Lst_Map_DealerCP_Org[0].mnnt_MST
+                mdcpo_DLCPCode = dlcpCode
+            };
+
+            var res = await CreateXAsync(createReq);
+            if (res is ObjectResult objRes && objRes.StatusCode != StatusCodes.Status200OK)
+            {
+                return res;
+            }
+        }
+
+        // 5. Thành công: Data = null (gate Sys_UserController.cs:1215-1216)
         return Ok(new
         {
             Success = true,
