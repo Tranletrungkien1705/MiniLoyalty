@@ -46,38 +46,6 @@ public class Mst_Org
     public string? MST { get; set; }
 }
 
-/// <summary>
-/// Bảng Mst_NNT (tối thiểu 7 cột cho phép join với Mst_Org: MST, OrgID, NNTFullName, NetworkID, FlagActive, LogLUDTimeUTC, LogLUBy).
-/// Khoá Mst_NNT = MST là SUY LUẬN (không có DDL) — cần xác nhận khi có DB thật.
-/// 60 cột còn lại của model Mst_NNT.cs KHÔNG làm trong lượt này — thuộc các hạng mục Mst_NNTController/* (GAP).
-/// </summary>
-public class Mst_NNT
-{
-    /// <summary>Mã số thuế người nộp thuế (khoá chính - suy luận, không có DDL - cần xác nhận)</summary>
-    public string MST { get; set; } = "";
-
-    /// <summary>Mã tổ chức liên kết với Mst_Org (MasterData.Org.cs:623)</summary>
-    public string? OrgID { get; set; }
-
-    /// <summary>Tên đầy đủ của người nộp thuế (MasterData.Org.cs:618 mnnt.NNTFullName)</summary>
-    public string? NNTFullName { get; set; }
-
-    /// <summary>Mã mạng lưới</summary>
-    public string? NetworkID { get; set; }
-
-    /// <summary>Trạng thái kích hoạt ('1' = hoạt động, '0' = tạm ngừng)</summary>
-    public string? FlagActive { get; set; }
-
-    /// <summary>Thời gian cập nhật cuối cùng theo chuẩn UTC</summary>
-    public DateTime? LogLUDTimeUTC { get; set; }
-
-    /// <summary>Người dùng thực hiện cập nhật cuối cùng</summary>
-    public string? LogLUBy { get; set; }
-
-    /// <summary>Email liên hệ của người nộp thuế (Master.Loyalty.cs:4335 mnnt.ContactEmail mnnt_ContactEmail)</summary>
-    public string? ContactEmail { get; set; }
-}
-
 /// <summary>Cấu hình ánh xạ EntityType cho bảng Mst_Org (khoá chính OrgID).</summary>
 public class Mst_OrgConfiguration : IEntityTypeConfiguration<Mst_Org>
 {
@@ -85,16 +53,6 @@ public class Mst_OrgConfiguration : IEntityTypeConfiguration<Mst_Org>
     {
         builder.ToTable("Mst_Org");
         builder.HasKey(x => x.OrgID);
-    }
-}
-
-/// <summary>Cấu hình ánh xạ EntityType cho bảng Mst_NNT (khoá chính MST - suy luận, cần xác nhận).</summary>
-public class Mst_NNTConfiguration : IEntityTypeConfiguration<Mst_NNT>
-{
-    public void Configure(EntityTypeBuilder<Mst_NNT> builder)
-    {
-        builder.ToTable("Mst_NNT");
-        builder.HasKey(x => x.MST);
     }
 }
 
