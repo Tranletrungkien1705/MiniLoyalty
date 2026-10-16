@@ -1,8 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Threading.Tasks;
+using ClosedXML.Excel;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
@@ -13,11 +17,13 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ===========================================================================================
-// PORT 1:1 từ dự án nguồn 2022.7.Loyalty — Crd_CardTransactionInCreaseController/Search (#015).
+// PORT 1:1 từ dự án nguồn 2022.7.Loyalty — Crd_CardTransactionInCreaseController: Search (#015) và Export (#016).
 //
 // Chuỗi gọi:
 //   Gate: Crd_CardTransactionInCreaseController.cs:33-117 (Search)
+//         Crd_CardTransactionInCreaseController.cs:121-215 (Export)
 //         + hàm phụ strWhereClause_Crd_CardTransactionInCrease (:219-258)
+//         + hàm phụ DicColums (:262-287), DicColumsDetail (:289-316)
 //   API:  CrdCardTransactionInCreaseController.cs:20-87 (WA_Crd_CardTransactionInCrease_Get)
 //   BIZ:  Report.cs:11903-12036 (WAS_Crd_CardTransactionInCrease_Get)
 //         Report.cs:12037-12183 (Crd_CardTransactionInCrease_Get)
@@ -133,10 +139,110 @@ public class Crd_CardTransactionInCreaseInstItem
 public class Crd_CardTransactionInCreaseControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly IWebHostEnvironment? _env;
 
-    public Crd_CardTransactionInCreaseControllerPort(AppDbContext db)
+    public Crd_CardTransactionInCreaseControllerPort(AppDbContext db, IWebHostEnvironment? env = null)
     {
         _db = db;
+        _env = env;
+    }
+
+    /// <summary>
+    /// Từ điển 20 cột của Sheet 1 "Điểm tích" — port 1:1 DicColums() (gate Crd_CardTransactionInCreaseController.cs:262-287).
+    /// </summary>
+    private static readonly Dictionary<string, string> DicColNames = new()
+    {
+        { "STT", "STT" },
+        { "DLCode", "Mã Đại lý" },
+        { "DLCPName", "Tên Đại lý" },
+        { "AutoId", "Mã giao dịch" },
+        { "CreateDate", "Thời gian giao dịch" },
+        { "RefNo", "Số tham chiếu" },
+        { "MemberNo", "Mã hội viên" },
+        { "CarNo", "Biển số" },
+        { "MemberName", "Họ và tên" },
+        { "CardTypeUse", "Hạng sử dụng" },
+        { "CardTypeInit", "Hạng thực" },
+        { "DealPointType", "Loại điểm" },
+        { "DLCodeExceptionally", "Đại lý yêu cầu đặc cách" },
+        { "AmountChTotal", "Số điểm hạng sử dụng" },
+        { "AmountChTotalInit", "Số điểm hạng thực" },
+        { "AmountChTotalDiffer", "Số điểm chênh hạng" },
+        { "PointExpiryDTime", "Ngày hết hạn sử dụng điểm" },
+        { "PointUsed", "Số điểm đã tiêu" },
+        { "PointExpiry", "Điểm hết hạn" },
+        { "PointRemain", "Còn lại có thể tiêu" }
+    };
+
+    /// <summary>
+    /// Từ điển 23 cột của Sheet 2 "Chi tiết tiêu điểm" — port 1:1 DicColumsDetail() (gate Crd_CardTransactionInCreaseController.cs:289-316).
+    /// </summary>
+    private static readonly Dictionary<string, string> DicColNamesDetail = new()
+    {
+        { "STT", "STT" },
+        { "DLCode", "Mã đại lý" },
+        { "DLCPName", "Tên đại lý" },
+        { "AutoId_IC", "Mã giao dịch" },
+        { "CreateDate_IC", "Thời gian giao dịch" },
+        { "RefNo_IC", "Số tham chiếu tích" },
+        { "MemberNo", "Mã Hội viên" },
+        { "CarNo", "Biển số" },
+        { "MemberName", "Họ và tên" },
+        { "CardTypeUse", "Hạng sử dụng" },
+        { "CardTypeInit", "Hạng thực" },
+        { "DealPointType", "Loại điểm" },
+        { "DLCodeExceptionally", "Đại lý yêu cầu đặc cách" },
+        { "AmountChTotal", "Số điểm hạng sử dụng" },
+        { "AmountChTotalInit", "Số điểm hạng thực" },
+        { "AmountChTotalDiffer", "Số điểm chênh hạng" },
+        { "PointExpiryDTime", "Ngày hết hạn sử dụng điểm" },
+        { "AutoId_DC", "Mã giao dịch tiêu điểm" },
+        { "CreateDate_DC", "Ngày giao dịch tiêu điểm" },
+        { "CardNo_DC", "Mã kỳ xét hạng tiêu điểm" },
+        { "PointDeCrease", "Số điểm tiêu" },
+        { "DLCode_DC", "Nơi tiêu điểm" },
+        { "RefNo_DC", "Số tham chiếu tiêu" }
+    };
+
+    /// <summary>
+    /// Ghi danh sách đối tượng ra một worksheet Excel với các tiêu đề cột theo từ điển.
+    /// Nếu danh sách rỗng hoặc null, chỉ ghi dòng 1 (tiêu đề cột).
+    /// </summary>
+    private static void PopulateSheet<T>(IXLWorksheet ws, IEnumerable<T>? rows, IReadOnlyDictionary<string, string> dicColNames)
+    {
+        var cols = dicColNames.ToList();
+        for (var c = 0; c < cols.Count; c++)
+        {
+            ws.Cell(1, c + 1).Value = cols[c].Value;
+        }
+
+        if (rows != null)
+        {
+            var r = 2;
+            foreach (var row in rows)
+            {
+                if (row is null) continue;
+                var t = row.GetType();
+                for (var c = 0; c < cols.Count; c++)
+                {
+                    var p = t.GetProperty(cols[c].Key, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+                    var v = p?.GetValue(row);
+                    ws.Cell(r, c + 1).Value = v switch
+                    {
+                        null => Blank.Value,
+                        DateTime d => d,
+                        double d => d,
+                        int i => i,
+                        long l => l,
+                        decimal m => m,
+                        _ => Convert.ToString(v) ?? "",
+                    };
+                }
+                r++;
+            }
+        }
+
+        ws.Columns().AdjustToContents();
     }
 
     /// <summary>
@@ -146,6 +252,85 @@ public class Crd_CardTransactionInCreaseControllerPort : ControllerBase
     /// </summary>
     [HttpPost("search")]
     public async Task<IActionResult> Search([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_CardTransactionInCreaseSearchReq? req)
+    {
+        var (lst_Crd_CardTransactionInCrease, lst_Crd_CardTransactionInCreaseInst) = await QueryDataAsync(req);
+
+        // ---- 6. Trả về đúng cấu trúc Gate :100-104 (rỗng -> null) ----
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Lst_Crd_CardTransactionInCrease = lst_Crd_CardTransactionInCrease,
+                Lst_Crd_CardTransactionInCreaseInst = lst_Crd_CardTransactionInCreaseInst
+            }
+        });
+    }
+
+    /// <summary>
+    /// Port 1:1 Crd_CardTransactionInCreaseController.Export (gate :121-215 -> biz Report.cs:12184-12523).
+    /// Xuất file Excel chứa 2 sheet trong CÙNG 1 file:
+    ///   - Sheet 1 "Điểm tích": danh sách Lst_Crd_CardTransactionInCrease với 20 cột từ DicColums() (:178, :187, :262-287).
+    ///   - Sheet 2 "Chi tiết tiêu điểm": danh sách Lst_Crd_CardTransactionInCreaseInst với 23 cột từ DicColumsDetail() (:179, :195, :289-316).
+    /// Nếu danh sách tăng điểm rỗng hoặc null -> trả lỗi "Không có dữ liệu" (gate :191 ném ServiceException).
+    /// Trả về Data = { Url = GetRequestBaseAddress() + url } (:198-201).
+    /// </summary>
+    [HttpPost("export")]
+    public async Task<IActionResult> Export([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_CardTransactionInCreaseSearchReq? req)
+    {
+        var (lst_Crd_CardTransactionInCrease, lst_Crd_CardTransactionInCreaseInst) = await QueryDataAsync(req);
+
+        // Gate :184-192: nếu danh sách tăng điểm rỗng hoặc null -> ném ServiceException("Không có dữ liệu")
+        if (lst_Crd_CardTransactionInCrease == null || lst_Crd_CardTransactionInCrease.Count == 0)
+        {
+            return PortResult.Fail("Crd_CardTransactionInCrease_Export", "Message", "Không có dữ liệu");
+        }
+
+        // Tạo thư mục và đường dẫn file Excel xuất: GenExcelExportFilePath (gate :182)
+        var webRoot = _env?.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = _env != null ? Path.Combine(_env.ContentRootPath, "wwwroot") : Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+        }
+
+        try
+        {
+            var (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Crd_CardTransactionInCrease");
+
+            using var wb = new XLWorkbook();
+
+            // Sheet 1: "Điểm tích" với 20 cột từ DicColums() (gate :178, :187, :262-287)
+            var ws1 = wb.Worksheets.Add("Điểm tích");
+            PopulateSheet(ws1, lst_Crd_CardTransactionInCrease, DicColNames);
+
+            // Sheet 2: "Chi tiết tiêu điểm" với 23 cột từ DicColumsDetail() (gate :179, :195, :289-316)
+            var ws2 = wb.Worksheets.Add("Chi tiết tiêu điểm");
+            PopulateSheet(ws2, lst_Crd_CardTransactionInCreaseInst, DicColNamesDetail);
+
+            wb.SaveAs(physicalPath);
+
+            // Trả về { Success = true, Data = { Url = GetRequestBaseAddress() + url } } (gate :198-201)
+            return Ok(new
+            {
+                Success = true,
+                Data = new
+                {
+                    Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            // Bọc try/catch riêng cho phần xuất Excel, trả lỗi Fail đúng tên action (bài học A.2, gate :204-208)
+            return PortResult.Fail("Crd_CardTransactionInCrease_Export", "Exception", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Hàm dùng chung truy vấn dữ liệu cho Search và Export theo chuỗi logic nghiệp vụ của nguồn
+    /// (strWhereClause_Crd_CardTransactionInCrease :219-258 và Report.cs:12184-12523).
+    /// </summary>
+    private async Task<(List<Crd_CardTransactionInCreaseItem>? increaseList, List<Crd_CardTransactionInCreaseInstItem>? instList)> QueryDataAsync(Crd_CardTransactionInCreaseSearchReq? req)
     {
         var r = req ?? new Crd_CardTransactionInCreaseSearchReq();
 
@@ -394,16 +579,7 @@ public class Crd_CardTransactionInCreaseControllerPort : ControllerBase
             }
         }
 
-        // ---- 6. Trả về đúng cấu trúc Gate :100-104 (rỗng -> null) ----
-        return Ok(new
-        {
-            Success = true,
-            Data = new
-            {
-                Lst_Crd_CardTransactionInCrease = lst_Crd_CardTransactionInCrease,
-                Lst_Crd_CardTransactionInCreaseInst = lst_Crd_CardTransactionInCreaseInst
-            }
-        });
+        return (lst_Crd_CardTransactionInCrease, lst_Crd_CardTransactionInCreaseInst);
     }
 
     /// <summary>
