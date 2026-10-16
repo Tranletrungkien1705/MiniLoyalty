@@ -194,10 +194,69 @@ public class Sys_UserGetForCurrentUserRes
 }
 
 /// <summary>
-/// Controller Port 1:1 cho Sys_UserController — hạng mục #323 (Search), #324 (GetByUserCode), #325 (GetByMST), #327 (GetForCurrentUser), #328 (GetAllActive).
-/// Nguồn Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Sys_UserController.cs:498-561
-/// Nguồn API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\SysUserController.cs:199-270
-/// Nguồn Biz LIVE: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\System.cs:8365-8478, 7987-8363 (Sys_User_Get_New20191104)
+/// DTO request cho action Create (Gate Sys_UserController.cs:565-683, #329).
+/// </summary>
+public class Sys_UserCreateReq
+{
+    /// <summary>Body JSON lồng nếu client gửi qua biến strJson (Gate Sys_UserController.cs:565)</summary>
+    
+    /// <summary>Cờ tồn tại tài khoản: nếu "1", gán mật khẩu mặc định (Gate Sys_UserController.cs:595-603)</summary>
+    public string? flagExist { get; set; }
+
+    /// <summary>Cờ đổi avatar inos (Gate Sys_UserController.cs:658-663)</summary>
+    public string? flagChangeAvatar { get; set; }
+
+    /// <summary>Mã người dùng (PK) - Sys_User.cs:12</summary>
+    public string? UserCode { get; set; }
+
+    /// <summary>Tên người dùng - Sys_User.cs:16</summary>
+    public string? UserName { get; set; }
+
+    /// <summary>Mật khẩu - Sys_User.cs:18</summary>
+    public string? UserPassword { get; set; }
+
+    /// <summary>Số điện thoại - Sys_User.cs:22</summary>
+    public string? PhoneNo { get; set; }
+
+    /// <summary>Email - Sys_User.cs:24. Ở gate dòng 594: UserCode = EMail</summary>
+    public string? EMail { get; set; }
+
+    /// <summary>Mã số thuế - Sys_User.cs:26</summary>
+    public string? MST { get; set; }
+
+    /// <summary>Mã phòng ban - Sys_User.cs:30</summary>
+    public string? DepartmentCode { get; set; }
+
+    /// <summary>Vị trí - Sys_User.cs:32</summary>
+    public string? Position { get; set; }
+
+    /// <summary>Cờ quản trị đại lý - Sys_User.cs:40</summary>
+    public string? FlagDLAdmin { get; set; }
+
+    /// <summary>Cờ quản trị hệ thống - Sys_User.cs:42</summary>
+    public string? FlagSysAdmin { get; set; }
+
+    /// <summary>Cờ quản trị NNT - Sys_User.cs:44</summary>
+    public string? FlagNNTAdmin { get; set; }
+
+    /// <summary>Múi giờ - Sys_User.cs:67</summary>
+    public string? ACTimeZone { get; set; }
+
+    /// <summary>Ngôn ngữ - Sys_User.cs:61</summary>
+    public string? ACLanguage { get; set; }
+
+    /// <summary>Mã hệ thống khách hàng - Sys_User.cs:46</summary>
+    public string? CustomerCodeSys { get; set; }
+
+    /// <summary>User thực hiện thao tác (nếu không truyền qua Header WAUserCode)</summary>
+    public string? WAUserCode { get; set; }
+}
+
+/// <summary>
+/// Controller Port 1:1 cho Sys_UserController — hạng mục #323 (Search), #324 (GetByUserCode), #325 (GetByMST), #327 (GetForCurrentUser), #328 (GetAllActive), #329 (Create).
+/// Nguồn Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Sys_UserController.cs:498-561, 565-683
+/// Nguồn API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\SysUserController.cs:199-270, 421-492
+/// Nguồn Biz LIVE: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\System.cs:8365-8478, 7987-8363 (Sys_User_Get_New20191104), 11222-11323 (WAS_Sys_User_Create), 9218-9391, 10160-10828 (Sys_User_CreateForNetworkX_New20200110)
 /// Route: api/sys_user
 /// </summary>
 [ApiController]
@@ -818,5 +877,261 @@ public class Sys_UserControllerPort : ControllerBase
         // LỖI NGUỒN GIỮ NGUYÊN: ACAvatar không chứa '~' -> IndexOutOfRangeException (PortExceptionFilter trả 400)
         if (string.IsNullOrEmpty(acAvatar)) return null;
         return inosBaseUrl + acAvatar.Split('~')[1];
+    }
+
+    /// <summary>
+    /// Port 1:1 Create action từ gate Sys_UserController.cs:565-683 (#329).
+    /// Chuỗi gọi: Gate Sys_UserController.cs:565 -> WA_Sys_User_Create (SysUserController.cs:421)
+    ///            -> WAS_Sys_User_Create (System.cs:11222) -> Sys_User_Create_New20200110 (System.cs:9218)
+    ///            -> Sys_User_CreateForNetworkX_New20200110 (System.cs:10160-10828).
+    /// </summary>
+    [HttpPost("create")]
+    public async Task<IActionResult> Create([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Sys_UserCreateReq? req)
+    {
+        // 0. Body rỗng / null: gate Sys_UserController.cs:578-581 ném ServiceException("strJson null") -> Fail("Sys_User_Create", "Check.strJson", null)
+        if (req == null)
+        {
+            return PortResult.Fail("Sys_User_Create", "Check.strJson", null);
+        }
+
+
+        return await CreateXAsync(req);
+    }
+
+    /// <summary>
+    /// Hàm nghiệp vụ tạo người dùng Sys_User (Sys_User_CreateForNetworkX_New20200110, System.cs:10160-10828).
+    /// </summary>
+    public async Task<IActionResult> CreateXAsync(Sys_UserCreateReq req)
+    {
+        // 1. Chuẩn hoá đầu vào:
+        // Gate dòng 594: objSys_User.UserCode = objSys_User.EMail
+        // Nếu client không truyền EMail (hoặc rỗng) -> UserCode bị rỗng/null
+        var rawUserCode = req.EMail;
+        var strUserCode = StdParam(rawUserCode);
+
+        // Guard 1: strUserCode rỗng hoặc null -> ném ngoại lệ Sys_User_Create_InvalidUserCode (System.cs:10235-10245)
+        if (string.IsNullOrEmpty(strUserCode))
+        {
+            return PortResult.Fail("Sys_User_Create_InvalidUserCode", "Check.strUserCode", strUserCode);
+        }
+
+        // Bắt đầu transaction (System.cs:9275: _cf.db.BeginTransaction())
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // Guard 2: Sys_User_CheckDB (UserCode, FlagExistToCheck = No, FlagActiveListToCheck = "") (System.cs:10246-10252, 3840-3850)
+            var uCodePattern = PortQuery.Equal(strUserCode);
+            var existingUser = await _db.Set<Sys_User>().AsNoTracking()
+                .FirstOrDefaultAsync(x => EF.Functions.Like((x.UserCode ?? "").ToLower(), uCodePattern, PortQuery.Esc));
+            if (existingUser != null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Sys_User_CheckDB_UserCodeExist", "Check.UserCodeExist", strUserCode);
+            }
+
+            // Guard 3: strUserName độ dài < 1 -> ném ngoại lệ Sys_User_Create_InvalidUserName (System.cs:10254-10264)
+            var strUserName = string.Format("{0}", req.UserName).Trim();
+            if (strUserName.Length < 1)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Sys_User_Create_InvalidUserName", "Check.strUserName", strUserName);
+            }
+
+            // Guard 4: strUserPassword độ dài < 1 -> ném ngoại lệ Sys_User_Create_InvalidUserPassword (System.cs:10266-10276)
+            var strUserPassword = string.Format("{0}", req.UserPassword);
+            var flagExist = req.flagExist ?? Request.Query["flagExist"].FirstOrDefault();
+            if (!string.IsNullOrEmpty(flagExist) && flagExist.Equals("1", StringComparison.Ordinal))
+            {
+                var passwordDefault = _config?["PassDefault"];
+                if (string.IsNullOrEmpty(passwordDefault))
+                {
+                    passwordDefault = "idocNet@123";
+                }
+                strUserPassword = passwordDefault;
+            }
+            if (strUserPassword.Length < 1)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Sys_User_Create_InvalidUserPassword", "Check.strUserPassword", strUserPassword);
+            }
+
+            // Guard 5: Mst_NNT_CheckDB (MST, FlagExistToCheck = Yes, FlagActiveList = Active) (System.cs:10280-10289, Master.cs:7813-7878)
+            var strMST = StdParam(req.MST);
+            if (string.IsNullOrEmpty(strMST))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_NNT_CheckDB_NNTNotFound", "Check.MST", strMST);
+            }
+            var mstPattern = PortQuery.Equal(strMST);
+            var nnt = await _db.Set<Mst_NNT>().AsNoTracking()
+                .FirstOrDefaultAsync(x => EF.Functions.Like((x.MST ?? "").ToLower(), mstPattern, PortQuery.Esc));
+            if (nnt == null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_NNT_CheckDB_NNTNotFound", "Check.MST", strMST);
+            }
+            if (!string.Equals(nnt.FlagActive?.Trim(), "1", StringComparison.Ordinal))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_NNT_CheckDB_FlagActiveNotMatched",
+                    "Check.MST", strMST,
+                    "Check.strFlagActiveListToCheck", "1",
+                    "DB.FlagActive", nnt.FlagActive);
+            }
+            var strOrgID = StdParam(nnt.OrgID);
+
+            // Guard 6: strDepartmentCode nếu không rỗng phải qua Mst_Department_CheckDB (Yes, Active) (System.cs:10293-10302, Master.cs:29275-29339)
+            var strDepartmentCode = StdParam(req.DepartmentCode);
+            if (!string.IsNullOrEmpty(strDepartmentCode))
+            {
+                var deptPattern = PortQuery.Equal(strDepartmentCode);
+                var dept = await _db.Set<Mst_Department>().AsNoTracking()
+                    .FirstOrDefaultAsync(x => EF.Functions.Like((x.DepartmentCode ?? "").ToLower(), deptPattern, PortQuery.Esc));
+                if (dept == null)
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Mst_Department_CheckDB_DepartmentNotFound", "Check.DepartmentCode", strDepartmentCode);
+                }
+                if (!string.Equals(dept.FlagActive?.Trim(), "1", StringComparison.Ordinal))
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Mst_Department_CheckDB_FlagActiveNotMatched",
+                        "Check.DepartmentCode", strDepartmentCode,
+                        "Check.strFlagActiveListToCheck", "1",
+                        "DB.FlagActive", dept.FlagActive);
+                }
+            }
+
+            // Guard 7: strFlagSysAdmin độ dài < 1 -> ném Sys_User_Create_InvalidFlagSysAdmin (System.cs:10316-10326)
+            var strFlagSysAdmin = StdFlag(req.FlagSysAdmin);
+            if (strFlagSysAdmin.Length < 1)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Sys_User_Create_InvalidFlagSysAdmin", "Check.strFlagSysAdmin", strFlagSysAdmin);
+            }
+
+            // Sys_User_CheckDB(strWAUserCode, "1", "1") (System.cs:10330-10355): người dùng ĐANG ĐĂNG NHẬP (nguồn: orgUserUI.Email). Đích chưa có phiên đăng nhập
+            // -> nhận qua header "WAUserCode" (tuỳ chọn). Có header: kiểm tra đúng như nguồn. KHÔNG có header (GAP): coi người tạo KHÔNG phải quản trị
+            // (nFlagSysAdminRoot = 0) để không ai tự cấp được FlagSysAdmin = 1 khi chưa xác thực.
+            var strWAUserCode = StdParam(Request.Headers["WAUserCode"].FirstOrDefault());
+            Sys_User? userRoot = null;
+            int nFlagSysAdminRoot = 0;
+            if (!string.IsNullOrEmpty(strWAUserCode))
+            {
+                var waPattern = PortQuery.Equal(strWAUserCode);
+                userRoot = await _db.Set<Sys_User>().AsNoTracking()
+                    .FirstOrDefaultAsync(x => EF.Functions.Like((x.UserCode ?? "").ToLower(), waPattern, PortQuery.Esc));
+                if (userRoot == null)
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Sys_User_CheckDB_UserCodeNotFound", "Check.UserCodeNotFound", strWAUserCode);
+                }
+                if (!"1".Contains(userRoot.FlagActive ?? ""))
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Sys_User_CheckDB_FlagActiveNotMatched",
+                        "Check.UserCodeError", strWAUserCode,
+                        "Check.FlagActiveListToCheck", "1",
+                        "DB.FlagActive", userRoot.FlagActive);
+                }
+                nFlagSysAdminRoot = Convert.ToInt32(userRoot.FlagSysAdmin);
+            }
+
+            // Người tạo không phải quản trị -> không cho bật cờ FlagSysAdmin (:10339-10354)
+            if (Convert.ToInt32(strFlagSysAdmin) == 1 && nFlagSysAdminRoot != 1)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Sys_User_Create_NNTNotAdmin",
+                    "Check.strWAUserCode", strWAUserCode,
+                    "Check.nFlagSysAdmin", nFlagSysAdminRoot);
+            }
+
+            // Lưu DB và tích hợp (System.cs:1204-1236):
+            var networkId = _config?["Biz_NetworkID"] ?? "1001";
+            var now = DateTime.UtcNow;
+            var logLUBy = userRoot?.UserCode ?? "port";
+
+            var newUser = new Sys_User
+            {
+                UserCode = strUserCode,
+                NetworkID = networkId,
+                UserName = strUserName,
+                UserPassword = GetEncodedHash(strUserPassword),
+                PhoneNo = !string.IsNullOrWhiteSpace(req.PhoneNo) ? req.PhoneNo.Trim() : null,
+                EMail = string.Format("{0}", req.EMail).Trim(),
+                MST = strMST,
+                DepartmentCode = strDepartmentCode,
+                Position = !string.IsNullOrWhiteSpace(req.Position) ? req.Position.Trim() : null,
+                UUID = "-1", // TConst.InosMix.Default_Anonymous = -1
+                FlagDLAdmin = StdFlag(req.FlagDLAdmin),
+                FlagSysAdmin = strFlagSysAdmin,
+                FlagNNTAdmin = StdFlag(req.FlagNNTAdmin),
+                OrgID = strOrgID,
+                CustomerCodeSys = StdParam(req.CustomerCodeSys),
+                ACLanguage = StdStr(req.ACLanguage),
+                ACTimeZone = StdStr(req.ACTimeZone),
+                FlagActive = "1",
+                LogLUDTimeUTC = now,
+                LogLUBy = logLUBy
+            };
+
+            await _db.Set<Sys_User>().AddAsync(newUser);
+            await _db.SaveChangesAsync();
+
+            // GAP: Các dịch vụ Inos bên ngoài (Mst_ManageNotify_CreateX, Inos_AccountService_*, Inos_OrgService_*, Inos_LicService_*)
+            // được bỏ qua có chủ đích do không có sẵn môi trường backend Inos tại đích (Bài học B.7 / A.16).
+
+            await tx.CommitAsync();
+
+            return Ok(new
+            {
+                Success = true,
+                Data = (object?)null
+            });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return PortResult.Fail("Sys_User_Create", "Exception", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Chuẩn hoá chuỗi mã theo CUtils.StdParam: Trim, viết HOA, rỗng -> null.
+    /// </summary>
+    private static string? StdParam(object? s)
+    {
+        if (s == null) return null;
+        var str = s.ToString()?.Trim().ToUpperInvariant();
+        return string.IsNullOrEmpty(str) ? null : str;
+    }
+
+    /// <summary>
+    /// Chuẩn hoá cờ theo CUtils.StdFlag: "1" nếu là "1", mọi giá trị khác -> "0".
+    /// </summary>
+    private static string StdFlag(object? s)
+    {
+        return string.Equals(s?.ToString()?.Trim(), "1", StringComparison.Ordinal) ? "1" : "0";
+    }
+
+    /// <summary>
+    /// Chuẩn hoá chuỗi văn bản theo CUtils.StdStr: Trim, Normalize, rỗng -> null.
+    /// </summary>
+    private static string? StdStr(object? s)
+    {
+        if (s == null) return null;
+        var str = s.ToString()?.Trim().Normalize();
+        return string.IsNullOrEmpty(str) ? null : str;
+    }
+
+    /// <summary>
+    /// Hash mật khẩu bằng MD5 + muối 'idocNet' theo TUtils.CUtils.GetEncodedHash nguồn (12.Dev.Common/idn.Loyalty.Utils/Utils.cs:1823-1829).
+    /// </summary>
+    private static string GetEncodedHash(string password)
+    {
+        using var md5 = System.Security.Cryptography.MD5.Create();
+        var digest = md5.ComputeHash(System.Text.Encoding.UTF8.GetBytes(password + "idocNet"));
+        var base64 = Convert.ToBase64String(digest);
+        return base64.Substring(0, base64.Length - 2);
     }
 }
