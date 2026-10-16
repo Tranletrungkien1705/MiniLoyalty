@@ -135,3 +135,27 @@ public class Mst_DepartmentSeeder : IPortSeeder
         await db.SaveChangesAsync();
     }
 }
+
+/// <summary>
+/// Bảng sinh sequence cho mã phòng ban — port 1:1 bảng <c>Seq_DepartmentCode</c>.
+/// SeqType.DepartmentCode (Seq.cs: bang Seq_DepartmentCode, format "{0}DPMCODE.{3}.{1:00000}{2}", max 100000).
+/// PK = AutoId (bigint IDENTITY(1,1) PK tự tăng).
+/// </summary>
+public class Seq_DepartmentCode
+{
+    public long AutoId { get; set; }                       // AutoId — bigint IDENTITY(1,1) PK
+    public string? Remark { get; set; }                    // Remark
+}
+
+/// <summary>
+/// Cấu hình EF cho <see cref="Seq_DepartmentCode"/> — PK AutoId tự tăng.
+/// </summary>
+public class Seq_DepartmentCodeConfig : IEntityTypeConfiguration<Seq_DepartmentCode>
+{
+    public void Configure(EntityTypeBuilder<Seq_DepartmentCode> b)
+    {
+        b.ToTable("Seq_DepartmentCode");
+        b.HasKey(x => x.AutoId);
+        b.Property(x => x.AutoId).ValueGeneratedOnAdd();
+    }
+}
