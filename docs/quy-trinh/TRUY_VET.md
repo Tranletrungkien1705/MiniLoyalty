@@ -1,9 +1,9 @@
 # MA TRẬN TRUY VẾT NGUỒN GỐC (TRACEABILITY MATRIX) — MiniLoyalty
 
-> **Phạm vi**: Toàn bộ 113 hạng mục đã port 1-1 thành công trong MiniLoyalty đối chiếu ngược về chuỗi mã nguồn gốc và xác thực qua git log.
-> **Cập nhật**: 2026-10-16 11:15
-> **Nguồn dữ liệu**: PARITY_PROGRESS.md (113 mục Đã làm), git log --oneline, các tệp source_excerpt.txt trong .parity-run\logs\, thân commit Git (Port: ...).
-> **Trạng thái**: Nháp — chờ review
+> **Phạm vi**: Toàn bộ 123 hạng mục đã port 1-1 thành công trong MiniLoyalty đối chiếu ngược về chuỗi mã nguồn gốc và xác thực qua git log.  
+> **Cập nhật**: 2026-10-16 12:12  
+> **Nguồn dữ liệu**: `PARITY_PROGRESS.md` (123 mục Đã làm), `git log --oneline`, các tệp `source_excerpt.txt` trong `.parity-run\logs\`, thân commit Git (`Port: ...`).  
+> **Trạng thái**: Nháp — chờ review  
 
 ---
 
@@ -11,16 +11,16 @@
 
 | STT | Engine / Mô hình AI | Số lượng hạng mục | Tỷ lệ (%) |
 |---|---|---|---|
-| 1 | agy (gemini-3.8-flash-high) | 74 | 65.49% |
-| 2 | codegpt (gemini-3.8-flash-high) | 27 | 23.89% |
-| 3 | codegpt (deepseek-v4.1-flash) | 9 | 7.96% |
-| 4 | agy2 (gemini-3.8-flash-high) | 2 | 1.77% |
-| 5 | agy3 (gemini-3.8-flash-high) | 1 | 0.88% |
-| **Tổng** | **Toàn bộ hạng mục đã hoàn thành** | **113** | **100.00%** |
+| 1 | agy (gemini-3.8-flash-high) | 77 | 62.60% |
+| 2 | codegpt (gemini-3.8-flash-high) | 28 | 22.76% |
+| 3 | codegpt (deepseek-v4.1-flash) | 9 | 7.32% |
+| 4 | agy2 (gemini-3.8-flash-high) | 5 | 4.07% |
+| 5 | agy3 (gemini-3.8-flash-high) | 4 | 3.25% |
+| **Tổng** | **Toàn bộ hạng mục đã hoàn thành** | **123** | **100.00%** |
 
 ---
 
-## 2. Ma trận truy vết chi tiết (113 hạng mục đã làm)
+## 2. Ma trận truy vết chi tiết (123 hạng mục đã làm)
 
 | # | Hạng mục | Trạng thái | Commit | Nguồn Gate (file:dòng) | Nguồn API (file:dòng) | Nguồn Biz LIVE (file:dòng) | File đích trong repo | Engine thực thi |
 |---|---|---|---|---|---|---|---|---|
@@ -86,6 +86,8 @@
 | 127 | Mst_DepartmentController/Delete | Đã làm | d565dda | Mst_DepartmentController.cs:446-514 | MstDepartmentController.cs:233-302 | Master.cs:30181-30258 | Controllers/Port/Mst_DepartmentControllerPort.cs | agy (gemini-3.8-flash-high) |
 | 128 | Mst_DepartmentController/DeleteMultiple | Đã làm | 9de58bd | Mst_DepartmentController.cs:516-580 | MstDepartmentController.cs:233-302 | Master.cs:30181-30258 | Controllers/Port/Mst_DepartmentControllerPort.cs | agy (gemini-3.8-flash-high) |
 | 129 | Mst_DepartmentController/Import | Đã làm | e3c84ce | Mst_DepartmentController.cs:584-730 | MstDepartmentController.cs:91-160 | Master.cs:29702-29785 | Controllers/Port/Mst_DepartmentControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 130 | Mst_DepartmentController/Export | Đã làm | 2d13be5 | Mst_DepartmentController.cs:735-812 | MstDepartmentController.cs:20-89 | Master.cs:29450-29548 | Controllers/Port/Mst_DepartmentControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 131 | Mst_DepartmentController/ExportTemplate | Đã làm | a2d6f65 | Mst_DepartmentController.cs:815-847 | - | - | Controllers/Port/Mst_DepartmentControllerPort.cs | agy (gemini-3.8-flash-high) |
 | 132 | Mst_DisciplineController/Search | Đã làm | 408c2b7 | Mst_DisciplineController.cs:26-106 | MstDisciplineController.cs:17-88 | MasterData.cs:34241-34331 | Controllers/Port/Mst_DisciplineControllerPort.cs<br/>Models/Port/Mst_Discipline.cs | codegpt (gemini-3.8-flash-high) |
 | 133 | Mst_DisciplineController/GetByDisciplineCode | Đã làm | 70bd1db | Mst_DisciplineController.cs:108-171 | MstDisciplineController.cs:17-88 | MasterData.cs:34241-34331 | Controllers/Port/Mst_DisciplineControllerPort.cs | codegpt (gemini-3.8-flash-high) |
 | 134 | Mst_DisciplineController/GetAllActive | Đã làm | 7a9dcb4 | Mst_DisciplineController.cs:173-233 | MstDisciplineController.cs:17-88 | MasterData.cs:34241-34331 | Controllers/Port/Mst_DisciplineControllerPort.cs | codegpt (gemini-3.8-flash-high) |
@@ -107,6 +109,14 @@
 | 150 | Mst_EthnicCategoryController/GetAllActive | Đã làm | cae436a | Mst_EthnicCategoryController.cs:107-167 | MstEthnicCategoryController.cs:17-88 | MasterData.cs:41808-41898 | Controllers/Port/Mst_EthnicCategoryControllerPort.cs | agy2 (gemini-3.8-flash-high) |
 | 151 | Mst_ExpenseTypeController/GetAllActive | Đã làm | aecf24a | Mst_ExpenseTypeController.cs:23-132 | MstExpenseTypeController.cs:22-90 | Master.Loyalty.cs:8933-9035 | Controllers/Port/Mst_ExpenseTypeControllerPort.cs<br/>Models/Port/Mst_ExpenseType.cs | agy2 (gemini-3.8-flash-high) |
 | 152 | Mst_FamilyStatusController/Search | Đã làm | b759701 | Mst_FamilyStatusController.cs:25-105 | MstFamilyStatusController.cs:17-88 | MasterData.cs:42702-42792 | Controllers/Port/Mst_FamilyStatusControllerPort.cs<br/>Models/Port/Mst_FamilyStatus.cs | agy3 (gemini-3.8-flash-high) |
+| 153 | Mst_FamilyStatusController/GetAllActive | Đã làm | b22f364 | Mst_FamilyStatusController.cs:107-167 | MstFamilyStatusController.cs:17-88 | MasterData.cs:42702-42792 | Controllers/Port/Mst_FamilyStatusControllerPort.cs | agy2 (gemini-3.8-flash-high) |
+| 154 | Mst_GenderController/Search | Đã làm | b8d304e | Mst_GenderController.cs:25-105 | MstGenderController.cs:20-89 | MasterData.cs:29670-29768 | Controllers/Port/Mst_GenderControllerPort.cs<br/>Models/Port/Mst_Gender.cs | codegpt (gemini-3.8-flash-high) |
+| 156 | Mst_GovIDTypeController/Search | Đã làm | 0cab8a8 | Mst_GovIDTypeController.cs:26-106 | MstGovIDTypeController.cs:21-90 | Master.cs:32184-32282 | Controllers/Port/Mst_GovIDTypeControllerPort.cs<br/>Models/Port/Mst_GovIDType.cs | agy3 (gemini-3.8-flash-high) |
+| 157 | Mst_GovIDTypeController/GetByGovIDType | Đã làm | e05732a | Mst_GovIDTypeController.cs:108-171 | MstGovIDTypeController.cs:21-90 | Master.cs:32184-32282 | Controllers/Port/Mst_GovIDTypeControllerPort.cs | agy2 (gemini-3.8-flash-high) |
+| 158 | Mst_GovIDTypeController/GetAllActive | Đã làm | fbe0e15 | Mst_GovIDTypeController.cs:173-233 | MstGovIDTypeController.cs:21-90 | Master.cs:32184-32282 | Controllers/Port/Mst_GovIDTypeControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 162 | Mst_GradeController/Search | Đã làm | 3b851aa | Mst_GradeController.cs:25-105 | MstGradeController.cs:17-88 | MasterData.cs:35544-35634 | Controllers/Port/Mst_GradeControllerPort.cs<br/>Models/Port/Mst_Grade.cs | agy3 (gemini-3.8-flash-high) |
+| 163 | Mst_GradeController/GetAllActive | Đã làm | 6c2dc39 | Mst_GradeController.cs:107-167 | MstGradeController.cs:17-88 | MasterData.cs:35544-35634 | Controllers/Port/Mst_GradeControllerPort.cs | agy2 (gemini-3.8-flash-high) |
+| 164 | Mst_LeaveDayController/Search | Đã làm | c6b0984 | Mst_LeaveDayController.cs:25-105 | MstLeaveDayController.cs:17-88 | MasterData.cs:30453-30543 | Controllers/Port/Mst_LeaveDayControllerPort.cs<br/>Models/Port/Mst_LeaveDay.cs | agy3 (gemini-3.8-flash-high) |
 | 178 | Mst_OrgController/Search | Đã làm | 775577b | Mst_OrgController.cs:25-105 | MstOrgController.cs:17-88 | MasterData.Org.cs:835-932 | Controllers/Port/Mst_OrgControllerPort.cs<br/>Models/Port/Mst_Org.cs | agy (gemini-3.8-flash-high) |
 | 179 | Mst_OrgController/GetAllActive | Đã làm | 84327c2 | Mst_OrgController.cs:107-168 | MstOrgController.cs:17-88 | MasterData.Org.cs:835-932 | Controllers/Port/Mst_OrgControllerPort.cs | agy (gemini-3.8-flash-high) |
 | 187 | Mst_ParamSysController/GetAllActive | Đã làm | 2bb249c | Mst_ParamSysController.cs:26-135 | MstParamSysController.cs:19-90 | Master.Loyalty.cs:12603-12706 | Controllers/Port/Mst_ParamSysControllerPort.cs<br/>Models/Port/Mst_ParamSys.cs | agy (gemini-3.8-flash-high) |
@@ -143,17 +153,18 @@
 ## 3. Phương pháp đo lường & kiểm chứng
 
 Dữ liệu trong ma trận truy vết được đối chiếu bằng các lệnh kiểm tra tự động:
-1. **Trạng thái & Commit**: Trích xuất từ bảng PARITY_PROGRESS.md tại cột Trạng thái và Commit.
-2. **Xác nhận Commit**: Kiểm tra sự tồn tại thực tế của commit trong Git qua lệnh: git -C repos/MiniLoyalty log -1 --oneline <CommitHash>.
-3. **Xác định File đích**: Đo lường các file được sinh ra hoặc sửa đổi bởi chính commit đó qua lệnh: git -C repos/MiniLoyalty show --name-only --oneline <CommitHash>.
-4. **Xác định Engine**: Phân tích cú pháp dòng Port: <engine> trong thân commit message: git -C repos/MiniLoyalty log -1 --format='%b' <CommitHash>.
-5. **Nguồn Gate/API/Biz**: Quét các khối phân cách trong file source_excerpt.txt của từng hạng mục.
+1. **Trạng thái & Commit**: Trích xuất từ bảng `PARITY_PROGRESS.md` tại cột Trạng thái và Commit.
+2. **Xác nhận Commit**: Kiểm tra sự tồn tại thực tế của commit trong Git qua lệnh: `git -C repos/MiniLoyalty log -1 --oneline <CommitHash>`.
+3. **Xác định File đích**: Đo lường các file được sinh ra hoặc sửa đổi bởi chính commit đó qua lệnh: `git -C repos/MiniLoyalty show --name-only --oneline <CommitHash>`.
+4. **Xác định Engine**: Phân tích cú pháp dòng `Port: <engine>` trong thân commit message: `git -C repos/MiniLoyalty log -1 --format='%b' <CommitHash>`.
+5. **Nguồn Gate/API/Biz**: Quét các khối phân cách trong file `source_excerpt.txt` của từng hạng mục.
 
 ---
 
 ## 4. Lịch sử cập nhật
 
 | Phiên bản | Ngày cập nhật | Người thực hiện | Nội dung thay đổi |
-|---|---|---|---|---|
+|---|---|---|---|
 | 1.0 | 2026-10-16 11:15 | doc2 (Quản lý quy trình) | Khởi tạo ma trận truy vết hoàn chỉnh cho toàn bộ 113 hạng mục đã port; đối chiếu đủ 4 tầng nguồn gốc và kiểm chứng bằng git log. |
-
+| 2.0 | 2026-10-16 12:00 | doc2 (Quản lý quy trình) | Cập nhật ma trận truy vết cho 121 hạng mục (bổ sung 8 hạng mục #130, #131, #153, #156, #157, #158, #162, #163). |
+| 2.1 | 2026-10-16 12:12 | doc2 (Quản lý quy trình) | Bổ sung 2 hạng mục mới hoàn thành #154 (Mst_GenderController/Search) và #164 (Mst_LeaveDayController/Search); nâng tổng số hạng mục truy vết lên 123; cập nhật phân bổ engine đối chiếu 100% khớp git log. |

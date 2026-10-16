@@ -1,7 +1,7 @@
 # BÁO CÁO TIẾN ĐỘ PORT 1-1 (PROGRESS REPORT) — MiniLoyalty
 
 > **Phạm vi**: Toàn bộ 337 endpoint / action thuộc 67 controller trong giải pháp `MiniLoyalty`.  
-> **Cập nhật**: 2026-10-16 11:15  
+> **Cập nhật**: 2026-10-16 12:12  
 > **Nguồn dữ liệu**: Đo lường thực tế từ `PARITY_PROGRESS.md`, `.parity-run\skipped.json`, và `git log`.  
 > **Trạng thái**: Nháp — chờ review  
 
@@ -9,10 +9,10 @@
 
 ## 1. Tổng quan tiến độ
 
-- **Tiến độ tổng thể**: **113 / 337 (33.53%)**
-- **Đã làm (Hoàn thành)**: **113 mục (33.53%)** — toàn bộ đã được Claude review (thân commit ghi `Review: ... PASS`) và có commit trên nhánh `parity/auto`.
-- **Bỏ (Loại bỏ)**: **1 mục (0.30%)** — mục scaffold/backup nội bộ không mang giá trị vận hành (`Mst_OrgController/GetAllOrg_bk`).
-- **Chưa làm (Tồn đọng)**: **223 mục (66.17%)** — gồm 5 mục tạm hoãn / cần xem tay và 218 mục chờ chuyển đổi theo kế hoạch.
+- **Tiến độ tổng thể**: **123 / 337 (36.50%)**
+- **Đã làm (Hoàn thành)**: **123 mục (36.50%)** — toàn bộ đã được Claude review (thân commit ghi `Review: ... PASS`) và có commit hợp lệ trên nhánh `parity/auto`.
+- **Bỏ (Loại bỏ)**: **1 mục (0.30%)** — mục scaffold/backup nội bộ không mang giá trị vận hành (`Mst_OrgController/GetAllOrg_bk`, #180).
+- **Chưa làm (Tồn đọng)**: **213 mục (63.20%)** — gồm 5 mục tạm hoãn / cần xem tay và 208 mục chờ chuyển đổi theo kế hoạch.
 - **Tạm hoãn / Cần xem tay**: **5 mục** (theo `.parity-run\skipped.json`: 3 mục `CAN_XEM_TAY`, 2 mục `HOAN_PHU_THUOC`).
 
 ### Bảng chỉ số tổng quan
@@ -20,11 +20,11 @@
 | Chỉ số đo lường | Giá trị số | Tỷ lệ (%) | Ghi chú phương pháp đo |
 |---|---|---|---|
 | Tổng mẫu số (N) | **337** | 100.00% | Đếm số dòng bảng định dạng `\| <số> \|` trong `PARITY_PROGRESS.md` |
-| Đã hoàn thành (X) | **113** | 33.53% | Lọc trạng thái `Đã làm` và xác minh mã commit trong `git log` |
+| Đã hoàn thành (X) | **123** | 36.50% | Lọc trạng thái `Đã làm` và xác minh mã commit tồn tại trong `git log` |
 | Đã loại bỏ | **1** | 0.30% | Lọc trạng thái `Bỏ` tại hàng #180 (`GetAllOrg_bk`) |
-| Tồn đọng cần làm | **223** | 66.17% | Lọc trạng thái `Chưa làm` trong sổ tiến độ |
-| Tổng số Controller | **67** | — | 23 controller đã có hạng mục hoàn thành, 44 controller chưa làm |
-| Tạm hoãn kỹ thuật | **5** | 1.48% | Trích xuất từ `.parity-run\skipped.json` |
+| Tồn đọng cần làm | **213** | 63.20% | Lọc trạng thái `Chưa làm` trong sổ tiến độ (213 + 123 + 1 = 337) |
+| Tổng số Controller | **67** | — | 27 controller có tiến độ, 21 controller đạt 100%, 40 controller chưa làm |
+| Tạm hoãn kỹ thuật | **5** | 1.48% | Trích xuất từ `.parity-run\skipped.json` (thuộc tập Chưa làm) |
 
 ---
 
@@ -34,7 +34,7 @@ Toàn bộ 337 hạng mục được phân thành 8 nhóm nghiệp vụ theo ti�
 
 | STT | Nhóm tiền tố | Ý nghĩa nghiệp vụ | Tổng số mục | Đã làm | Bỏ | Chưa làm | Tỷ lệ hoàn thành (%) |
 |---|---|---|---|---|---|---|---|
-| 1 | `Mst_` | Danh mục cơ sở (Master Data) | 178 | 109 | 1 | 68 | 61.24% |
+| 1 | `Mst_` | Danh mục cơ sở (Master Data) | 178 | 119 | 1 | 58 | 66.85% |
 | 2 | `Map_` | Bảng liên kết trung gian (Mapping) | 5 | 4 | 0 | 1 | 80.00% |
 | 3 | `Crd_` | Nghiệp vụ thẻ & Hội viên (Card / Member) | 58 | 0 | 0 | 58 | 0.00% |
 | 4 | `Sys_` | Quản trị hệ thống & Phân quyền (System) | 38 | 0 | 0 | 38 | 0.00% |
@@ -42,12 +42,12 @@ Toàn bộ 337 hạng mục được phân thành 8 nhóm nghiệp vụ theo ti�
 | 6 | `Rpt_` | Báo cáo thống kê (Report) | 16 | 0 | 0 | 16 | 0.00% |
 | 7 | `Khác` | Tiện ích, Home, Upload file | 15 | 0 | 0 | 15 | 0.00% |
 | 8 | `InvF_` | Mẫu in & Hóa đơn (Invoice / Template) | 2 | 0 | 0 | 2 | 0.00% |
-| **Tổng** | **Toàn bộ hệ thống** | — | **337** | **113** | **1** | **223** | **33.53%** |
+| **Tổng** | **Toàn bộ hệ thống** | — | **337** | **123** | **1** | **213** | **36.50%** |
 
 ### Đánh giá tiến độ theo nhóm
-1. **Nhóm Danh mục cơ sở (`Mst_*`)**: Đạt **61.24%** (109/178 mục). Đã hoàn thành dứt điểm 15 controller danh mục (Tỉnh thành, Quận huyện, Phường xã, Thương hiệu xe, Dòng xe, Loại thẻ, Kỷ luật, Phòng ban, v.v.). Đây là khối lượng nền tảng quan trọng nhất để phục vụ cho các bảng giao dịch nghiệp vụ.
+1. **Nhóm Danh mục cơ sở (`Mst_*`)**: Đạt **66.85%** (119/178 mục, tăng 10 mục so với lượt 1). Đã hoàn thành dứt điểm 18 controller danh mục (Tỉnh thành, Quận huyện, Phường xã, Thương hiệu xe, Dòng xe, Loại thẻ, Kỷ luật, Phòng ban, Tình trạng gia đình, Ngạch bậc, v.v.) và đang triển khai các danh mục tiếp theo (`Mst_GovIDType`, `Mst_Gender`, `Mst_LeaveDay`). Khối lượng này tạo nền tảng vững chắc để chuyển sang các bảng giao dịch nghiệp vụ.
 2. **Nhóm Liên kết đại lý (`Map_*`)**: Đạt **80.00%** (4/5 mục). Chỉ còn duy nhất 1 mục `#068 Map_QueryDealer_MemberController/Create` đang tạm hoãn do phụ thuộc Web Service Hyundai DMS.
-3. **Các nhóm nghiệp vụ giao dịch**: Các nhóm `Crd_*`, `Prm_*`, `Rpt_*`, `Sys_*` hiện đạt 0% và sẽ được triển khai tuần tự ngay sau khi dứt điểm nhóm `Mst_*`.
+3. **Các nhóm nghiệp vụ giao dịch**: Các nhóm `Crd_*`, `Prm_*`, `Rpt_*`, `Sys_*`, `InvF_*`, `Khác` hiện đang ở mức 0% và sẽ được triển khai tuần tự ngay sau khi dứt điểm các danh mục `Mst_*` còn lại.
 
 ---
 
@@ -100,16 +100,16 @@ Năm hạng mục sau được ghi nhận tạm hoãn trong quá trình điều 
 | 21 | `Mst_CertificateGroupController` | 2 | 2 | 0 | 0 | 100.0% |
 | 22 | `Mst_CountryController` | 1 | 1 | 0 | 0 | 100.0% |
 | 23 | `Mst_DealerCPController` | 12 | 10 | 0 | 2 | 83.3% |
-| 24 | `Mst_DepartmentController` | 10 | 8 | 0 | 2 | 80.0% |
+| 24 | `Mst_DepartmentController` | 10 | 10 | 0 | 0 | 100.0% |
 | 25 | `Mst_DisciplineController` | 7 | 7 | 0 | 0 | 100.0% |
 | 26 | `Mst_DistrictController` | 10 | 10 | 0 | 0 | 100.0% |
 | 27 | `Mst_EthnicCategoryController` | 2 | 2 | 0 | 0 | 100.0% |
 | 28 | `Mst_ExpenseTypeController` | 1 | 1 | 0 | 0 | 100.0% |
-| 29 | `Mst_FamilyStatusController` | 2 | 1 | 0 | 1 | 50.0% |
-| 30 | `Mst_GenderController` | 2 | 0 | 0 | 2 | 0.0% |
-| 31 | `Mst_GovIDTypeController` | 6 | 0 | 0 | 6 | 0.0% |
-| 32 | `Mst_GradeController` | 2 | 0 | 0 | 2 | 0.0% |
-| 33 | `Mst_LeaveDayController` | 2 | 0 | 0 | 2 | 0.0% |
+| 29 | `Mst_FamilyStatusController` | 2 | 2 | 0 | 0 | 100.0% |
+| 30 | `Mst_GenderController` | 2 | 1 | 0 | 1 | 50.0% |
+| 31 | `Mst_GovIDTypeController` | 6 | 3 | 0 | 3 | 50.0% |
+| 32 | `Mst_GradeController` | 2 | 2 | 0 | 0 | 100.0% |
+| 33 | `Mst_LeaveDayController` | 2 | 1 | 0 | 1 | 50.0% |
 | 34 | `Mst_LeaveTypeController` | 2 | 0 | 0 | 2 | 0.0% |
 | 35 | `Mst_MajorController` | 2 | 0 | 0 | 2 | 0.0% |
 | 36 | `Mst_MajorGroupController` | 2 | 0 | 0 | 2 | 0.0% |
@@ -144,7 +144,7 @@ Năm hạng mục sau được ghi nhận tạm hoãn trong quá trình điều 
 | 65 | `Sys_ObjectController` | 6 | 0 | 0 | 6 | 0.0% |
 | 66 | `Sys_UserController` | 14 | 0 | 0 | 14 | 0.0% |
 | 67 | `Sys_UserInGroupController` | 1 | 0 | 0 | 1 | 0.0% |
-| **Tổng** | **67 Controller** | **337** | **113** | **1** | **223** | **33.53%** |
+| **Tổng** | **67 Controller** | **337** | **123** | **1** | **213** | **36.50%** |
 
 ---
 
@@ -176,3 +176,5 @@ Tuân thủ bẫy #22 của `INDEX_CONVERT.md`, mọi con số trong báo cáo n
 | Phiên bản | Ngày cập nhật | Người thực hiện | Nội dung thay đổi |
 |---|---|---|---|
 | 1.0 | 2026-10-16 11:15 | doc2 (Quản lý quy trình) | Khởi tạo báo cáo tiến độ toàn diện; đo lường độc lập toàn bộ 337 endpoint, 67 controller, 8 nhóm tiền tố và danh mục hoãn. |
+| 2.0 | 2026-10-16 12:00 | doc2 (Quản lý quy trình) | Cập nhật tiến độ đợt 2: tăng 8 hạng mục (113 lên 121, đạt 35.91%), hoàn thành dứt điểm Mst_Department (10/10), Mst_FamilyStatus (2/2), Mst_Grade (2/2) và khởi động Mst_GovIDType (3/6). |
+| 2.1 | 2026-10-16 12:12 | doc2 (Quản lý quy trình) | Cập nhật số liệu realtime mới nhất từ PARITY_PROGRESS.md: đạt 123/337 (36.50%), bổ sung hoàn thành Mst_GenderController/Search (#154) và Mst_LeaveDayController/Search (#164); nâng số controller có tiến độ lên 27. |

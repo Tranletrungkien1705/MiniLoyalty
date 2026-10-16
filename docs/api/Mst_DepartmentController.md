@@ -2,9 +2,9 @@
 
 | Thông tin | Giá trị |
 |---|---|
-| **Phạm vi** | Tài liệu tham chiếu chi tiết 8 endpoint đã port 1-1 của Mst_DepartmentController (#122 - #129) |
+| **Phạm vi** | Tài liệu tham chiếu chi tiết 9 endpoint đã port 1-1 của Mst_DepartmentController (#122 - #130) |
 | **Cập nhật** | 2026-10-16 |
-| **Phiên bản mã** | 8b25ecf |
+| **Phiên bản mã** | `014ab70` |
 | **Trạng thái** | Nháp — chờ review |
 
 ---
@@ -12,15 +12,15 @@
 ## 1. Tóm tắt Nghiệp vụ & Cấu trúc Dữ liệu
 
 ### 1.1. Mục đích Nghiệp vụ
-API `Mst_DepartmentController` quản lý danh mục phòng ban (`Mst_Department`) trong hệ thống MiniLoyalty. Module này cung cấp các chức năng tìm kiếm phân trang theo từ khóa và tổ chức, lấy danh sách phòng ban đang hoạt động, tra cứu chi tiết một phòng ban theo mã, tạo mới phòng ban kèm sinh sequence tự động và tính toán phân cấp BU toàn bảng, cập nhật thông tin phòng ban, xóa đơn lẻ/xóa hàng loạt và nhập dữ liệu danh mục từ bảng tính Excel.
+API `Mst_DepartmentController` quản lý danh mục phòng ban (`Mst_Department`) trong hệ thống MiniLoyalty. Module này cung cấp các chức năng tìm kiếm phân trang theo từ khóa và tổ chức, lấy danh sách phòng ban đang hoạt động, tra cứu chi tiết một phòng ban theo mã, tạo mới phòng ban kèm sinh sequence tự động và tính toán phân cấp BU toàn bảng, cập nhật thông tin phòng ban, xóa đơn lẻ/xóa hàng loạt, nhập dữ liệu danh mục từ bảng tính Excel và xuất danh sách phòng ban ra tập tin Excel chuẩn.
 
 ### 1.2. Bảng Đối chiếu Nguồn Tra cứu (Source Code Mapping)
 
 | Thành phần | Đường dẫn tập tin nguồn (`2022.7.Loyalty`) | Tập tin đích tương ứng (`MiniLoyalty`) |
 |---|---|---|
-| **Gate Controller** | `13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Mst_DepartmentController.cs:30-730` | [`Controllers/Port/Mst_DepartmentControllerPort.cs`](../../Controllers/Port/Mst_DepartmentControllerPort.cs) |
+| **Gate Controller** | `13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Mst_DepartmentController.cs:30-812` | [`Controllers/Port/Mst_DepartmentControllerPort.cs`](../../Controllers/Port/Mst_DepartmentControllerPort.cs) |
 | **API Backend** | `11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\MstDepartmentController.cs:20-302` | Tích hợp trực tiếp vào [`Controllers/Port/Mst_DepartmentControllerPort.cs`](../../Controllers/Port/Mst_DepartmentControllerPort.cs) |
-| **Nghiệp vụ (Biz)** | `11.BackEnd\V10\idn.Loyalty.Biz\Master.cs` (Search `:29450-29701`, `:30396-30568`; Create `:29702-29935`, `:30569-30726`; Update `:29936-30180`, `:30727-30864`; Delete `:30181-30395`, `:30865-30968`; UpdBU `:29413-29448`; CheckDB `:29275-29411`, `:7813-7890`) | Tích hợp trực tiếp vào [`Controllers/Port/Mst_DepartmentControllerPort.cs`](../../Controllers/Port/Mst_DepartmentControllerPort.cs) |
+| **Nghiệp vụ (Biz)** | `11.BackEnd\V10\idn.Loyalty.Biz\Master.cs` (Search `:29450-29701`, `:30396-30568`; Create `:29702-29935`, `:30569-30726`; Update `:29936-30180`, `:30727-30864`; Delete `:30181-30395`, `:30865-30968`; Export `:29450-29701`; UpdBU `:29413-29448`; CheckDB `:29275-29411`, `:7813-7890`) | Tích hợp trực tiếp vào [`Controllers/Port/Mst_DepartmentControllerPort.cs`](../../Controllers/Port/Mst_DepartmentControllerPort.cs) |
 | **Entity Model** | `12.Dev.Common\idn.Loyalty.Common\Models\Mst_Department.cs:8-35` | [`Models/Port/Mst_Department.cs:35-50`](../../Models/Port/Mst_Department.cs#L35-L50) |
 | **Sequence Entity** | `Seq.cs:Bang Seq_DepartmentCode, SeqType.DepartmentCode` | [`Models/Port/Mst_Department.cs:144-148`](../../Models/Port/Mst_Department.cs#L144-L148) |
 
@@ -569,6 +569,10 @@ Payload JSON gửi qua Request Body (`MstDepartmentDeleteReq`):
 | `ErridnLoyalty.invalid_departmentcode` | `DepartmentCode` rỗng hoặc body rỗng | `Check.DepartmentCode = <value>` |
 | `ErridnLoyalty.invalid_orgid` | `OrgID` rỗng trong khi `DepartmentCode` hợp lệ | `Check.OrgID = <value>` |
 | `ErridnLoyalty.Mst_Department_CheckDB_DepartmentNotFound` | Phòng ban không tồn tại trong CSDL | `Check.DepartmentCode = <code >` |
+| `ErridnLoyalty.Mst_Department_Delete` | Ngoại lệ DB bất ngờ trong quá trình xóa bản ghi (`DeleteXAsync`, commit `1752274`) | `Exception = <thông báo ngoại lệ>` |
+
+> [!NOTE]
+> **Xử lý ngoại lệ DB bất ngờ (Commit `1752274`)**: Trước đây, ngoại lệ DB bất ngờ trong `DeleteXAsync` bị ném lại (`throw;`) dẫn tới lỗi máy chủ HTTP 500. Hiện tại, khối `catch (Exception ex)` thực hiện rollback transaction và trả về HTTP 400 kèm mã lỗi `ErridnLoyalty.Mst_Department_Delete` với `Params.Exception = ex.Message`, đảm bảo hành vi khớp 1-1 với tầng gate nguồn (`:503-507`), không còn trả HTTP 500.
 
 #### Ví dụ Request / Response thực tế (từ lần chạy VERIFY #127)
 - **Xóa thành công phòng ban `"old"`**:
@@ -606,7 +610,7 @@ Payload JSON gửi qua Request Body là một mảng danh sách các đối tư�
    - **Khác biệt quan trọng so với Delete đơn**: Tầng gate của `DeleteMultiple` **không kiểm tra rỗng đối với `DepartmentCode` và không kiểm tra `OrgID`** (nguồn lấy `OrgID` từ session người dùng đăng nhập `orgUserUI.OrgId`). Nếu phần tử có mã rỗng, mã rỗng được chuyển thẳng xuống hàm nghiệp vụ và gây ra lỗi `ErridnLoyalty.Mst_Department_CheckDB_DepartmentNotFound`.
    - Mỗi phần tử được thực thi qua hàm `DeleteXAsync` trong một **Transaction riêng biệt đã commit**.
 4. **Hành vi Xóa một phần (Partial Delete - Nguồn `:547-573`)**:
-   - Nếu phần tử thứ k gặp lỗi (ví dụ: mã không tồn tại, mã rỗng): Vòng lặp dừng ngay lập tức, trả về lỗi của phần tử thứ k.
+   - Nếu phần tử thứ k gặp lỗi (ví dụ: mã không tồn tại, mã rỗng, hoặc lỗi DB bất ngờ): Vòng lặp dừng ngay lập tức, trả về lỗi của phần tử thứ k (kèm `Params.Exception` nếu là ngoại lệ DB bất ngờ theo commit `1752274`).
    - **Các phần tử đứng trước k đã được commit vào CSDL và KHÔNG bị rollback**.
    - **Các phần tử đứng sau k hoàn toàn không được xử lý**.
 5. Nếu tất cả phần tử hợp lệ: Trả về HTTP 200 `{ Success = true, Data = null }`.
@@ -617,6 +621,7 @@ Payload JSON gửi qua Request Body là một mảng danh sách các đối tư�
 |---|---|---|
 | `ErridnLoyalty.Mst_Department_Delete` | Request body rỗng hoặc null | `Check.strJson = null` |
 | `ErridnLoyalty.Mst_Department_CheckDB_DepartmentNotFound` | Phần tử thứ k có `DepartmentCode` rỗng hoặc không tồn tại trong CSDL | `Check.DepartmentCode = <value>` |
+| `ErridnLoyalty.Mst_Department_Delete` | Ngoại lệ DB bất ngờ tại phần tử thứ k (`DeleteXAsync`, commit `1752274`) | `Exception = <thông báo ngoại lệ>` |
 
 #### Ví dụ Request / Response thực tế (từ lần chạy VERIFY #128)
 - **Xóa thành công danh sách hợp lệ**:
@@ -678,11 +683,12 @@ Dữ liệu đọc từ sheet đầu tiên, bắt đầu từ dòng dữ liệu 
    - Mỗi dòng được xử lý trong một Transaction độc lập.
    - **Sinh mã phòng ban tự động**: Gán `DepartmentCode = Guid.NewGuid().ToString()` (`:689`). Khi đi qua `StdParam` trong `CreateXAsync`, mã chuyển thành **chuỗi GUID in hoa 36 ký tự**. *(Khác với Create đơn sử dụng sequence `DPMCODE...`, Import không qua sequence)*.
    - Xác định `OrgID` và `MST`: Client gửi `"ALL"` bị bỏ qua, thực tế lấy theo cấu hình `Biz_OrgID` giống Create đơn.
-   - Gọi `CreateXAsync`: Kiểm tra sự tồn tại và cờ hoạt động của phòng ban cha, kiểm tra trùng tên trong cùng tổ chức, lưu bản ghi và chạy `UpdBUAsync` để tính toán lại phân cấp.
-   - **Hành vi Nhập một phần (Partial Import)**:
-     - Nếu dòng thứ k gặp lỗi nghiệp vụ (ví dụ: cha không tồn tại, cha ngừng hoạt động, hoặc trùng tên): Transaction của dòng thứ k bị rollback, dừng vòng lặp ngay và trả về lỗi của dòng thứ k.
-     - **Tất cả các dòng trước k đã commit thành công và tồn tại trong CSDL**.
-     - **Tất cả các dòng sau k không được xử lý**.
+    - Gọi `CreateXAsync`: Kiểm tra sự tồn tại và cờ hoạt động của phòng ban cha, kiểm tra trùng tên trong cùng tổ chức, lưu bản ghi và chạy `UpdBUAsync` để tính toán lại phân cấp.
+    - **Hành vi Nhập một phần (Partial Import)**:
+      - Nếu dòng thứ k gặp lỗi nghiệp vụ (ví dụ: cha không tồn tại, cha ngừng hoạt động, hoặc trùng tên): Transaction của dòng thứ k bị rollback, dừng vòng lặp ngay và trả về lỗi của dòng thứ k.
+      - **Tất cả các dòng trước k đã commit thành công và tồn tại trong CSDL**.
+      - **Tất cả các dòng sau k không được xử lý**.
+    - **Xử lý ngoại lệ DB bất ngờ (Commit `1752274`)**: Nếu xảy ra ngoại lệ DB bất ngờ khi lưu dòng thứ k, khối `catch (Exception ex)` thực hiện rollback transaction của dòng thứ k và trả về HTTP 400 kèm mã lỗi `ErridnLoyalty.Mst_Department_Import` với `Params.Exception = ex.Message` (không còn văng lỗi HTTP 500, khớp nguồn `gate :719-723`). Các dòng trước k đã commit vẫn tồn tại trong CSDL.
 5. Trả về HTTP 200 `{ Success = true, Data = null }` (`:710-711`).
 
 #### Bảng mã lỗi
@@ -695,6 +701,7 @@ Dữ liệu đọc từ sheet đầu tiên, bắt đầu từ dòng dữ liệu 
 | `ErridnLoyalty.Mst_Department_CheckDB_DepartmentNotFound` | Dòng k có phòng ban cha không tồn tại | `Check.DepartmentCode = <parentCode>` |
 | `ErridnLoyalty.Mst_Department_CheckDB_FlagActiveNotMatched` | Dòng k có phòng ban cha ngừng hoạt động | `Check.DepartmentCode = <parentCode>`, `Check.strFlagActiveListToCheck = "1"`, `DB.FlagActive = "0"` |
 | `ErridnLoyalty.Mst_Department_CheckDB_DepartmentNameExist` | Dòng k có tên bị trùng trong cùng tổ chức | `Check.OrgID = <orgId>`, `Check.DepartmentName = <name>` |
+| `ErridnLoyalty.Mst_Department_Import` | Ngoại lệ DB bất ngờ trong quá trình lưu dòng thứ k (`commit 1752274`) | `Exception = <thông báo ngoại lệ>` |
 
 #### Ví dụ Request / Response thực tế (từ lần chạy VERIFY #129)
 - **Nhập file hợp lệ thành công**:
@@ -727,6 +734,88 @@ Dữ liệu đọc từ sheet đầu tiên, bắt đầu từ dòng dữ liệu 
     }
     ```
   - CSDL: `Phòng D` **đã được lưu thành công vào CSDL**, trong khi `Phòng E` hoàn toàn chưa được xử lý.
+
+---
+
+### 2.9. Export (#130)
+
+Xuất danh sách phòng ban ra tập tin Excel `.xlsx`.
+
+- **Route**: `POST /api/mst_department/export`
+- **Controller Action**: [`Mst_DepartmentControllerPort.Export`](../../Controllers/Port/Mst_DepartmentControllerPort.cs#L944-L998)
+- **Tham chiếu nguồn**: Gate `Mst_DepartmentController.cs:735-812` → API `MstDepartmentController.cs:20-89` (WA_Mst_Department_Get) → Biz `Master.cs:29450-29701`, `30396-30568`
+
+#### Bảng tham số Request
+
+Payload JSON gửi qua Request Body (`MstDepartmentExportReq`), hỗ trợ cả trường hợp body rỗng hoàn toàn hoặc null (`EmptyBodyBehavior.Allow`, gate `:735`):
+
+| Tên tham số | Kiểu dữ liệu | Bắt buộc | Mặc định | Ý nghĩa & Quy tắc |
+|---|---|---|---|---|
+| `OrgID` | `string?` | Không | `null` | Lọc chính xác theo mã tổ chức (`OrgID = 'x'`). Khác với Search, tham số OrgID ở Export được áp dụng lọc trực tiếp theo client gửi (`gate :886-889`). |
+| `KeyWord` | `string?` | Không | `null` | Từ khóa tìm kiếm theo tên phòng ban (`DepartmentName LIKE '%kw%'`, `gate :882-885`). |
+| `FlagActive` | `string?` | Không | `null` | Danh sách trạng thái phân cách bởi dấu phẩy (toán tử `IN ('a','b')`, `gate :894-902`). |
+
+#### Quy tắc xử lý theo thứ tự (Business Rules)
+1. **Lấy danh sách dữ liệu qua `GetXAsync`** (`gate :774-781`):
+   - Truyền phân trang `recordStart = 0`, `recordCount = 123456000` (lấy toàn bộ bản ghi thỏa mãn).
+   - Lọc theo `KeyWord` (`LIKE` trên `DepartmentName`), `OrgID` (`=` từ tham số client), `FlagActive` (`IN` tách dấu phẩy).
+   - Thứ tự sắp xếp: `md.DepartmentCode ASC` (`Master.cs:30457`), select cuối sắp theo `t.MyIdxSeq ASC` (`Master.cs:30514`).
+2. **Kiểm tra dữ liệu rỗng** (`gate :782, :796-798, :801-805`):
+   - Nếu danh sách `rows == null || rows.Count == 0`, trả về HTTP 400 kèm mã lỗi `ErridnLoyalty.Mst_Department_Export` và `Message = "Không có dữ liệu"`.
+3. **Từ điển cột xuất Excel (`GetImportDicColums()`)**:
+   - Tầng gate nguồn sử dụng từ điển Import cho chức năng Export (`gate :786, :851-862`), gồm đúng 4 cột theo thứ tự:
+     1. `DepartmentName`: `"Tên phòng ban (*)"`
+     2. `DepartmentCodeParent`: `"Phòng ban cấp trên"`
+     3. `DepartmentDesc`: `"Mô tả"`
+     4. `FlagActive`: `"Trạng thái"`
+   - *(Lưu ý: Các cột `md_DepartmentNameParent` và `ss_QtyStaff` có trong danh sách truy vấn nguồn nhưng không nằm trong từ điển nên không được đưa lên file Excel)*.
+4. **Sinh tập tin Excel**:
+   - Tạo đường dẫn file qua [`PortExcel.GenExcelExportFilePath`](../../Data/PortExcel.cs) với tiền tố `"Mst_Department"`.
+   - Ghi dữ liệu ra sheet `"Mst_Department"` qua [`PortExcel.ExportToExcelFromList`](../../Data/PortExcel.cs).
+5. **Cơ chế bắt ngoại lệ bất ngờ (Commit `1752274`)**:
+   - Toàn bộ quá trình tạo đường dẫn và ghi tập tin Excel được bao bọc trong khối `try/catch (Exception ex)`.
+   - Nếu xảy ra lỗi I/O hoặc lỗi hệ thống bất ngờ, hệ thống bắt ngoại lệ và trả về HTTP 400 kèm mã lỗi `ErridnLoyalty.Mst_Department_Export` với `Params.Exception = ex.Message`. Tuyệt đối không để văng ngoại lệ gây lỗi máy chủ HTTP 500, khớp 1-1 với `gate :801-805`.
+6. **Trả về kết quả thành công**:
+   - Trả về HTTP 200 `{ Success = true, Data = { Url = baseAddress + virtualPath } }` (`gate :790-793`). Không mở transaction, không ghi CSDL (chỉ đọc).
+
+#### Bảng mã lỗi `ErridnLoyalty.*`
+
+| Mã lỗi | Điều kiện kích hoạt | Các tham số trả về trong `Params` |
+|---|---|---|
+| `ErridnLoyalty.Mst_Department_Export` | Không có bản ghi nào thỏa mãn điều kiện lọc (`rows.Count == 0`) | `Message = "Không có dữ liệu"` |
+| `ErridnLoyalty.Mst_Department_Export` | Ngoại lệ hệ thống hoặc lỗi I/O bất ngờ khi tạo tập tin Excel (`commit 1752274`) | `Exception = <thông báo ngoại lệ>` |
+
+#### Ví dụ Request / Response thực tế (từ lần chạy VERIFY #130)
+- **Xuất toàn bộ danh sách mặc định (`{}`)**:
+  - Request: `POST /api/mst_department/export` kèm body `{}`
+  - Response (HTTP 200):
+    ```json
+    {
+      "Success": true,
+      "Data": {
+        "Url": "http://localhost:5000/TempFiles/2026/10/16/Mst_Department_20261016111530_xxxx.xlsx"
+      }
+    }
+    ```
+  - Kết quả kiểm chứng OpenXML tập tin `.xlsx`: Tên sheet `"Mst_Department"`, đúng 4 cột tiêu đề theo thứ tự, đủ 4 dòng dữ liệu demo (`HQ`, `KD`, `KT`, `old`).
+- **Lọc theo cờ hoạt động**:
+  - Request: `{"FlagActive": "1"}` → HTTP 200, file Excel xuất 3 dòng (`HQ`, `KD`, `KT`).
+  - Request: `{"FlagActive": "1,0"}` → HTTP 200, file Excel xuất 4 dòng.
+- **Lọc theo tổ chức và từ khóa**:
+  - Request: `{"OrgID": "4020320001"}` → HTTP 200, file Excel xuất 3 dòng.
+  - Request: `{"KeyWord": "kinh"}` → HTTP 200, file Excel xuất 1 dòng (`KD`).
+- **Lỗi không có dữ liệu**:
+  - Request: `{"KeyWord": "khongco"}`
+  - Response (HTTP 400):
+    ```json
+    {
+      "Success": false,
+      "ErrorCode": "ErridnLoyalty.Mst_Department_Export",
+      "Params": {
+        "Message": "Không có dữ liệu"
+      }
+    }
+    ```
 
 ---
 
@@ -764,3 +853,5 @@ Các hạng mục API của `Mst_DepartmentController` được chuyển đổi 
 | **#127** | `Mst_DepartmentController/Delete` | Đã hoàn thành | `d565dda` | Xóa đơn lẻ phòng ban, kiểm tra rỗng tại gate cho cả mã và OrgID, không kiểm tra phòng ban con. |
 | **#128** | `Mst_DepartmentController/DeleteMultiple` | Đã hoàn thành | `9de58bd` | Xóa danh sách phòng ban, lặp tuần tự từng transaction riêng biệt, thực thi cơ chế xóa một phần khi có lỗi. |
 | **#129** | `Mst_DepartmentController/Import` | Đã hoàn thành | `e3c84ce` | Nhập danh mục từ Excel, validate toàn bộ dòng trước khi tạo, sinh mã GUID tự động và thực thi cơ chế nhập một phần. |
+| **#130** | `Mst_DepartmentController/Export` | Đã hoàn thành | `2d13be5` | Xuất danh sách phòng ban ra Excel với từ điển 4 cột theo thứ tự nguồn, lọc OrgID/KeyWord/FlagActive. |
+| **Fix** | Sửa lỗi ngoại lệ DB bất ngờ | Đã hoàn thành | `1752274` | Import, Delete, DeleteMultiple, Export bắt mọi ngoại lệ và trả về HTTP 400 PortResult.Fail với Params.Exception thay vì HTTP 500, khớp nguồn 1-1. |
