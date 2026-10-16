@@ -1,9 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using MiniLoyalty.Data;
 using MiniLoyalty.Models.Port;
 
@@ -30,10 +33,12 @@ public class MstResignReasonSearchReq
 public class Mst_ResignReasonControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly IConfiguration _config;
 
-    public Mst_ResignReasonControllerPort(AppDbContext db)
+    public Mst_ResignReasonControllerPort(AppDbContext db, IConfiguration config)
     {
         _db = db;
+        _config = config;
     }
 
     [HttpPost("search")]
@@ -85,10 +90,10 @@ public class Mst_ResignReasonControllerPort : ControllerBase
     /// - Body rỗng -> ServiceException("strJson null") -> mã mặc định Mst_ResignReason_Create (gate :239-242).
     /// - ReasonID do SEQ sinh (gate :256-276, SeqType.ReasonID -> Seq_ReasonID, format "{0}REASONID.{3}.{1:00000}{2}", max 100000) và GHI ĐÈ ReasonID client gửi;
     ///   seq nằm trong transaction riêng đã commit nên vẫn tăng kể cả khi lưu lỗi (Seq.cs:28-41, :118).
-    /// - Trình tự CreateX: OrgID rỗng -> ReasonID rỗng -> Mst_ResignReason_CheckDB(No) -> Mst_Org_CheckDB(Yes, Active) -> ResignReason rỗng -> CheckResignReason(No) -> lưu.
+    /// - Nghiệp vụ tạo được tách sang CreateXAsync để dùng chung cho cả Create và Import (mỗi dòng 1 transaction biz riêng).
     /// </summary>
     [HttpPost("create")]
-    public async Task<IActionResult> Create([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] Mst_ResignReason? req, [FromServices] Microsoft.Extensions.Configuration.IConfiguration _config)
+    public async Task<IActionResult> Create([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] Mst_ResignReason? req)
     {
         // Body rỗng (Mst_ResignReasonController.cs:239-242) -> mã mặc định của Create
         if (req == null)
@@ -100,11 +105,30 @@ public class Mst_ResignReasonControllerPort : ControllerBase
         var seq = await PortSeq.NextAsync<Seq_ReasonID>(_db);
         var strReasonID = (PortSeq.Build("{0}REASONID.{3}.{1:00000}{2}", "", seq, 100000, "", DateTime.UtcNow) ?? "").Trim().ToUpper();
 
+        var err = await CreateXAsync(req.OrgID, strReasonID, req.ResignReason, req.ReasonDesc, req.Remark);
+        if (err != null)
+        {
+            return err;
+        }
+
+        return Ok(new { Success = true, Data = (object?)null }); // Mst_ResignReasonController.cs:295-296
+    }
+
+    /// <summary>
+    /// Nghiệp vụ tạo 1 lý do nghỉ việc — tách riêng để dùng chung cho Create (#236) và Import (#240, gọi từng dòng).
+    /// Nguồn: MasterData.cs:25005-25143 (Mst_ResignReason_CreateX).
+    /// Nhận thẳng reasonId (Create sinh từ sequence Seq_ReasonID; Import sinh bằng Guid.NewGuid().ToString()).
+    /// Mỗi lời gọi chạy trong 1 transaction độc lập (MasterData.cs:25182 _cf.db.BeginTransaction()).
+    /// Trả về null nếu thành công; trả về IActionResult chứa lỗi nếu thất bại (và rollback transaction của dòng đó).
+    /// </summary>
+    private async Task<IActionResult?> CreateXAsync(string? orgId, string? reasonId, string? resignReason, string? reasonDesc, string? remark)
+    {
         // Chuẩn hoá đầu vào (MasterData.cs:25039-25043): StdParam = Trim + ToUpper; StdStr = Trim
-        var strOrgID = string.IsNullOrWhiteSpace(req.OrgID) ? null : req.OrgID.Trim().ToUpper();
-        var strResignReason = string.IsNullOrWhiteSpace(req.ResignReason) ? null : req.ResignReason.Trim();
-        var strReasonDesc = string.IsNullOrWhiteSpace(req.ReasonDesc) ? null : req.ReasonDesc.Trim();
-        var strRemark = string.IsNullOrWhiteSpace(req.Remark) ? null : req.Remark.Trim();
+        var strOrgID = string.IsNullOrWhiteSpace(orgId) ? null : orgId.Trim().ToUpper();
+        var strReasonID = string.IsNullOrWhiteSpace(reasonId) ? null : reasonId.Trim().ToUpper();
+        var strResignReason = string.IsNullOrWhiteSpace(resignReason) ? null : resignReason.Trim();
+        var strReasonDesc = string.IsNullOrWhiteSpace(reasonDesc) ? null : reasonDesc.Trim();
+        var strRemark = string.IsNullOrWhiteSpace(remark) ? null : remark.Trim();
 
         await using var tx = await _db.Database.BeginTransactionAsync(); // MasterData.cs:25182
         try
@@ -177,13 +201,102 @@ public class Mst_ResignReasonControllerPort : ControllerBase
             await _db.SaveChangesAsync();
             await tx.CommitAsync();
 
-            return Ok(new { Success = true, Data = (object?)null }); // Mst_ResignReasonController.cs:295-296
+            return null; // Thành công
         }
         catch (Exception ex)
         {
             await tx.RollbackAsync();
             return PortResult.Fail("Mst_ResignReason_Create", "Exception", ex.Message); // mã mặc định (MasterData.cs:25246)
         }
+    }
+
+    /// <summary>
+    /// Port 1:1 Mst_ResignReasonController.Import (gate :512-623) -> WA_Mst_ResignReason_Create -> Mst_ResignReason_CreateX (MasterData.cs:25005-25143).
+    /// - Nhận file upload qua multipart/form-data.
+    /// - Tham số orgId nhận từ form ([FromForm] string? orgId) hoặc header OrgID (do nguồn lấy OrgID từ session user orgUserUI.OrgId :594).
+    /// - Thiếu file hoặc file rỗng hoặc đuôi khác .xlsx -> Fail("Mst_ResignReason_Import", "Message", "File excel import không hợp lệ") (gate :536-549).
+    /// - Đọc sheet bằng PortExcel.ReadSheet với 3 cột: ResignReason, OrgID, ReasonDesc (gate :552-555, template :757-767).
+    ///   Template (GetImportDicColumsTemplate :757-767): ResignReason ("Lý do nghỉ việc (*)"), OrgID ("Mã tổ chức"), ReasonDesc ("Mô tả"). (ghi chú cũ: GetImportDicColumsTemplate().
+    /// - Không có dòng dữ liệu (rows.Count == 0) -> Fail("Mst_ResignReason_Import", "Message", "File excel import không có dữ liệu") (gate :553, :606-610).
+    /// - Số cột dòng tiêu đề != 3 -> Fail("Mst_ResignReason_Import", "Message", "File excel import không hợp lệ") (gate :555-559).
+    /// - Vòng lặp 1 (kiểm tra trước): nếu bất kỳ dòng nào có ResignReason rỗng -> Fail("Mst_ResignReason_Import", "Message", "Lý do nghỉ việc không được trống") (gate :562-570).
+    ///   Nếu lỗi ở bước này: không có dòng nào được tạo (kiểm tra trước).
+    /// - Vòng lặp 2 (lưu dữ liệu từng dòng): mỗi dòng sinh ReasonID = Guid.NewGuid().ToString() (gate :585)
+    ///   rồi gọi CreateXAsync độc lập (1 transaction riêng cho mỗi dòng). Lỗi ở dòng k -> trả về lỗi của CreateXAsync ngay lập tức
+    ///   (hành vi import một phần: các dòng trước k đã commit thành công, dòng k và các dòng sau không được tạo).
+    /// - Thành công: trả { Success = true, Data = null } (gate :603-604).
+    /// </summary>
+    [HttpPost("import")]
+    [Consumes("multipart/form-data")]
+    public async Task<IActionResult> Import(IFormFile? file)
+    {
+        // 1. Kiểm tra file upload (gate Mst_ResignReasonController.cs:534-549)
+        if (file == null || file.Length == 0)
+        {
+            return PortResult.Fail("Mst_ResignReason_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+        if (ext != ".xlsx")
+        {
+            return PortResult.Fail("Mst_ResignReason_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        // 2. Đọc bảng tính bằng PortExcel.ReadSheet (gate Mst_ResignReasonController.cs:552)
+        // Giả định mẫu template gồm 3 cột: ResignReason, ReasonDesc, Remark do mã nguồn thiếu hàm GetImportDicColumsTemplate()
+        int columnCount;
+        List<Dictionary<string, string?>> rows;
+        try
+        {
+            using var stream = file.OpenReadStream();
+            (columnCount, rows) = PortExcel.ReadSheet(stream, new[] { "ResignReason", "OrgID", "ReasonDesc" });   // GetImportDicColumsTemplate (Mst_ResignReasonController.cs:757-767): ResignReason, OrgID, ReasonDesc (ReasonID/mnnt bị comment)
+        }
+        catch
+        {
+            return PortResult.Fail("Mst_ResignReason_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        // Kiểm tra có dữ liệu hay không (gate Mst_ResignReasonController.cs:553, :606-610)
+        if (rows.Count == 0)
+        {
+            return PortResult.Fail("Mst_ResignReason_Import", "Message", "File excel import không có dữ liệu");
+        }
+
+        // Kiểm tra số cột dòng tiêu đề so với template (3 cột) (gate Mst_ResignReasonController.cs:555-559)
+        if (columnCount != 3)   // GetImportDicColumsTemplate().Count = 3
+        {
+            return PortResult.Fail("Mst_ResignReason_Import", "Message", "File excel import không hợp lệ");
+        }
+
+        // 3. Vòng lặp 1: Kiểm tra TẤT CẢ các dòng TRƯỚC khi tạo (gate Mst_ResignReasonController.cs:562-570)
+        foreach (var r in rows)
+        {
+            var resignReason = r.GetValueOrDefault("ResignReason");
+            if (string.IsNullOrWhiteSpace(resignReason))
+            {
+                return PortResult.Fail("Mst_ResignReason_Import", "Message", "Lý do nghỉ việc không được trống");
+            }
+        }
+
+        // OrgID lấy từ TỪNG DÒNG Excel (cột "Mã tổ chức"): gate :578 ToListof<Mst_ResignReason>(table) -> :597 Mst_ResignReason = item; CreateX dùng item.OrgID (không dùng OrgID session)
+        // 4. Vòng lặp 2: Lưu từng dòng tuần tự: mỗi dòng sinh ReasonID bằng Guid.NewGuid().ToString() (gate :585)
+        // và gọi CreateXAsync trong 1 transaction riêng (hành vi import một phần: gate :583-601)
+        foreach (var r in rows)
+        {
+            var reasonId = Guid.NewGuid().ToString();
+            var resignReason = r.GetValueOrDefault("ResignReason");
+            var reasonDesc = r.GetValueOrDefault("ReasonDesc");
+            var rowOrgID = r.GetValueOrDefault("OrgID");
+            var err = await CreateXAsync(rowOrgID, reasonId, resignReason, reasonDesc, null);
+            if (err != null)
+            {
+                // Lỗi ở dòng k -> dừng ngay và trả lỗi của dòng đó (các dòng trước k đã commit thành công)
+                return err;
+            }
+        }
+
+        // Thành công: Data null (gate Mst_ResignReasonController.cs:603-604)
+        return Ok(new { Success = true, Data = (object?)null });
     }
 
     /// <summary>
@@ -462,10 +575,10 @@ public class Mst_ResignReasonControllerPort : ControllerBase
             : await ordered.Skip((int)Math.Min(recordStart, int.MaxValue)).Take((int)Math.Min(recordCount, int.MaxValue)).ToListAsync();
 
         // Select cuoi: left join Mst_NNT mnnt on t.OrgID = mnnt.OrgID (MasterData.cs:24719-24720)
-        var orgIds = page.Select(p => p.OrgID).Distinct().ToList();
+        var orgIds = page.Select(p => p.OrgID).Where(x => !string.IsNullOrEmpty(x)).Select(x => x!).Distinct().ToList();
         // left join Mst_NNT theo OrgID (MasterData.cs:24719-24721): một OrgID có thể có nhiều dòng NNT -> lấy dòng đầu theo MST (như #197), tránh ToDictionary ném lỗi trùng khoá
         var nntRows = await _db.Set<Mst_NNT>().AsNoTracking()
-            .Where(n => orgIds.Contains(n.OrgID))
+            .Where(n => n.OrgID != null && orgIds.Contains(n.OrgID))
             .OrderBy(n => n.MST)
             .ToListAsync();
         var nntDict = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
