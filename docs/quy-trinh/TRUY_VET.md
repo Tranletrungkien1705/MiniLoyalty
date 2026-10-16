@@ -1,0 +1,159 @@
+# MA TRẬN TRUY VẾT NGUỒN GỐC (TRACEABILITY MATRIX) — MiniLoyalty
+
+> **Phạm vi**: Toàn bộ 113 hạng mục đã port 1-1 thành công trong MiniLoyalty đối chiếu ngược về chuỗi mã nguồn gốc và xác thực qua git log.
+> **Cập nhật**: 2026-10-16 11:15
+> **Nguồn dữ liệu**: PARITY_PROGRESS.md (113 mục Đã làm), git log --oneline, các tệp source_excerpt.txt trong .parity-run\logs\, thân commit Git (Port: ...).
+> **Trạng thái**: Nháp — chờ review
+
+---
+
+## 1. Thống kê theo Engine thực thi
+
+| STT | Engine / Mô hình AI | Số lượng hạng mục | Tỷ lệ (%) |
+|---|---|---|---|
+| 1 | agy (gemini-3.8-flash-high) | 74 | 65.49% |
+| 2 | codegpt (gemini-3.8-flash-high) | 27 | 23.89% |
+| 3 | codegpt (deepseek-v4.1-flash) | 9 | 7.96% |
+| 4 | agy2 (gemini-3.8-flash-high) | 2 | 1.77% |
+| 5 | agy3 (gemini-3.8-flash-high) | 1 | 0.88% |
+| **Tổng** | **Toàn bộ hạng mục đã hoàn thành** | **113** | **100.00%** |
+
+---
+
+## 2. Ma trận truy vết chi tiết (113 hạng mục đã làm)
+
+| # | Hạng mục | Trạng thái | Commit | Nguồn Gate (file:dòng) | Nguồn API (file:dòng) | Nguồn Biz LIVE (file:dòng) | File đích trong repo | Engine thực thi |
+|---|---|---|---|---|---|---|---|---|
+| 65 | Map_DealerCP_OrgController/GetByDLCPCode | Đã làm | b6bc9a4 | Map_DealerCP_OrgController.cs:26-91 | MapDealerCPOrgController.cs:92-161 | Master.Loyalty.cs:4832-4931 | Controllers/Port/Map_DealerCP_OrgControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 66 | Map_QueryDealer_MemberController/Search | Đã làm | 904a579 | Map_QueryDealer_MemberController.cs:31-104 | MapQueryDealerMemberController.cs:95-165 | Master.Loyalty.cs:20675-20778 | Controllers/Port/Map_QueryDealer_MemberControllerPort.cs<br/>Models/Port/Map_QueryDealer_Member.cs | codegpt (gemini-3.8-flash-high) |
+| 67 | Map_QueryDealer_MemberController/SearchForRePort | Đã làm | f3f9453 | Map_QueryDealer_MemberController.cs:106-195 | - | - | Controllers/Port/Map_QueryDealer_MemberControllerPort.cs<br/>Models/Port/Map_QueryDealer_Member.cs | codegpt (gemini-3.8-flash-high) |
+| 69 | Map_QueryDealer_MemberController/ExportExcel | Đã làm | 8c79bfa | Map_QueryDealer_MemberController.cs:333-422 | - | - | Controllers/Port/Map_QueryDealer_MemberControllerPort.cs | codegpt (gemini-3.8-flash-high) |
+| 70 | Mst_BirthPolicyController/Search | Đã làm | 87e7bc8 | Mst_BirthPolicyController.cs:23-103 | MstBirthPolicyController.cs:168-238 | Master.Loyalty.cs:10606-10719 | Controllers/Port/Mst_BirthPolicyControllerPort.cs<br/>Models/Port/Mst_BirthPolicy.cs | codegpt (gemini-3.8-flash-high) |
+| 71 | Mst_BirthPolicyController/GetAllActive | Đã làm | 1f45cdd | Mst_BirthPolicyController.cs:104-213 | MstBirthPolicyController.cs:168-238 | Master.Loyalty.cs:10606-10719 | Controllers/Port/Mst_BirthPolicyControllerPort.cs | codegpt (gemini-3.8-flash-high) |
+| 72 | Mst_BirthPolicyController/GetByBirthPolicyNo | Đã làm | 1177dce | Mst_BirthPolicyController.cs:214-290 | MstBirthPolicyController.cs:168-238 | Master.Loyalty.cs:10606-10719 | Controllers/Port/Mst_BirthPolicyControllerPort.cs | codegpt (gemini-3.8-flash-high) |
+| 73 | Mst_BirthPolicyController/Save | Đã làm | 41cfecb | Mst_BirthPolicyController.cs:339-434 | MstBirthPolicyController.cs:22-92 | Master.Loyalty.cs:10507-10604 | Controllers/Port/Mst_BirthPolicyControllerPort.cs<br/>Models/Port/Mst_BirthPolicy.cs | codegpt (gemini-3.8-flash-high) |
+| 74 | Mst_BirthPolicyController/Update | Đã làm | 127bc2b | Mst_BirthPolicyController.cs:438-531 | MstBirthPolicyController.cs:95-165 | Master.Loyalty.cs:11600-11690 | Controllers/Port/Mst_BirthPolicyControllerPort.cs | codegpt (gemini-3.8-flash-high) |
+| 75 | Mst_BirthPolicyController/Delete | Đã làm | 1eee9a3 | Mst_BirthPolicyController.cs:535-599 | MstBirthPolicyController.cs:22-92 | Master.Loyalty.cs:10507-10604 | Controllers/Port/Mst_BirthPolicyControllerPort.cs | codegpt (gemini-3.8-flash-high) |
+| 76 | Mst_BirthPolicyController/Export | Đã làm | 7c5d72f | Mst_BirthPolicyController.cs:604-682 | MstBirthPolicyController.cs:168-238 | Master.Loyalty.cs:10606-10719 | Controllers/Port/Mst_BirthPolicyControllerPort.cs | codegpt (gemini-3.8-flash-high) |
+| 77 | Mst_CarBrandController/Search | Đã làm | 58254a7 | Mst_CarBrandController.cs:25-105 | MstCarBrandController.cs:238-307 | Master.Loyalty.cs:93-193 | Controllers/Port/Mst_CarBrandControllerPort.cs<br/>Models/Port/Mst_CarBrand.cs | codegpt (deepseek-v4.1-flash) |
+| 78 | Mst_CarBrandController/GetAllActive | Đã làm | 42bec14 | Mst_CarBrandController.cs:106-215 | MstCarBrandController.cs:238-307 | Master.Loyalty.cs:93-193 | Controllers/Port/Mst_CarBrandControllerPort.cs | codegpt (deepseek-v4.1-flash) |
+| 79 | Mst_CarBrandController/GetByBrandCode | Đã làm | 9f12551 | Mst_CarBrandController.cs:216-279 | MstCarBrandController.cs:238-307 | Master.Loyalty.cs:93-193 | Controllers/Port/Mst_CarBrandControllerPort.cs | codegpt (deepseek-v4.1-flash) |
+| 80 | Mst_CarBrandController/Create | Đã làm | aac1677 | Mst_CarBrandController.cs:332-417 | MstCarBrandController.cs:20-90 | Master.Loyalty.cs:502-584 | Controllers/Port/Mst_CarBrandControllerPort.cs | codegpt (gemini-3.8-flash-high) |
+| 81 | Mst_CarBrandController/Update | Đã làm | 8c9d925 | Mst_CarBrandController.cs:421-488 | MstCarBrandController.cs:92-162 | Master.Loyalty.cs:829-913 | Controllers/Port/Mst_CarBrandControllerPort.cs | codegpt (gemini-3.8-flash-high) |
+| 82 | Mst_CarBrandController/Delete | Đã làm | e2b928d | Mst_CarBrandController.cs:492-555 | MstCarBrandController.cs:165-235 | Master.Loyalty.cs:1157-1235 | Controllers/Port/Mst_CarBrandControllerPort.cs | codegpt (gemini-3.8-flash-high) |
+| 83 | Mst_CarBrandController/DeleteMultiple | Đã làm | 3be4019 | Mst_CarBrandController.cs:557-621 | MstCarBrandController.cs:165-235 | Master.Loyalty.cs:1157-1235 | Controllers/Port/Mst_CarBrandControllerPort.cs | codegpt (gemini-3.8-flash-high) |
+| 84 | Mst_CarBrandController/Import | Đã làm | f00ecc2 | Mst_CarBrandController.cs:625-769 | MstCarBrandController.cs:20-90 | Master.Loyalty.cs:502-584 | Controllers/Port/Mst_CarBrandControllerPort.cs | codegpt (gemini-3.8-flash-high) |
+| 85 | Mst_CarBrandController/Export | Đã làm | 451e2e1 | Mst_CarBrandController.cs:774-852 | MstCarBrandController.cs:238-307 | Master.Loyalty.cs:93-193 | Controllers/Port/Mst_CarBrandControllerPort.cs | codegpt (gemini-3.8-flash-high) |
+| 86 | Mst_CarBrandController/ExportTemplate | Đã làm | a75af45 | Mst_CarBrandController.cs:855-887 | - | - | Controllers/Port/Mst_CarBrandControllerPort.cs | codegpt (gemini-3.8-flash-high) |
+| 87 | Mst_CardTypeController/Search | Đã làm | f9f91c1 | Mst_CardTypeController.cs:25-105 | MstCardTypeController.cs:239-308 | Master.Loyalty.cs:5329-5429 | Controllers/Port/Mst_CardTypeControllerPort.cs<br/>Models/Port/Mst_CardType.cs | codegpt (deepseek-v4.1-flash) |
+| 88 | Mst_CardTypeController/GetAllActive | Đã làm | 737757f | Mst_CardTypeController.cs:106-215 | MstCardTypeController.cs:239-308 | Master.Loyalty.cs:5329-5429 | Controllers/Port/Mst_CardTypeControllerPort.cs | codegpt (deepseek-v4.1-flash) |
+| 89 | Mst_CardTypeController/GetByCardType | Đã làm | 8569655 | Mst_CardTypeController.cs:216-279 | MstCardTypeController.cs:239-308 | Master.Loyalty.cs:5329-5429 | Controllers/Port/Mst_CardTypeControllerPort.cs | codegpt (deepseek-v4.1-flash) |
+| 90 | Mst_CardTypeController/Create | Đã làm | 262abcd | Mst_CardTypeController.cs:329-414 | MstCardTypeController.cs:21-91 | Master.Loyalty.cs:5738-5820 | Controllers/Port/Mst_CardTypeControllerPort.cs | codegpt (deepseek-v4.1-flash) |
+| 91 | Mst_CardTypeController/Update | Đã làm | 43e777c | Mst_CardTypeController.cs:418-485 | MstCardTypeController.cs:93-163 | Master.Loyalty.cs:6100-6184 | Controllers/Port/Mst_CardTypeControllerPort.cs | codegpt (deepseek-v4.1-flash) |
+| 92 | Mst_CardTypeController/Delete | Đã làm | 08a9140 | Mst_CardTypeController.cs:489-552 | MstCardTypeController.cs:166-236 | Master.Loyalty.cs:6428-6506 | Controllers/Port/Mst_CardTypeControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 93 | Mst_CardTypeController/DeleteMultiple | Đã làm | 5b4de6e | Mst_CardTypeController.cs:554-618 | MstCardTypeController.cs:166-236 | Master.Loyalty.cs:6428-6506 | Controllers/Port/Mst_CardTypeControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 94 | Mst_CardTypeController/Import | Đã làm | 7d595b1 | Mst_CardTypeController.cs:622-768 | MstCardTypeController.cs:21-91 | Master.Loyalty.cs:5738-5820 | Controllers/Port/Mst_CardTypeControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 95 | Mst_CardTypeController/Export | Đã làm | 934cdcd | Mst_CardTypeController.cs:773-851 | MstCardTypeController.cs:239-308 | Master.Loyalty.cs:5329-5429 | Controllers/Port/Mst_CardTypeControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 96 | Mst_CardTypeController/ExportTemplate | Đã làm | 0bd575c | Mst_CardTypeController.cs:854-886 | - | - | Controllers/Port/Mst_CardTypeControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 97 | Mst_CarModelController/Search | Đã làm | 7f59b63 | Mst_CarModelController.cs:25-105 | MstCarModelController.cs:238-307 | Master.Loyalty.cs:1434-1534 | Controllers/Port/Mst_CarModelControllerPort.cs<br/>Models/Port/Mst_CarModel.cs | agy (gemini-3.8-flash-high) |
+| 98 | Mst_CarModelController/GetAllActive | Đã làm | 7a89b1e | Mst_CarModelController.cs:106-216 | MstCarModelController.cs:238-307 | Master.Loyalty.cs:1434-1534 | Controllers/Port/Mst_CarModelControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 99 | Mst_CarModelController/GetByModelCode | Đã làm | fcd66ce | Mst_CarModelController.cs:217-280 | MstCarModelController.cs:238-307 | Master.Loyalty.cs:1434-1534 | Controllers/Port/Mst_CarModelControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 100 | Mst_CarModelController/Create | Đã làm | 52137d6 | Mst_CarModelController.cs:329-414 | MstCarModelController.cs:20-90 | Master.Loyalty.cs:1908-1991 | Controllers/Port/Mst_CarModelControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 101 | Mst_CarModelController/Update | Đã làm | 5685496 | Mst_CarModelController.cs:418-485 | MstCarModelController.cs:92-162 | Master.Loyalty.cs:2251-2336 | Controllers/Port/Mst_CarModelControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 102 | Mst_CarModelController/Delete | Đã làm | 79ced82 | Mst_CarModelController.cs:489-552 | MstCarModelController.cs:165-235 | Master.Loyalty.cs:2593-2671 | Controllers/Port/Mst_CarModelControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 103 | Mst_CarModelController/DeleteMultiple | Đã làm | 5b61bc9 | Mst_CarModelController.cs:554-618 | MstCarModelController.cs:165-235 | Master.Loyalty.cs:2593-2671 | Controllers/Port/Mst_CarModelControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 104 | Mst_CarModelController/Import | Đã làm | c1ef11a | Mst_CarModelController.cs:622-766 | MstCarModelController.cs:20-90 | Master.Loyalty.cs:1908-1991 | Controllers/Port/Mst_CarModelControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 105 | Mst_CarModelController/Export | Đã làm | 847a191 | Mst_CarModelController.cs:771-849 | MstCarModelController.cs:238-307 | Master.Loyalty.cs:1434-1534 | Controllers/Port/Mst_CarModelControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 106 | Mst_CarModelController/ExportTemplate | Đã làm | 1548bea | Mst_CarModelController.cs:852-884 | - | - | Controllers/Port/Mst_CarModelControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 107 | Mst_CertificateGroupController/Search | Đã làm | d3b52bf | Mst_CertificateGroupController.cs:25-105 | MstCertificateGroupController.cs:17-88 | MasterData.cs:44765-44855 | Controllers/Port/Mst_CertificateGroupControllerPort.cs<br/>Models/Port/Mst_CertificateGroup.cs | agy (gemini-3.8-flash-high) |
+| 108 | Mst_CertificateGroupController/GetAllActive | Đã làm | 2b9ee3d | Mst_CertificateGroupController.cs:107-167 | MstCertificateGroupController.cs:17-88 | MasterData.cs:44765-44855 | Controllers/Port/Mst_CertificateGroupControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 109 | Mst_CountryController/GetAllActive | Đã làm | 4d4e166 | Mst_CountryController.cs:25-85 | MstCountryController.cs:20-91 | Master.cs:3987-4086 | Controllers/Port/Mst_CountryControllerPort.cs<br/>Models/Port/Mst_Country.cs | agy (gemini-3.8-flash-high) |
+| 110 | Mst_DealerCPController/Search | Đã làm | e57e314 | Mst_DealerCPController.cs:26-106 | MstDealerCPController.cs:21-90 | Master.Loyalty.cs:3937-4050 | Controllers/Port/Mst_DealerCPControllerPort.cs<br/>Models/Port/Mst_DealerCP.cs<br/>Models/Port/Mst_Org.cs | agy (gemini-3.8-flash-high) |
+| 111 | Mst_DealerCPController/GetAllActive | Đã làm | 3f0c8f9 | Mst_DealerCPController.cs:107-230 | MstDealerCPController.cs:21-90 | Master.Loyalty.cs:3937-4050 | Controllers/Port/Mst_DealerCPControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 112 | Mst_DealerCPController/GetByDLCPCode | Đã làm | 2dc6a66 | Mst_DealerCPController.cs:231-296 | MstDealerCPController.cs:21-90 | Master.Loyalty.cs:3937-4050 | Controllers/Port/Mst_DealerCPControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 113 | Mst_DealerCPController/GetByOrgID | Đã làm | 35489ef | Mst_DealerCPController.cs:297-360 | MstDealerCPController.cs:21-90 | Master.Loyalty.cs:3937-4050 | Controllers/Port/Mst_DealerCPControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 114 | Mst_DealerCPController/CreateOld | Đã làm | 03e9623 | Mst_DealerCPController.cs:436-521 | MstDealerCPController.cs:93-162 | Master.Loyalty.cs:2973-3055 | Controllers/Port/Mst_DealerCPControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 116 | Mst_DealerCPController/Update | Đã làm | 578ef34 | Mst_DealerCPController.cs:700-770 | MstDealerCPController.cs:165-234 | Master.Loyalty.cs:3323-3406 | Controllers/Port/Mst_DealerCPControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 117 | Mst_DealerCPController/Delete | Đã làm | f46f3d7 | Mst_DealerCPController.cs:774-837 | MstDealerCPController.cs:236-305 | Master.Loyalty.cs:3662-3739 | Controllers/Port/Mst_DealerCPControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 118 | Mst_DealerCPController/DeleteMultiple | Đã làm | ccda090 | Mst_DealerCPController.cs:839-903 | MstDealerCPController.cs:236-305 | Master.Loyalty.cs:3662-3739 | Controllers/Port/Mst_DealerCPControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 120 | Mst_DealerCPController/Export | Đã làm | 0b1c1c8 | Mst_DealerCPController.cs:1175-1253 | MstDealerCPController.cs:21-90 | Master.Loyalty.cs:3937-4050 | Controllers/Port/Mst_DealerCPControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 121 | Mst_DealerCPController/ExportTemplate | Đã làm | 1884d03 | Mst_DealerCPController.cs:1256-1288 | - | - | Controllers/Port/Mst_DealerCPControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 122 | Mst_DepartmentController/Search | Đã làm | ec584e6 | Mst_DepartmentController.cs:30-109 | MstDepartmentController.cs:20-89 | Master.cs:29450-29548 | Controllers/Port/Mst_DepartmentControllerPort.cs<br/>Models/Port/Mst_Department.cs | agy (gemini-3.8-flash-high) |
+| 123 | Mst_DepartmentController/GetAllActive | Đã làm | 46644d1 | Mst_DepartmentController.cs:110-218 | MstDepartmentController.cs:20-89 | Master.cs:29450-29548 | Controllers/Port/Mst_DepartmentControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 124 | Mst_DepartmentController/GetByDepartmentCode | Đã làm | 5c1288c | Mst_DepartmentController.cs:219-282 | MstDepartmentController.cs:20-89 | Master.cs:29450-29548 | Controllers/Port/Mst_DepartmentControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 125 | Mst_DepartmentController/Create | Đã làm | 9b5c7cb | Mst_DepartmentController.cs:286-370 | MstDepartmentController.cs:91-160 | Master.cs:29702-29785 | Controllers/Port/Mst_DepartmentControllerPort.cs<br/>Models/Port/Mst_Department.cs | agy (gemini-3.8-flash-high) |
+| 126 | Mst_DepartmentController/Update | Đã làm | 7d67b30 | Mst_DepartmentController.cs:374-442 | MstDepartmentController.cs:162-231 | Master.cs:29936-30021 | Controllers/Port/Mst_DepartmentControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 127 | Mst_DepartmentController/Delete | Đã làm | d565dda | Mst_DepartmentController.cs:446-514 | MstDepartmentController.cs:233-302 | Master.cs:30181-30258 | Controllers/Port/Mst_DepartmentControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 128 | Mst_DepartmentController/DeleteMultiple | Đã làm | 9de58bd | Mst_DepartmentController.cs:516-580 | MstDepartmentController.cs:233-302 | Master.cs:30181-30258 | Controllers/Port/Mst_DepartmentControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 129 | Mst_DepartmentController/Import | Đã làm | e3c84ce | Mst_DepartmentController.cs:584-730 | MstDepartmentController.cs:91-160 | Master.cs:29702-29785 | Controllers/Port/Mst_DepartmentControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 132 | Mst_DisciplineController/Search | Đã làm | 408c2b7 | Mst_DisciplineController.cs:26-106 | MstDisciplineController.cs:17-88 | MasterData.cs:34241-34331 | Controllers/Port/Mst_DisciplineControllerPort.cs<br/>Models/Port/Mst_Discipline.cs | codegpt (gemini-3.8-flash-high) |
+| 133 | Mst_DisciplineController/GetByDisciplineCode | Đã làm | 70bd1db | Mst_DisciplineController.cs:108-171 | MstDisciplineController.cs:17-88 | MasterData.cs:34241-34331 | Controllers/Port/Mst_DisciplineControllerPort.cs | codegpt (gemini-3.8-flash-high) |
+| 134 | Mst_DisciplineController/GetAllActive | Đã làm | 7a9dcb4 | Mst_DisciplineController.cs:173-233 | MstDisciplineController.cs:17-88 | MasterData.cs:34241-34331 | Controllers/Port/Mst_DisciplineControllerPort.cs | codegpt (gemini-3.8-flash-high) |
+| 135 | Mst_DisciplineController/Create | Đã làm | 08defd5 | Mst_DisciplineController.cs:237-320 | MstDisciplineController.cs:91-162 | MasterData.cs:34555-34630 | Controllers/Port/Mst_DisciplineControllerPort.cs<br/>Models/Port/Mst_Discipline.cs | codegpt (gemini-3.8-flash-high) |
+| 136 | Mst_DisciplineController/Update | Đã làm | 60ea7cc | Mst_DisciplineController.cs:324-389 | MstDisciplineController.cs:165-236 | MasterData.cs:34861-34939 | Controllers/Port/Mst_DisciplineControllerPort.cs | codegpt (gemini-3.8-flash-high) |
+| 137 | Mst_DisciplineController/Delete | Đã làm | bf2220f | Mst_DisciplineController.cs:393-453 | MstDisciplineController.cs:239-310 | MasterData.cs:35113-35186 | Controllers/Port/Mst_DisciplineControllerPort.cs | codegpt (gemini-3.8-flash-high) |
+| 138 | Mst_DisciplineController/DeleteMultiple | Đã làm | c71e69b | Mst_DisciplineController.cs:455-519 | MstDisciplineController.cs:239-310 | MasterData.cs:35113-35186 | Controllers/Port/Mst_DisciplineControllerPort.cs | codegpt (gemini-3.8-flash-high) |
+| 139 | Mst_DistrictController/Search | Đã làm | 926454e | Mst_DistrictController.cs:31-111 | MstDistrictController.cs:20-91 | Master.cs:2584-2708 | Controllers/Port/Mst_DistrictControllerPort.cs<br/>Models/Port/Mst_District.cs | agy (gemini-3.8-flash-high) |
+| 140 | Mst_DistrictController/GetDetail | Đã làm | 638e1da | Mst_DistrictController.cs:113-177 | MstDistrictController.cs:20-91 | Master.cs:2584-2708 | Controllers/Port/Mst_DistrictControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 141 | Mst_DistrictController/GetByProvinceCode | Đã làm | 4c27394 | Mst_DistrictController.cs:179-250 | MstDistrictController.cs:20-91 | Master.cs:2584-2708 | Controllers/Port/Mst_DistrictControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 142 | Mst_DistrictController/GetAllActive | Đã làm | 1ec6984 | Mst_DistrictController.cs:252-312 | MstDistrictController.cs:20-91 | Master.cs:2584-2708 | Controllers/Port/Mst_DistrictControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 143 | Mst_DistrictController/Create | Đã làm | bcb2a6d | Mst_DistrictController.cs:316-376 | MstDistrictController.cs:94-165 | Master.cs:2710-2794 | Controllers/Port/Mst_DistrictControllerPort.cs<br/>Models/Port/Mst_District.cs | agy (gemini-3.8-flash-high) |
+| 144 | Mst_DistrictController/Update | Đã làm | b956397 | Mst_DistrictController.cs:380-445 | MstDistrictController.cs:168-239 | Master.cs:2796-2883 | Controllers/Port/Mst_DistrictControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 145 | Mst_DistrictController/Delete | Đã làm | 6a0da23 | Mst_DistrictController.cs:449-513 | MstDistrictController.cs:242-313 | Master.cs:2885-2968 | Controllers/Port/Mst_DistrictControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 146 | Mst_DistrictController/Import | Đã làm | 02b9e95 | Mst_DistrictController.cs:517-673 | MstDistrictController.cs:94-165 | Master.cs:2710-2794 | Controllers/Port/Mst_DistrictControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 147 | Mst_DistrictController/Export | Đã làm | e6b27ff | Mst_DistrictController.cs:678-756 | MstDistrictController.cs:20-91 | Master.cs:2584-2708 | Controllers/Port/Mst_DistrictControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 148 | Mst_DistrictController/ExportTemplate | Đã làm | 733b31b | Mst_DistrictController.cs:759-791 | - | - | Controllers/Port/Mst_DistrictControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 149 | Mst_EthnicCategoryController/Search | Đã làm | 5b9504a | Mst_EthnicCategoryController.cs:25-105 | MstEthnicCategoryController.cs:17-88 | MasterData.cs:41808-41898 | Controllers/Port/Mst_EthnicCategoryControllerPort.cs<br/>Models/Port/Mst_EthnicCategory.cs | codegpt (deepseek-v4.1-flash) |
+| 150 | Mst_EthnicCategoryController/GetAllActive | Đã làm | cae436a | Mst_EthnicCategoryController.cs:107-167 | MstEthnicCategoryController.cs:17-88 | MasterData.cs:41808-41898 | Controllers/Port/Mst_EthnicCategoryControllerPort.cs | agy2 (gemini-3.8-flash-high) |
+| 151 | Mst_ExpenseTypeController/GetAllActive | Đã làm | aecf24a | Mst_ExpenseTypeController.cs:23-132 | MstExpenseTypeController.cs:22-90 | Master.Loyalty.cs:8933-9035 | Controllers/Port/Mst_ExpenseTypeControllerPort.cs<br/>Models/Port/Mst_ExpenseType.cs | agy2 (gemini-3.8-flash-high) |
+| 152 | Mst_FamilyStatusController/Search | Đã làm | b759701 | Mst_FamilyStatusController.cs:25-105 | MstFamilyStatusController.cs:17-88 | MasterData.cs:42702-42792 | Controllers/Port/Mst_FamilyStatusControllerPort.cs<br/>Models/Port/Mst_FamilyStatus.cs | agy3 (gemini-3.8-flash-high) |
+| 178 | Mst_OrgController/Search | Đã làm | 775577b | Mst_OrgController.cs:25-105 | MstOrgController.cs:17-88 | MasterData.Org.cs:835-932 | Controllers/Port/Mst_OrgControllerPort.cs<br/>Models/Port/Mst_Org.cs | agy (gemini-3.8-flash-high) |
+| 179 | Mst_OrgController/GetAllActive | Đã làm | 84327c2 | Mst_OrgController.cs:107-168 | MstOrgController.cs:17-88 | MasterData.Org.cs:835-932 | Controllers/Port/Mst_OrgControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 187 | Mst_ParamSysController/GetAllActive | Đã làm | 2bb249c | Mst_ParamSysController.cs:26-135 | MstParamSysController.cs:19-90 | Master.Loyalty.cs:12603-12706 | Controllers/Port/Mst_ParamSysControllerPort.cs<br/>Models/Port/Mst_ParamSys.cs | agy (gemini-3.8-flash-high) |
+| 194 | Mst_PolicyMoneyToPointServiceController/GetAllActive | Đã làm | b7a48c3 | Mst_PolicyMoneyToPointServiceController.cs:24-133 | MstPolicyMoneyToPointServiceController.cs:94-164 | Master.Loyalty.cs:18347-18460 | Controllers/Port/Mst_PolicyMoneyToPointServiceControllerPort.cs<br/>Models/Port/Mst_PolicyMoneyToPointService.cs | codegpt (gemini-3.8-flash-high) |
+| 195 | Mst_PolicyMoneyToPointServiceController/GetByPolicyCode | Đã làm | f0df397 | Mst_PolicyMoneyToPointServiceController.cs:134-210 | MstPolicyMoneyToPointServiceController.cs:94-164 | Master.Loyalty.cs:18347-18460 | Controllers/Port/Mst_PolicyMoneyToPointServiceControllerPort.cs | codegpt (gemini-3.8-flash-high) |
+| 196 | Mst_PolicyMoneyToPointServiceController/Save | Đã làm | 0364844 | Mst_PolicyMoneyToPointServiceController.cs:259-352 | MstPolicyMoneyToPointServiceController.cs:22-92 | Master.Loyalty.cs:17542-17632 | Controllers/Port/Mst_PolicyMoneyToPointServiceControllerPort.cs<br/>Models/Port/Mst_PolicyMoneyToPointService.cs | codegpt (gemini-3.8-flash-high) |
+| 205 | Mst_PromotionProgramController/Search | Đã làm | dba2d40 | Mst_PromotionProgramController.cs:32-113 | MstPromotionProgramController.cs:22-90 | Master.Loyalty.cs:13997-14119 | Controllers/Port/Mst_PromotionProgramControllerPort.cs<br/>Models/Port/Mst_PromotionProgram.cs | agy (gemini-3.8-flash-high) |
+| 206 | Mst_PromotionProgramController/GetAllActive | Đã làm | 045e8ef | Mst_PromotionProgramController.cs:114-223 | MstPromotionProgramController.cs:22-90 | Master.Loyalty.cs:13997-14119 | Controllers/Port/Mst_PromotionProgramControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 207 | Mst_PromotionProgramController/GetByPrProgramCode | Đã làm | 2b9f2f0 | Mst_PromotionProgramController.cs:224-307 | MstPromotionProgramController.cs:22-90 | Master.Loyalty.cs:13997-14119 | Controllers/Port/Mst_PromotionProgramControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 208 | Mst_PromotionProgramController/Save | Đã làm | c9070f3 | Mst_PromotionProgramController.cs:311-402 | MstPromotionProgramController.cs:93-163 | Master.Loyalty.cs:13893-13995 | Controllers/Port/Mst_PromotionProgramControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 209 | Mst_PromotionProgramController/Update | Đã làm | 26fc5aa | Mst_PromotionProgramController.cs:406-502 | MstPromotionProgramController.cs:93-163 | Master.Loyalty.cs:13893-13995 | Controllers/Port/Mst_PromotionProgramControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 210 | Mst_PromotionProgramController/Delete | Đã làm | 09b4b3d | Mst_PromotionProgramController.cs:506-569 | MstPromotionProgramController.cs:93-163 | Master.Loyalty.cs:13893-13995 | Controllers/Port/Mst_PromotionProgramControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 211 | Mst_PromotionProgramController/Export | Đã làm | e7ebfb9 | Mst_PromotionProgramController.cs:573-657 | MstPromotionProgramController.cs:22-90 | Master.Loyalty.cs:13997-14119 | Controllers/Port/Mst_PromotionProgramControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 212 | Mst_PromotionProgramController/ExportTemplate | Đã làm | 6999fdd | Mst_PromotionProgramController.cs:658-690 | - | - | Controllers/Port/Mst_PromotionProgramControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 213 | Mst_ProvinceController/Search | Đã làm | 77773a7 | Mst_ProvinceController.cs:31-111 | MstProvinceController.cs:20-91 | Master.cs:1109-1213 | Controllers/Port/Mst_ProvinceControllerPort.cs<br/>Models/Port/Mst_Province.cs | agy (gemini-3.8-flash-high) |
+| 214 | Mst_ProvinceController/GetByProvinceCode | Đã làm | d1a9bb8 | Mst_ProvinceController.cs:113-176 | MstProvinceController.cs:20-91 | Master.cs:1109-1213 | Controllers/Port/Mst_ProvinceControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 215 | Mst_ProvinceController/GetAllActive | Đã làm | 578190e | Mst_ProvinceController.cs:178-241 | MstProvinceController.cs:20-91 | Master.cs:1109-1213 | Controllers/Port/Mst_ProvinceControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 216 | Mst_ProvinceController/Create | Đã làm | cfc0f9c | Mst_ProvinceController.cs:245-305 | MstProvinceController.cs:94-165 | Master.cs:1215-1297 | Controllers/Port/Mst_ProvinceControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 217 | Mst_ProvinceController/Update | Đã làm | bff717b | Mst_ProvinceController.cs:309-373 | MstProvinceController.cs:168-239 | Master.cs:1299-1385 | Controllers/Port/Mst_ProvinceControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 218 | Mst_ProvinceController/Delete | Đã làm | 901234a | Mst_ProvinceController.cs:377-437 | MstProvinceController.cs:242-313 | Master.cs:1387-1468 | Controllers/Port/Mst_ProvinceControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 219 | Mst_ProvinceController/Import | Đã làm | 1a50d6b | Mst_ProvinceController.cs:441-592 | MstProvinceController.cs:94-165 | Master.cs:1215-1297 | Controllers/Port/Mst_ProvinceControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 220 | Mst_ProvinceController/Export | Đã làm | 41f304b | Mst_ProvinceController.cs:597-675 | MstProvinceController.cs:20-91 | Master.cs:1109-1213 | Controllers/Port/Mst_ProvinceControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 221 | Mst_ProvinceController/ExportTemplate | Đã làm | 47f6ddf | Mst_ProvinceController.cs:678-710 | - | - | Controllers/Port/Mst_ProvinceControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 222 | Mst_PurchaseTypeController/GetAllActive | Đã làm | ad8f49a | Mst_PurchaseTypeController.cs:26-94 | MstPurchaseTypeController.cs:20-89 | Master.Loyalty.cs:21886-21983 | Controllers/Port/Mst_PurchaseTypeControllerPort.cs<br/>Models/Port/Mst_PurchaseType.cs | agy (gemini-3.8-flash-high) |
+| 227 | Mst_RankPolicyController/Search | Đã làm | b98d2d5 | Mst_RankPolicyController.cs:23-103 | MstRankPolicyController.cs:95-163 | Master.Loyalty.cs:7442-7542 | Controllers/Port/Mst_RankPolicyControllerPort.cs<br/>Models/Port/Mst_RankPolicy.cs | agy (gemini-3.8-flash-high) |
+| 228 | Mst_RankPolicyController/GetAllActive | Đã làm | a20a029 | Mst_RankPolicyController.cs:104-213 | MstRankPolicyController.cs:95-163 | Master.Loyalty.cs:7442-7542 | Controllers/Port/Mst_RankPolicyControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 229 | Mst_RankPolicyController/GetByRankPolicyCode | Đã làm | cb67c47 | Mst_RankPolicyController.cs:214-277 | MstRankPolicyController.cs:95-163 | Master.Loyalty.cs:7442-7542 | Controllers/Port/Mst_RankPolicyControllerPort.cs | agy (gemini-3.8-flash-high) |
+| 230 | Mst_RankPolicyController/Save | Đã làm | ddbf66a | Mst_RankPolicyController.cs:319-411 | MstRankPolicyController.cs:22-92 | Master.Loyalty.cs:6770-6855 | Controllers/Port/Mst_RankPolicyControllerPort.cs<br/>Data/PortSeq.cs<br/>Models/Port/Mst_RankPolicy.cs | agy (gemini-3.8-flash-high) |
+| 246 | Mst_WardController/GetAllActive | Đã làm | 3aa4d9d | Mst_WardController.cs:24-84 | MstWardController.cs:21-91 | Master.1.cs:5755-5847 | Controllers/Port/Mst_WardControllerPort.cs<br/>Models/Port/Mst_Ward.cs | agy (gemini-3.8-flash-high) |
+| 247 | Mst_WardController/GetWardDetail | Đã làm | 4419e9d | Mst_WardController.cs:86-158 | MstWardController.cs:21-91 | Master.1.cs:5755-5847 | Controllers/Port/Mst_WardControllerPort.cs | agy (gemini-3.8-flash-high) |
+
+---
+
+## 3. Phương pháp đo lường & kiểm chứng
+
+Dữ liệu trong ma trận truy vết được đối chiếu bằng các lệnh kiểm tra tự động:
+1. **Trạng thái & Commit**: Trích xuất từ bảng PARITY_PROGRESS.md tại cột Trạng thái và Commit.
+2. **Xác nhận Commit**: Kiểm tra sự tồn tại thực tế của commit trong Git qua lệnh: git -C repos/MiniLoyalty log -1 --oneline <CommitHash>.
+3. **Xác định File đích**: Đo lường các file được sinh ra hoặc sửa đổi bởi chính commit đó qua lệnh: git -C repos/MiniLoyalty show --name-only --oneline <CommitHash>.
+4. **Xác định Engine**: Phân tích cú pháp dòng Port: <engine> trong thân commit message: git -C repos/MiniLoyalty log -1 --format='%b' <CommitHash>.
+5. **Nguồn Gate/API/Biz**: Quét các khối phân cách trong file source_excerpt.txt của từng hạng mục.
+
+---
+
+## 4. Lịch sử cập nhật
+
+| Phiên bản | Ngày cập nhật | Người thực hiện | Nội dung thay đổi |
+|---|---|---|---|---|
+| 1.0 | 2026-10-16 11:15 | doc2 (Quản lý quy trình) | Khởi tạo ma trận truy vết hoàn chỉnh cho toàn bộ 113 hạng mục đã port; đối chiếu đủ 4 tầng nguồn gốc và kiểm chứng bằng git log. |
+
