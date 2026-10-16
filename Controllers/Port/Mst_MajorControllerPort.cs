@@ -10,11 +10,13 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục chuyên ngành (Mst_Major) của dự án nguồn 2022.7.Loyalty (#168).
+// PORT 1:1 — màn danh mục chuyên ngành (Mst_Major) của dự án nguồn 2022.7.Loyalty (#168, #169).
 //
 // Nguồn controller (tầng gate):
 //   Mst_MajorController.cs:25-105     Search -> WA_Mst_Major_Get
+//   Mst_MajorController.cs:107-167    GetAllActive -> WA_Mst_Major_Get (#169)
 //   Mst_MajorController.cs:171-186    strWhereClause_Mst_Major (mệnh đề lọc Search)
+//   Mst_MajorController.cs:188-199    strWhereClause_Mst_Major_Active (mệnh đề lọc GetAllActive)
 // Nguồn API:
 //   MstMajorController.cs:17-88       WA_Mst_Major_Get
 // Nguồn biz:
@@ -83,6 +85,29 @@ public class Mst_MajorControllerPort : ControllerBase
 
         // Data là đối tượng PageInfo (KHÔNG null); DataList rỗng là mảng rỗng [] (KHÔNG null) — gate :48-51.
         return Ok(new { Success = true, Data = new PageInfo<object>(rows, itemCount, pageCount, pageIndex, pageSize) });
+    }
+
+    /// <summary>
+    /// Port 1:1 <c>Mst_MajorController.GetAllActive</c> (nguồn gate Mst_MajorController.cs:107-167, #169).
+    /// Nguồn gọi <c>strWhereClause_Mst_Major_Active</c> với <c>FlagActive = "1"</c> (Mst_MajorController.cs:127-130) ⇒ lọc
+    /// <c>FlagActive = "1"</c> (:193-196, toán tử '=', KHÔNG IN, KHÔNG tách dấu phẩy).
+    /// <c>OrgID</c>/<c>NetworkID</c> được đọc từ header (:118-119) và gán vào request (:139-140),
+    /// nhưng hàm lọc (:188-199) và SQL biz (MasterData.cs:40244-40330) KHÔNG lọc OrgID/NetworkID ⇒ KHÔNG lọc.
+    /// Không nhận tham số input; phân trang gửi từ gate: Ft_RecordStart = "0", Ft_RecordCount = "123456000" (gate :142-143, BaseController.cs:30-31).
+    /// Tái sử dụng <see cref="GetXAsync"/> (bài học A.3): sắp xếp theo mm.MajorCode asc (MasterData.cs:40251),
+    /// select cuối sắp theo t.MyIdxSeq asc (MasterData.cs:40290), mỗi dòng 9 trường (MyIdxSeq + 8 cột Mst_Major).
+    /// Trả <c>Ok(new { Success = true, Data = ... })</c> — Data là danh sách trần List&lt;Mst_Major&gt;, KHÔNG bọc PageInfo;
+    /// khi rỗng (0 dòng) trả <c>null</c>, KHÔNG phải <c>[]</c> (gate Mst_MajorController.cs:126, 149-154).
+    /// </summary>
+    [HttpPost("getallactive")]
+    public async Task<IActionResult> GetAllActive()
+    {
+        // Nguồn: Ft_RecordStart = "0", Ft_RecordCount = "123456000" (gate Mst_MajorController.cs:142-143, BaseController.cs:30-31).
+        // FlagActive = "1" (gate Mst_MajorController.cs:129, :195) ⇒ lọc toán tử '=' với giá trị "1"; không lọc KeyWord/OrgID/NetworkID.
+        var (_, rows) = await GetXAsync(null, "1", 0, 123456000);
+
+        // Nguồn Mst_MajorController.cs:126, 149-154: Data là danh sách trần, rỗng ⇒ null (KHÔNG phải []).
+        return Ok(new { Success = true, Data = rows.Count > 0 ? rows : null });
     }
 
     /// <summary>
