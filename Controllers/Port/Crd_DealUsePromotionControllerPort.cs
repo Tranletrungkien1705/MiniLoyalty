@@ -294,6 +294,46 @@ public class Crd_DealUsePromotionGetForMemberNoTxItem
     public double DiscountRevenue { get; set; }
 }
 
+/// <summary>
+/// DTO yêu cầu lấy thông tin thẻ và ưu đãi theo MemberNo Crd_DealUsePromotion/GetByMemberNo (#025).
+/// Nguồn gate: Crd_DealUsePromotionController.cs:298.
+/// </summary>
+public class Crd_DealUsePromotionGetByMemberNoReq
+{
+    public string? MemberNo { get; set; }
+}
+
+/// <summary>
+/// DTO thông tin thẻ và hội viên trả về từ GetByMemberNo (#025).
+/// Kế thừa toàn bộ 100+ thuộc tính Crd_Card và Crd_Member từ Crd_DealUsePromotionSearchItem (Crd_Card.cs:1-120).
+/// </summary>
+public class Crd_DealUsePromotionGetByMemberNoCardItem : Crd_DealUsePromotionSearchItem
+{
+}
+
+/// <summary>
+/// DTO chi tiết chương trình ưu đãi trả về từ GetByMemberNo (#025).
+/// Nguồn model: 12.Dev.Common/idn.Loyalty.Common/Models/Crd_DealUsePromotionDtl.cs
+/// Nguồn SQL: Master.Loyalty.cs:17286-17382.
+/// </summary>
+public class Crd_DealUsePromotionGetByMemberNoDtlItem
+{
+    public string? IDCardNo { get; set; }
+    public string? CardNo { get; set; }
+    public string? DealUsePrmNo { get; set; }
+    public string? PrProgramCode { get; set; }
+    public string? PrProgramName { get; set; }
+    public DateTime? EffDateStart { get; set; }
+    public string? ListDealer { get; set; }
+    public string? FlagShow { get; set; }
+    public string? Remark { get; set; }
+    public double? QtyPr { get; set; }
+    public double? QtyPrUsed { get; set; }
+    public double? QtyRemain { get; set; }
+    public double? QtyPrChTotal { get; set; }
+    public string? Unit { get; set; }
+}
+
 [ApiController]
 [Route("api/crd_dealusepromotion")]
 public class Crd_DealUsePromotionControllerPort : ControllerBase
@@ -1210,6 +1250,355 @@ public class Crd_DealUsePromotionControllerPort : ControllerBase
             mdcp_DLCPCode = cm.DLCodeRegis,
             DLCodeRequest = cm.DLCodeRegis,
             mcm_ModelName = cm.ModelName
+        };
+    }
+
+    /// <summary>
+    /// Lấy thông tin thẻ và chi tiết ưu đãi theo MemberNo — port 1:1 Crd_DealUsePromotionController/GetByMemberNo (#025).
+    /// Nguồn:
+    ///   - Gate: Crd_DealUsePromotionController.cs:298-377 (GetByMemberNo), :460-477 (strWhereClause_Crd_Card)
+    ///   - API: CrdDealUsePromotionController.cs:169-239 (WA_Crd_Card_GetForPromotion)
+    ///   - Biz: Master.Loyalty.cs:16790-16903 (WAS_Crd_Card_GetForPromotion)
+    ///          Master.Loyalty.cs:16904-17062 (Crd_Card_GetForPromotion)
+    ///          Master.Loyalty.cs:17063-17460 (Crd_Card_GetForPromotionX - bản LIVE)
+    /// </summary>
+    [HttpPost("getbymemberno")]
+    public async Task<IActionResult> GetByMemberNo(
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_DealUsePromotionGetByMemberNoReq? req)
+    {
+        var memberNoParam = req?.MemberNo?.Trim();
+
+        // 1. Nếu MemberNo rỗng hoặc null: Gate Crd_DealUsePromotionController.cs:320-358 không gọi service,
+        //    trả về Crd_Card mặc định (rỗng) và Lst_Crd_DealUsePromotionDtl rỗng với Success = true.
+        if (string.IsNullOrEmpty(memberNoParam))
+        {
+            return Ok(new
+            {
+                Success = true,
+                Data = new
+                {
+                    Crd_Card = new Crd_DealUsePromotionGetByMemberNoCardItem { MemberNo = req?.MemberNo },
+                    Lst_Crd_DealUsePromotionDtl = new List<Crd_DealUsePromotionGetByMemberNoDtlItem>()
+                }
+            });
+        }
+
+        var strMemberNo = StdParam(memberNoParam) ?? "";
+
+        // 2. Kiểm tra hội viên tồn tại trong Crd_Member (Master.Loyalty.cs:17116-17151):
+        //    Nếu không tìm thấy hội viên -> ném lỗi Crd_DealUsePromotion_Get_MemberNotFound (gate bắt trả 400).
+        var member = await _db.Set<CrdMember>()
+            .FirstOrDefaultAsync(cm => EF.Functions.Like((cm.MemberNo ?? "").ToLower(), PortQuery.Equal(strMemberNo), PortQuery.Esc));
+
+        if (member == null)
+        {
+            return PortResult.Fail("Crd_DealUsePromotion_Get_MemberNotFound", "Check.MemberNo", strMemberNo);
+        }
+
+        // 3. Tính khoảng ngày sinh nhật từ Mst_ParamPromotion (Master.Loyalty.cs:17124-17166):
+        var paramPromo = await _db.Set<Mst_ParamPromotion>()
+            .OrderByDescending(p => p.LogLUDTimeUTC)
+            .FirstOrDefaultAsync();
+
+        DateTime dtBirthdayPre = default;
+        DateTime dtBirthdayNext = default;
+        var dtimeSys = DateTime.UtcNow.AddHours(7);
+
+        if (paramPromo != null && member.DateOfBirth.HasValue)
+        {
+            var dtBefore = Convert.ToInt32(paramPromo.QtyDateBefore ?? 0.0);
+            var dtAfter = Convert.ToInt32(paramPromo.QtyDateAfter ?? 0.0);
+            var dob = member.DateOfBirth.Value;
+            try
+            {
+                var dtBirthday = new DateTime(dtimeSys.Year, dob.Month, dob.Day);
+                dtBirthdayPre = dtBirthday.AddDays(-dtBefore).Date;
+                dtBirthdayNext = dtBirthday.AddDays(dtAfter).Date;
+            }
+            catch
+            {
+                var dtBirthday = new DateTime(dtimeSys.Year, dob.Month, 28);
+                dtBirthdayPre = dtBirthday.AddDays(-dtBefore).Date;
+                dtBirthdayNext = dtBirthday.AddDays(dtAfter).Date;
+            }
+        }
+
+        // 4. Lọc thẻ Crd_Card của hội viên với CardStatus = 'APPROVE', lấy top 1 theo LogLUDTimeUTC desc
+        //    (Master.Loyalty.cs:17182-17212)
+        var card = await _db.Set<CrdCard>()
+            .Where(cc => EF.Functions.Like((cc.MemberNo ?? "").ToLower(), PortQuery.Equal(strMemberNo), PortQuery.Esc)
+                         && cc.CardStatus == LoyaltyConst.CardStatus.Approve)
+            .OrderByDescending(cc => cc.LogLUDTimeUTC)
+            .FirstOrDefaultAsync();
+
+        if (card == null)
+        {
+            // Hội viên có trong Crd_Member nhưng không có thẻ hợp lệ (CardStatus = APPROVE)
+            // Gate :350 objRT_Crd_Card.Lst_Crd_Card rỗng -> objCrd_Card giữ nguyên mặc định
+            return Ok(new
+            {
+                Success = true,
+                Data = new
+                {
+                    Crd_Card = new Crd_DealUsePromotionGetByMemberNoCardItem { MemberNo = req?.MemberNo },
+                    Lst_Crd_DealUsePromotionDtl = new List<Crd_DealUsePromotionGetByMemberNoDtlItem>()
+                }
+            });
+        }
+
+        var cardItem = MapToGetByMemberNoCardItem(card, member, 0);
+
+        // 5. Tính danh sách ưu đãi Lst_Crd_DealUsePromotionDtl (Master.Loyalty.cs:17260-17382)
+        // 5a. Tính tổng số lượng ưu đãi đã sử dụng TotalQtyPrChTotal theo (PrProgramCode, CardType, CardNo)
+        var cardNo = card.CardNo ?? "";
+        var cardType = card.CardTypeUse ?? "";
+
+        var usedDeals = await (
+            from cdup in _db.Set<Crd_DealUsePromotion>()
+            join cdupl in _db.Set<Crd_DealUsePromotionDtl>() on cdup.DealUsePrmNo equals cdupl.DealUsePrmNo
+            where cdup.CardNo == cardNo && cdup.CardType == cardType
+            select new
+            {
+                cdupl.PrProgramCode,
+                QtyPrChTotal = cdupl.QtyPrChTotal ?? 0.0
+            }
+        ).ToListAsync();
+
+        var totalUsedMap = usedDeals
+            .GroupBy(d => d.PrProgramCode)
+            .ToDictionary(g => g.Key, g => g.Sum(x => x.QtyPrChTotal));
+
+        // 5b. Tìm các chương trình khuyến mại còn hạn hiệu lực theo ngày hệ thống UTC+7
+        //     (Master.Loyalty.cs:17306, :17336, :17377)
+        var dateSysDay = dtimeSys.Date;
+
+        var allPrograms = await (
+            from mpp in _db.Set<Mst_PromotionProgram>()
+            join mppd in _db.Set<Mst_PromotionProgramDtl>() on mpp.PrProgramCode equals mppd.PrProgramCode
+            where mpp.EffDateStart <= dtimeSys && mpp.EffDateEnd >= dtimeSys
+                  && mppd.CardType == cardType
+            select new
+            {
+                mpp.PrProgramCode,
+                mpp.PrProgramName,
+                mpp.EffDateStart,
+                mpp.FlagAllDL,
+                Qty = mppd.Qty ?? 0.0,
+                mppd.Unit,
+                mppd.Remark
+            }
+        ).ToListAsync();
+
+        // Lấy spec dealers cho các chương trình không áp dụng tất cả đại lý (FlagAllDL != "1")
+        var notAllDlCodes = allPrograms.Where(p => p.FlagAllDL != "1").Select(p => p.PrProgramCode).Distinct().ToList();
+        var specs = await _db.Set<Mst_PromotionProgramSpec>()
+            .Where(s => notAllDlCodes.Contains(s.PrProgramCode))
+            .ToListAsync();
+
+        var promoList = new List<Crd_DealUsePromotionGetByMemberNoDtlItem>();
+        var memberDLCode = member.DLCodeRegis ?? "";
+
+        // Tập 1: Áp dụng tất cả đại lý (FlagAllDL == "1")
+        foreach (var p in allPrograms.Where(x => x.FlagAllDL == "1"))
+        {
+            totalUsedMap.TryGetValue(p.PrProgramCode, out var used);
+            var remain = p.Qty - used;
+            if (remain > 0)
+            {
+                promoList.Add(new Crd_DealUsePromotionGetByMemberNoDtlItem
+                {
+                    PrProgramCode = p.PrProgramCode,
+                    PrProgramName = p.PrProgramName,
+                    EffDateStart = p.EffDateStart,
+                    Remark = null,
+                    QtyPr = p.Qty,
+                    QtyPrChTotal = 0.0,
+                    QtyRemain = remain,
+                    QtyPrUsed = used,
+                    Unit = p.Unit,
+                    CardNo = cardNo,
+                    IDCardNo = member.IDCardNo
+                });
+            }
+        }
+
+        // Tập 2: Áp dụng đại lý chỉ định (FlagAllDL != "1" && mpps.DLCode == ccf.DLCodeRegis)
+        foreach (var p in allPrograms.Where(x => x.FlagAllDL != "1"))
+        {
+            bool dealerMatched = specs.Any(s => s.PrProgramCode == p.PrProgramCode && s.DLCode == memberDLCode);
+            if (dealerMatched)
+            {
+                totalUsedMap.TryGetValue(p.PrProgramCode, out var used);
+                var remain = p.Qty - used;
+                if (remain > 0)
+                {
+                    promoList.Add(new Crd_DealUsePromotionGetByMemberNoDtlItem
+                    {
+                        PrProgramCode = p.PrProgramCode,
+                        PrProgramName = p.PrProgramName,
+                        EffDateStart = p.EffDateStart,
+                        Remark = null,
+                        QtyPr = p.Qty,
+                        QtyPrChTotal = 0.0,
+                        QtyRemain = remain,
+                        QtyPrUsed = used,
+                        Unit = p.Unit,
+                        CardNo = cardNo,
+                        IDCardNo = member.IDCardNo
+                    });
+                }
+            }
+        }
+
+        // Loại trùng theo PrProgramCode
+        promoList = promoList
+            .GroupBy(x => x.PrProgramCode)
+            .Select(g => g.First())
+            .ToList();
+
+        // 5c. Xác định FlagShow cho từng chương trình (Master.Loyalty.cs:17355-17373):
+        //     left join Mst_ParamPromotion mpp on t.PrProgramCode = mpp.PrProgramCode
+        //     when mpp.PrProgramCode is not null and (dtBirthdayPre <= dateSys && dtBirthdayNext >= dateSys) -> '1'
+        //     when mpp.PrProgramCode is null -> '0'
+        //     else -> '2'
+        var promoCodes = promoList.Select(x => x.PrProgramCode).ToList();
+        var paramPromoCodes = await _db.Set<Mst_ParamPromotion>()
+            .Where(p => promoCodes.Contains(p.PrProgramCode))
+            .Select(p => p.PrProgramCode)
+            .Distinct()
+            .ToListAsync();
+
+        var paramPromoSet = new HashSet<string>(paramPromoCodes, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var item in promoList)
+        {
+            if (item.PrProgramCode != null && paramPromoSet.Contains(item.PrProgramCode))
+            {
+                // Là chương trình ưu đãi sinh nhật
+                if (member.DateOfBirth.HasValue && dtBirthdayPre <= dateSysDay && dtBirthdayNext >= dateSysDay)
+                {
+                    item.FlagShow = "1"; // Ưu đãi sinh nhật CÓ hiệu lực
+                }
+                else
+                {
+                    item.FlagShow = "2"; // Ưu đãi sinh nhật KHÔNG có hiệu lực
+                }
+            }
+            else
+            {
+                item.FlagShow = "0"; // Chương trình bình thường có hiệu lực
+            }
+        }
+
+        // 6. Trả về kết quả thành công (Gate Crd_DealUsePromotionController.cs:359-364)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Crd_Card = cardItem,
+                Lst_Crd_DealUsePromotionDtl = promoList
+            }
+        });
+    }
+
+    private static Crd_DealUsePromotionGetByMemberNoCardItem MapToGetByMemberNoCardItem(CrdCard cc, CrdMember cm, long? idx = null)
+    {
+        var s = MapToSearchItem(cc, cm, idx);
+        return new Crd_DealUsePromotionGetByMemberNoCardItem
+        {
+            MyIdxSeq = s.MyIdxSeq,
+            CardNo = s.CardNo,
+            CardNoPrev = s.CardNoPrev,
+            NetworkID = s.NetworkID,
+            MemberNo = s.MemberNo,
+            DLCodeExceptionally = s.DLCodeExceptionally,
+            CardSourceCode = s.CardSourceCode,
+            RankPolicyCode = s.RankPolicyCode,
+            PointBonus = s.PointBonus,
+            PointPurchaseAddCar = s.PointPurchaseAddCar,
+            EffDateStart = s.EffDateStart,
+            EffDateEnd = s.EffDateEnd,
+            PointTotal = s.PointTotal,
+            PointBlock = s.PointBlock,
+            PointAvail = s.PointAvail,
+            AmountTotal = s.AmountTotal,
+            AmountBlock = s.AmountBlock,
+            AmountAvail = s.AmountAvail,
+            QtyVisitTotal = s.QtyVisitTotal,
+            QtyVisitBlock = s.QtyVisitBlock,
+            QtyVisitAvail = s.QtyVisitAvail,
+            PointCardRank = s.PointCardRank,
+            TotalAmountPeriod = s.TotalAmountPeriod,
+            CardTypeUse = s.CardTypeUse,
+            CardTypeInit = s.CardTypeInit,
+            CardTypeUsePrev = s.CardTypeUsePrev,
+            CardTypeInitPrev = s.CardTypeInitPrev,
+            CardActiveDate = s.CardActiveDate,
+            FlagExceptionally = s.FlagExceptionally,
+            RankActionType = s.RankActionType,
+            CardTypeUseExpect = s.CardTypeUseExpect,
+            CardTypeInitExpect = s.CardTypeInitExpect,
+            CreateDTimeUTC = s.CreateDTimeUTC,
+            CreateBy = s.CreateBy,
+            LUDTimeUTC = s.LUDTimeUTC,
+            LUBy = s.LUBy,
+            ApproveDTimeUTC = s.ApproveDTimeUTC,
+            ApproveBy = s.ApproveBy,
+            CancelDTimeUTC = s.CancelDTimeUTC,
+            CancelBy = s.CancelBy,
+            CardStatus = s.CardStatus,
+            Remark = s.Remark,
+            LogLUDTimeUTC = s.LogLUDTimeUTC,
+            LogLUBy = s.LogLUBy,
+
+            MemberName = s.MemberName,
+            MemberStatus = s.MemberStatus,
+            IDCardNo = s.IDCardNo,
+            MemberGender = s.MemberGender,
+            MemAddress = s.MemAddress,
+            DateOfBirth = s.DateOfBirth,
+            PhoneNo = s.PhoneNo,
+            CarNo = s.CarNo,
+            VIN = s.VIN,
+            ModelCode = s.ModelCode,
+            ModelName = s.ModelName,
+            BrandName = s.BrandName,
+            ProvinceCode = s.ProvinceCode,
+            ProvinceName = s.ProvinceName,
+            DistrictCode = s.DistrictCode,
+            DistrictName = s.DistrictName,
+            WarrantyExpiryDate = s.WarrantyExpiryDate,
+            InvoiceDate = s.InvoiceDate,
+            MemberActiveDate = s.MemberActiveDate,
+            InactiveDTimeUTC = s.InactiveDTimeUTC,
+            PointBegin = s.PointBegin,
+            PointEnd = s.PointEnd,
+            RevenueMiss = s.RevenueMiss,
+            QtyVisitMiss = s.QtyVisitMiss,
+            cc_FlagShow = s.cc_FlagShow,
+            cm_FlagShow = s.cm_FlagShow,
+            AmountEnd = s.AmountEnd,
+            mdcp_DLCPCode = s.mdcp_DLCPCode,
+            mdcp_DLCPName = s.mdcp_DLCPName,
+            mcm_ModelName = s.mcm_ModelName,
+            PointExpiry = s.PointExpiry,
+            AmountRef = s.AmountRef,
+            ConvertValue = s.ConvertValue,
+            ConvertPoint = s.ConvertPoint,
+            PolicyAmountUnit = s.PolicyAmountUnit,
+            PolicyPointUnit = s.PolicyPointUnit,
+            PolicyCode = s.PolicyCode,
+            ParamCode = s.ParamCode,
+            ParamPointUnit = s.ParamPointUnit,
+            ParamAmountUnit = s.ParamAmountUnit,
+            PointAccumulated = s.PointAccumulated,
+            PointUse = s.PointUse,
+            TradeMarkCode = s.TradeMarkCode,
+            DLCodeRequest = s.DLCodeRequest,
+            PointVoucher = s.PointVoucher,
+            PurchaseType = s.PurchaseType,
+            PurchaseTypeName = s.PurchaseTypeName
         };
     }
 }
