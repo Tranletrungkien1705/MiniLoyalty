@@ -14,7 +14,7 @@ namespace MiniLoyalty.Controllers.Port
 {
 
 // ============================================================================================
-// PORT 1:1 — port 1:1 Mst_PositionController.cs — Mst_Position (#197, #198, #199, #200, #201, #202).
+// PORT 1:1 — port 1:1 Mst_PositionController.cs — Mst_Position (#197, #198, #199, #200, #201, #202, #203).
 //
 // Nguồn controller (tầng gate):
 //   - Mst_PositionController.cs:26-106   Search -> WA_Mst_Position_Get (#197)
@@ -23,6 +23,7 @@ namespace MiniLoyalty.Controllers.Port
 //   - Mst_PositionController.cs:238-321  Create -> WA_Mst_Position_Create (#200)
 //   - Mst_PositionController.cs:325-391  Update -> WA_Mst_Position_Update (#201)
 //   - Mst_PositionController.cs:395-456  Delete -> WA_Mst_Position_Delete (#202)
+//   - Mst_PositionController.cs:458-522  DeleteMultiple -> WA_Mst_Position_Delete (#203)
 //   - Mst_PositionController.cs:624-652  strWhereClause_Mst_Position (mệnh đề lọc Search & GetAllActive)
 //   - Mst_PositionController.cs:654-673  strWhereClause_Mst_Position_By_PositionCode (mệnh đề lọc GetByPositionCode)
 // Nguồn API:
@@ -547,23 +548,8 @@ public class Mst_PositionControllerPort : ControllerBase
     ///
     /// Quy trình nghiệp vụ:
     ///   1. Kiểm tra PositionCode rỗng/null tại gate (:414, :442) -> throw ServiceException("invalid_positioncode", "invalid_positioncode") -> 400 ErridnLoyalty.invalid_positioncode.
-    ///   2. Mở transaction lưu DB: _cf.db.BeginTransaction() (MasterData.cs:24299).
-    ///   3. Chuẩn hoá dữ liệu (MasterData.cs:24179-24180):
-    ///      - strOrgID = StdParam(req.OrgID) (Trim + ToUpper, rỗng -> null)
-    ///      - strPositionCode = StdParam(req.PositionCode)!
-    ///   4. Mst_Org_CheckDB(OrgID, "1", "1") (MasterData.cs:24187-24193):
-    ///      OrgID phải tồn tại trong Mst_Org và FlagActive thuộc "1"
-    ///      -> nếu không thấy ném ErridnLoyalty.Mst_Org_CheckDB_OrgNotFound (:61);
-    ///      -> nếu FlagActive không thuộc "1" ném ErridnLoyalty.Mst_Org_CheckDB_FlagActiveNotMatched (:88).
-    ///   5. Mst_Position_CheckDB(OrgID, PositionCode, "1", "") (MasterData.cs:24195-24202):
-    ///      PositionCode phải tồn tại trong OrgID
-    ///      -> nếu không thấy ném ErridnLoyalty.Mst_Position_CheckDB_PositionCodeNotFound.
-    ///   6. Kiểm tra Staff_MapDepartment (MasterData.cs:24207-24251):
-    ///      GAP: Chưa có entity Staff_MapDepartment trong DbContext -> Bỏ qua theo đề bài.
-    ///   7. Thực hiện xóa: dtDB_Mst_Position.Rows[0].Delete() (:24257) rồi SaveData.
-    ///   8. Commit transaction (MasterData.cs:24347).
-    ///   9. Thành công trả JsonResultEntry với Success = true, Data = null (gate :437-438).
-    ///  10. Bắt ngoại lệ: rollback và trả lỗi mặc định PortResult.Fail("Mst_Position_Delete", "Exception", ex.Message) (:24351-24364).
+    ///   2. Gọi DeleteXAsync mở transaction lưu DB: _cf.db.BeginTransaction() (MasterData.cs:24299).
+    ///   3. Thành công trả JsonResultEntry với Success = true, Data = null (gate :437-438).
     /// </summary>
     [HttpPost("delete")]
     public async Task<IActionResult> Delete(
@@ -575,16 +561,84 @@ public class Mst_PositionControllerPort : ControllerBase
             return PortResult.Fail("invalid_positioncode", "Check.PositionCode", req?.PositionCode);
         }
 
-        var strOrgID = StdParam(req.OrgID);
-        var strPositionCode = StdParam(req.PositionCode)!;
+        var err = await DeleteXAsync(req?.OrgID, req?.PositionCode);
+        if (err != null)
+        {
+            return err;
+        }
 
-        // 2. Mở transaction chính cho nghiệp vụ xóa (MasterData.cs:24299)
+        return Ok(new { Success = true, Data = (object?)null });
+    }
+
+    /// <summary>
+    /// Port 1:1 action DeleteMultiple từ gate Mst_PositionController.cs:458-522 (#203).
+    /// Chuỗi gọi: gate Mst_PositionController.DeleteMultiple -> WA_Mst_Position_Delete (MstPositionController.cs:239-310)
+    /// -> WAS_Mst_Position_Delete (MasterData.cs:24386-24460) -> Mst_Position_Delete (MasterData.cs:24268-24384)
+    /// -> Mst_Position_DeleteX (MasterData.cs:24151-24266).
+    ///
+    /// Quy trình nghiệp vụ:
+    ///   1. Body rỗng / null: gate :467-474 ném ServiceException("strJson null") -> bắt lỗi trả về lỗi mặc định (400 ErridnLoyalty.Mst_Position_DeleteMultiple).
+    ///   2. Lặp tuần tự qua từng phần tử (gate :489-506), mỗi phần tử gọi WA_Mst_Position_Delete riêng biệt
+    ///      (mỗi phần tử mở 1 transaction tại MasterData.cs:24299 qua DeleteXAsync).
+    ///      Nếu lỗi ở phần tử k -> dừng lặp, return lỗi đó ngay. Các phần tử TRƯỚC k ĐÃ XÓA thành công vào DB
+    ///      và không bị rollback ("xóa một phần" là hành vi nguồn).
+    ///   3. KHÔNG kiểm tra rỗng thủ công ở gate (khác với Delete đơn): mã rỗng xuống biz sẽ bị CheckDB bắt và trả về
+    ///      Mst_Org_CheckDB_OrgNotFound (nếu OrgID rỗng) hoặc Mst_Position_CheckDB_PositionCodeNotFound (nếu PositionCode rỗng).
+    ///   4. Thành công Data = null, Success = true (gate :508-509).
+    /// </summary>
+    [HttpPost("deletemultiple")]
+    public async Task<IActionResult> DeleteMultiple(
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] List<MstPositionDeleteReq>? req)
+    {
+        // 1. Kiểm tra body rỗng / null (gate Mst_PositionController.cs:467-474):
+        // if (!string.IsNullOrEmpty(strJson)) { ... } else { throw new ServiceException("strJson null"); }
+        if (req == null)
+        {
+            return PortResult.Fail("Mst_Position_Delete", "Check.strJson", null);
+        }
+
+        // 2. Lặp tuần tự qua từng phần tử (gate Mst_PositionController.cs:489-506).
+        // Mỗi phần tử chạy trong 1 transaction riêng biệt (MasterData.cs:24299 qua DeleteXAsync).
+        // "xóa một phần" là hành vi nguồn: nếu phần tử thứ k gặp lỗi -> dừng lặp và trả lỗi ngay,
+        // các phần tử trước k đã commit thành công vào DB và KHÔNG bị rollback,
+        // các phần tử sau k không được xử lý.
+        foreach (var item in req)
+        {
+            var err = await DeleteXAsync(item?.OrgID, item?.PositionCode);
+            if (err != null)
+            {
+                return err;
+            }
+        }
+
+        // 3. Thành công trả Data = null (gate Mst_PositionController.cs:508-509)
+        return Ok(new { Success = true, Data = (object?)null });
+    }
+
+    /// <summary>
+    /// Xóa 1 chức danh — tương ứng chuỗi gọi:
+    /// WA_Mst_Position_Delete (MstPositionController.cs:239-310) -> WAS_Mst_Position_Delete (MasterData.cs:24386-24460)
+    /// -> Mst_Position_Delete (MasterData.cs:24268-24384) -> Mst_Position_DeleteX (MasterData.cs:24151-24266).
+    /// Mỗi lần gọi mở 1 transaction riêng (_cf.db.BeginTransaction :24299),
+    /// kiểm tra Mst_Org_CheckDB, Mst_Position_CheckDB, xóa dòng khỏi Mst_Position, và commit.
+    /// Nếu lỗi: rollback transaction và trả IActionResult tương ứng; thành công trả null.
+    /// </summary>
+    private async Task<IActionResult?> DeleteXAsync(string? rawOrgId, string? rawPositionCode)
+    {
+        var strOrgID = StdParam(rawOrgId);
+        var strPositionCode = StdParam(rawPositionCode);
+
+        // Mở transaction riêng cho từng phần tử (MasterData.cs:24299)
         await using var tx = await _db.Database.BeginTransactionAsync();
         try
         {
-            // 4. Mst_Org_CheckDB(OrgID, "1", "1") (MasterData.cs:24187-24193)
-            var org = await _db.Set<Mst_Org>().AsNoTracking()
-                .FirstOrDefaultAsync(x => EF.Functions.Like((x.OrgID ?? "").ToLower(), PortQuery.Equal(strOrgID ?? ""), PortQuery.Esc));
+            // Mst_Org_CheckDB(OrgID, "1", "1") (MasterData.cs:24187-24193, MasterData.Org.cs:29-93)
+            Mst_Org? org = null;
+            if (!string.IsNullOrEmpty(strOrgID))
+            {
+                org = await _db.Set<Mst_Org>().AsNoTracking()
+                    .FirstOrDefaultAsync(x => EF.Functions.Like((x.OrgID ?? "").ToLower(), PortQuery.Equal(strOrgID), PortQuery.Esc));
+            }
             if (org == null)
             {
                 await tx.RollbackAsync();
@@ -597,28 +651,31 @@ public class Mst_PositionControllerPort : ControllerBase
                     "Check.strFlagActiveListToCheck", "1", "DB.FlagActive", org.FlagActive);
             }
 
-            // 5. Mst_Position_CheckDB(OrgID, PositionCode, "1", "") (MasterData.cs:24195-24202)
-            var position = await _db.Set<Mst_Position>()
-                .FirstOrDefaultAsync(x => EF.Functions.Like((x.OrgID ?? "").ToLower(), PortQuery.Equal(strOrgID ?? ""), PortQuery.Esc)
-                                       && EF.Functions.Like((x.PositionCode ?? "").ToLower(), PortQuery.Equal(strPositionCode), PortQuery.Esc));
+            // Mst_Position_CheckDB(OrgID, PositionCode, "1", "") (MasterData.cs:24195-24202, :22920-22970)
+            Mst_Position? position = null;
+            if (!string.IsNullOrEmpty(strPositionCode))
+            {
+                position = await _db.Set<Mst_Position>()
+                    .FirstOrDefaultAsync(x => EF.Functions.Like((x.OrgID ?? "").ToLower(), PortQuery.Equal(strOrgID!), PortQuery.Esc)
+                                           && EF.Functions.Like((x.PositionCode ?? "").ToLower(), PortQuery.Equal(strPositionCode), PortQuery.Esc));
+            }
             if (position == null)
             {
                 await tx.RollbackAsync();
                 return PortResult.Fail("Mst_Position_CheckDB_PositionCodeNotFound", "Check.OrgID", strOrgID, "Check.PositionCode", strPositionCode);
             }
 
-            // 6. Kiểm tra Staff_MapDepartment (MasterData.cs:24207-24251):
+            // Kiểm tra Staff_MapDepartment (MasterData.cs:24207-24251):
             // GAP: Chưa có entity Staff_MapDepartment trong DbContext -> Bỏ qua theo đề bài
 
-            // 7. Thực hiện xóa (MasterData.cs:24257)
+            // Thực hiện xóa (MasterData.cs:24257)
             _db.Set<Mst_Position>().Remove(position);
             await _db.SaveChangesAsync();
 
-            // 8. Commit transaction (MasterData.cs:24347)
+            // Commit transaction (MasterData.cs:24347)
             await tx.CommitAsync();
 
-            // 9. Thành công trả Data = null (gate Mst_PositionController.cs:437-438)
-            return Ok(new { Success = true, Data = (object?)null });
+            return null;
         }
         catch (Exception ex)
         {
