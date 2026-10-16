@@ -55,3 +55,21 @@ public class Sys_ObjectSeeder : IPortSeeder
         await db.SaveChangesAsync();
     }
 }
+
+public class Sys_ObjectMenuButtonSeeder : IPortSeeder
+{
+    public int Order => 86;
+
+    public async Task SeedAsync(AppDbContext db)
+    {
+        // Thêm các button phục vụ test GetAllMenuButtonActive
+        if (!await db.Set<Sys_Object>().AnyAsync(x => x.ObjectCode == "BTN01"))
+        {
+            db.Set<Sys_Object>().AddRange(
+                new Sys_Object { ObjectCode = "BTN01", ObjectName = "Button 1", ObjectType = "BUTTON", FlagActive = "1", ServiceCode = "SRV01", LogLUBy = "seed" },
+                new Sys_Object { ObjectCode = "BTN02", ObjectName = "Button 2 Inactive", ObjectType = "BUTTON", FlagActive = "0", ServiceCode = "SRV01", LogLUBy = "seed" }
+            );
+            await db.SaveChangesAsync();
+        }
+    }
+}
