@@ -4,7 +4,7 @@ Nguồn mẫu số: `D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.Web
 
 **Mẫu số (N)**: 337
 
-**Tiến độ hiện tại**: 155/337 (45.99%)
+**Tiến độ hiện tại**: 156/337 (46.29%)
 
 Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã có` (đã port từ trước, có bằng chứng) · `Bỏ` (scaffold/không nghiệp vụ, ghi lý do) · `Cần xem tay`.
 
@@ -247,7 +247,7 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 235 | Mst_ResignReasonController/GetAllActive | Đã làm | 53b867b |
 | 236 | Mst_ResignReasonController/Create | Đã làm | 8c1cc88 |
 | 237 | Mst_ResignReasonController/Update | Đã làm | b7b7988 |
-| 238 | Mst_ResignReasonController/Delete | Chưa làm | - |
+| 238 | Mst_ResignReasonController/Delete | Đã làm | de9d222 |
 | 239 | Mst_ResignReasonController/DeleteMultiple | Chưa làm | - |
 | 240 | Mst_ResignReasonController/Import | Chưa làm | - |
 | 241 | Mst_ResignReasonController/Export | Chưa làm | - |
