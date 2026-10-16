@@ -35,6 +35,59 @@ public class Sys_UserSearchReq
 }
 
 /// <summary>
+/// DTO request cho action GetByUserCode (Sys_UserController.cs:116).
+/// </summary>
+public class Sys_UserGetByUserCodeReq
+{
+    public string? UserCode { get; set; }
+}
+
+/// <summary>
+/// DTO response cho action GetByUserCode (Gate Sys_UserController.cs:167-206).
+/// </summary>
+public class Sys_UserGetByUserCodeRes
+{
+    public string? UserCode { get; set; }
+    public string? NetworkID { get; set; }
+    public string? UserName { get; set; }
+    public string? UserPassword { get; set; }
+    public string? UserPasswordNew { get; set; }
+    public string? PhoneNo { get; set; }
+    public string? EMail { get; set; }
+    public string? MST { get; set; }
+    public string? OrganCode { get; set; }
+    public string? DepartmentCode { get; set; }
+    public string? Position { get; set; }
+    public string? VerificationCode { get; set; }
+    public string? Avatar { get; set; }
+    public string? UUID { get; set; }
+    public string? FlagDLAdmin { get; set; }
+    public string? FlagSysAdmin { get; set; }
+    public string? FlagNNTAdmin { get; set; }
+    public string? OrgID { get; set; }
+    public string? CustomerCodeSys { get; set; }
+    public string? CustomerCode { get; set; }
+    public string? CustomerName { get; set; }
+    public string? FlagActive { get; set; }
+    public string? ACId { get; set; }
+    public string? ACAvatar { get; set; }
+    public string? ACEmail { get; set; }
+    public string? ACLanguage { get; set; }
+    public string? ACName { get; set; }
+    public string? ACPhone { get; set; }
+    public string? ACTimeZone { get; set; }
+    public string? mo_OrganCode { get; set; }
+    public string? mo_OrganName { get; set; }
+    public string? mdept_DepartmentCode { get; set; }
+    public string? mdept_DepartmentName { get; set; }
+    public string? mnnt_DealerType { get; set; }
+    public string? ctitctg_CustomerGrpCode { get; set; }
+    public string? ACAvatarUrl { get; set; }
+    public string? mdcpo_DLCPCode { get; set; }
+    public string? mdcp_DLCPName { get; set; }
+}
+
+/// <summary>
 /// Controller Port 1:1 cho Sys_UserController — hạng mục #323 Sys_UserController/Search.
 /// Nguồn Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Sys_UserController.cs:33-114
 /// Nguồn Hàm lọc: Sys_UserController.cs:1394-1419 (strWhereClause_Sys_User)
@@ -188,7 +241,7 @@ public class Sys_UserControllerPort : ControllerBase
                 // Xử lý ACAvatar ở tầng Gate (Sys_UserController.cs:90):
                 // x.ACAvatar = !string.IsNullOrEmpty(x.ACAvatar) ? string.Format("{0}{1}", inosBaseUrl, Url.Content(x.ACAvatar)) : ""
                 ACId = u.ACId,
-                ACAvatar = !string.IsNullOrEmpty(u.ACAvatar) ? $"{inosBaseUrl}{u.ACAvatar}" : "",
+                ACAvatar = !string.IsNullOrEmpty(u.ACAvatar) ? string.Format("{0}{1}", inosBaseUrl, UrlContent(u.ACAvatar)) : "",   // x.ACAvatar = ... Url.Content(x.ACAvatar) (gate Sys_UserController.cs:90)
                 ACEmail = u.ACEmail,
                 ACLanguage = u.ACLanguage,
                 ACName = u.ACName,
@@ -226,5 +279,169 @@ public class Sys_UserControllerPort : ControllerBase
             Success = true,
             Data = pageInfo
         });
+    }
+
+    /// <summary>
+    /// Port 1:1 GetByUserCode action từ gate Sys_UserController.cs:116-219 (#324).
+    /// Hỗ trợ GET query parameter: /api/sys_user/getbyusercode?userCode={userCode} (DEBAI.md P3).
+    /// </summary>
+/// <summary>
+    /// Port 1:1 GetByUserCode action hỗ trợ POST JSON body (Bài học A.14).
+    /// </summary>
+    [HttpPost("getbyusercode")]
+    public async Task<IActionResult> GetByUserCodePost([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Sys_UserGetByUserCodeReq? req)
+    {
+        var userCode = req?.UserCode;
+        return await GetByUserCodeCoreAsync(userCode);
+    }
+
+    /// <summary>
+    /// Logic cốt lõi của GetByUserCode:
+    /// 1. Nếu userCode rỗng hoặc null: trả Success = true, Data = null (Gate Sys_UserController.cs:136).
+    /// 2. Tìm Sys_User theo UserCode với toán tử '=' (không phân biệt hoa/thường, không wildcard).
+    /// 3. Nếu không tìm thấy: trả Success = true, Data = null (Gate Sys_UserController.cs:167).
+    /// 4. Left join các bảng liên quan theo System.cs:8196-8207:
+    ///    - Mst_Department mdept on su.DepartmentCode = mdept.DepartmentCode
+    ///    - Mst_Customer mc on su.CustomerCodeSys = mc.CustomerCodeSys
+    ///    - Mst_Org mo on su.OrgID = mo.OrgID
+    ///    - Map_DealerCP_Org mdcpo on mo.OrgID = mdcpo.OrgID
+    ///    - Mst_DealerCP mdcp on mdcpo.DLCPCode = mdcp.DLCPCode
+    /// 5. Mask UserPassword = "*********" (TConst.BizMix.Default_PasswordMask, System.cs:8170, 8211).
+    /// 6. Xử lý ACAvatar: inosBaseUrl + ACAvatar.Split('~')[1] (Gate Sys_UserController.cs:191, 203).
+    /// </summary>
+    private async Task<IActionResult> GetByUserCodeCoreAsync(string? userCode)
+    {
+        if (string.IsNullOrWhiteSpace(userCode))
+        {
+            return Ok(new
+            {
+                Success = true,
+                Data = (object?)null
+            });
+        }
+
+        var uCode = PortQuery.Equal(userCode.Trim());
+        var user = await _db.Set<Sys_User>().AsNoTracking()
+            .FirstOrDefaultAsync(x => EF.Functions.Like((x.UserCode ?? "").ToLower(), uCode, PortQuery.Esc));
+
+        if (user == null)
+        {
+            return Ok(new
+            {
+                Success = true,
+                Data = (object?)null
+            });
+        }
+
+        // 1. Left join Mst_Department mdept on su.DepartmentCode = mdept.DepartmentCode
+        Mst_Department? dept = null;
+        if (!string.IsNullOrEmpty(user.DepartmentCode))
+        {
+            var dCode = PortQuery.Equal(user.DepartmentCode.Trim());
+            dept = await _db.Set<Mst_Department>().AsNoTracking()
+                .FirstOrDefaultAsync(d => EF.Functions.Like((d.DepartmentCode ?? "").ToLower(), dCode, PortQuery.Esc));
+        }
+
+        // 2. Left join Mst_Customer mc on su.CustomerCodeSys = mc.CustomerCodeSys
+        Mst_Customer? cust = null;
+        if (!string.IsNullOrEmpty(user.CustomerCodeSys))
+        {
+            var cCode = PortQuery.Equal(user.CustomerCodeSys.Trim());
+            cust = await _db.Set<Mst_Customer>().AsNoTracking()
+                .FirstOrDefaultAsync(c => EF.Functions.Like((c.CustomerCodeSys ?? "").ToLower(), cCode, PortQuery.Esc));
+        }
+
+        // 3. Left join Mst_Org mo -> Map_DealerCP_Org mdcpo -> Mst_DealerCP mdcp (System.cs:8202-8207)
+        string? dlcpCode = null;
+        string? dlcpName = null;
+        if (!string.IsNullOrEmpty(user.OrgID))
+        {
+            var orgId = PortQuery.Equal(user.OrgID.Trim());
+            var dealerInfo = await (
+                from mo in _db.Set<Mst_Org>().AsNoTracking()
+                where EF.Functions.Like((mo.OrgID ?? "").ToLower(), orgId, PortQuery.Esc)
+                join mdcpo in _db.Set<Map_DealerCP_Org>().AsNoTracking() on mo.OrgID equals mdcpo.OrgID into mdcpoGroup
+                from mdcpo in mdcpoGroup.DefaultIfEmpty()
+                join mdcp in _db.Set<Mst_DealerCP>().AsNoTracking() on (mdcpo != null ? mdcpo.DLCPCode : null) equals mdcp.DLCPCode into mdcpGroup
+                from mdcp in mdcpGroup.DefaultIfEmpty()
+                select new
+                {
+                    DLCPCode = mdcpo != null ? mdcpo.DLCPCode : null,
+                    DLCPName = mdcp != null ? mdcp.DLCPName : null
+                }
+            ).FirstOrDefaultAsync();
+
+            if (dealerInfo != null)
+            {
+                dlcpCode = dealerInfo.DLCPCode;
+                dlcpName = dealerInfo.DLCPName;
+            }
+        }
+
+        var inosBaseUrl = _config?["InosBaseUrl"] ?? "";
+
+        var res = new Sys_UserGetByUserCodeRes
+        {
+            UserCode = user.UserCode,
+            NetworkID = null,   // không nằm trong select của Sys_User_Get
+            UserName = user.UserName,
+            UserPassword = Default_PasswordMask,
+            UserPasswordNew = null,
+            PhoneNo = user.PhoneNo,
+            EMail = user.EMail,
+            MST = user.MST,
+            OrganCode = null,
+            DepartmentCode = user.DepartmentCode,
+            Position = user.Position,
+            VerificationCode = null,
+            Avatar = null,
+            UUID = null,
+            FlagDLAdmin = user.FlagDLAdmin,
+            FlagSysAdmin = user.FlagSysAdmin,
+            FlagNNTAdmin = user.FlagNNTAdmin,
+            OrgID = user.OrgID,
+            CustomerCodeSys = user.CustomerCodeSys,
+            CustomerCode = cust?.CustomerCode,
+            CustomerName = cust?.CustomerName,
+            FlagActive = user.FlagActive,
+            ACId = user.ACId,
+            ACAvatar = FormatACAvatar(user.ACAvatar, inosBaseUrl),
+            ACEmail = user.ACEmail,
+            ACLanguage = user.ACLanguage,
+            ACName = user.ACName,
+            ACPhone = user.ACPhone,
+            ACTimeZone = user.ACTimeZone,
+            mo_OrganCode = null,
+            mo_OrganName = null,
+            mdept_DepartmentCode = dept?.DepartmentCode,
+            mdept_DepartmentName = dept?.DepartmentName,
+            mnnt_DealerType = null,
+            ctitctg_CustomerGrpCode = null,
+            ACAvatarUrl = FormatACAvatar(user.ACAvatar, inosBaseUrl),
+            mdcpo_DLCPCode = dlcpCode,
+            mdcp_DLCPName = dlcpName
+        };
+
+        return Ok(new
+        {
+            Success = true,
+            Data = res
+        });
+    }
+
+    /// <summary>
+    /// Xử lý đường dẫn avatar theo Gate Sys_UserController.cs:191, 203:
+    /// inosBaseUrl + TUtils.CUtils.StrValue(objSys_User.ACAvatar).Split('~')[1]
+    /// An toàn khi chuỗi không chứa ký tự '~'.
+    /// </summary>
+    /// <summary>Url.Content: "~/path" -> "/path" (đường dẫn gốc ứng dụng); đường dẫn khác giữ nguyên.</summary>
+    private static string UrlContent(string p) => p.StartsWith("~/") ? "/" + p.Substring(2) : p;
+
+    private static string? FormatACAvatar(string? acAvatar, string inosBaseUrl)
+    {
+        // gate Sys_UserController.cs:191,203: !IsNullOrEmpty(ACAvatar) ? inosBaseUrl + ACAvatar.Split('~')[1] : null
+        // LỖI NGUỒN GIỮ NGUYÊN: ACAvatar không chứa '~' -> IndexOutOfRangeException (PortExceptionFilter trả 400)
+        if (string.IsNullOrEmpty(acAvatar)) return null;
+        return inosBaseUrl + acAvatar.Split('~')[1];
     }
 }
