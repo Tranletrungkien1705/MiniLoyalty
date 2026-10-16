@@ -12,16 +12,17 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 /// <summary>
-/// Port 1:1 Mst_NNTController.cs — Mst_NNT (#172 Search, #173 GetAllActive, #174 GetByMST, #175 Create, #176 Update)
+/// Port 1:1 Mst_NNTController.cs — Mst_NNT (#172 Search, #173 GetAllActive, #174 GetByMST, #175 Create, #176 Update, #177 Delete)
 /// Chuỗi gọi nguồn:
-///   gate: 13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Mst_NNTController.cs:26-187 (Search), :189-289 (GetAllActive), :291-434 (GetByMST), :438-499 (Create), :503-597 (Update), :666-698 (strWhereClause_Mst_NNT), :700-719 (strWhereClause_Mst_NNT_By_MST)
-///   API:  11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\MstNNTController.cs:20-89 (WA_Mst_NNT_Get), :604-673 (WA_Mst_NNT_Update), :1254-1324 (WA_Mst_NNT_CreateForNetworkCP)
+///   gate: 13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Mst_NNTController.cs:26-187 (Search), :189-289 (GetAllActive), :291-434 (GetByMST), :438-499 (Create), :503-597 (Update), :601-662 (Delete), :666-698 (strWhereClause_Mst_NNT), :700-719 (strWhereClause_Mst_NNT_By_MST)
+///   API:  11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\MstNNTController.cs:20-89 (WA_Mst_NNT_Get), :604-673 (WA_Mst_NNT_Update), :820-889 (WA_Mst_NNT_Delete), :1254-1324 (WA_Mst_NNT_CreateForNetworkCP)
 ///   biz:  11.BackEnd\V10\idn.Loyalty.Biz\Master.cs:7933-8030 (WAS_Mst_NNT_Get) -> :8126-8295 (Mst_NNT_Get) -> :21344-21524 (Mst_NNT_GetX),
 ///         11.BackEnd\V10\idn.Loyalty.Biz\Master.1.cs:3699-3812 (WAS_Mst_NNT_CreateForNetworkCP) -> :3813-4545 (Mst_NNT_CreateForNetworkCP) -> Master.cs:11937-12356 (Mst_NNT_CreateForNetworkCPX),
-///         11.BackEnd\V10\idn.Loyalty.Biz\Master.cs:25240-25354 (WAS_Mst_NNT_Update_New20190822) -> :25909-26156 (Mst_NNT_Update_New20200208) -> :26520-26885 (Mst_NNT_UpdateX_New20200208)
+///         11.BackEnd\V10\idn.Loyalty.Biz\Master.cs:25240-25354 (WAS_Mst_NNT_Update_New20190822) -> :25909-26156 (Mst_NNT_Update_New20200208) -> :26520-26885 (Mst_NNT_UpdateX_New20200208),
+///         11.BackEnd\V10\idn.Loyalty.Biz\Master.cs:20940-21017 (WAS_Mst_NNT_Delete) -> :21018-21154 (Mst_NNT_Delete) -> :23469-23525 (Mst_NNT_DeleteX)
 ///
 /// Bỏ qua có chủ đích (loại Đ):
-/// - CheckGatewayAuthentication, CheckAuthorize (Mst_NNTController.cs:37-38, :198-199, :302-303, :457-458)
+/// - CheckGatewayAuthentication, CheckAuthorize (Mst_NNTController.cs:37-38, :198-199, :302-303, :457-458, :610-611)
 /// - WA_Sys_User_GetForCurrentUser (Mst_NNTController.cs:227)
 /// - Sys_User_CheckAuthorize (Master.cs:8199-8212, Master.1.cs:3927-3940)
 /// - Sys_User_GetAbilityViewOfUser / #tbl_Mst_NNT_ViewAbility (Master.cs:21382-21386, :12072-12073)
@@ -543,6 +544,76 @@ public class Mst_NNTControllerPort : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Port 1:1 Delete action từ gate Mst_NNTController.cs:601-662.
+    /// Chuỗi gọi nguồn:
+    ///   gate: 13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Mst_NNTController.cs:601-662 (Delete)
+    ///   API:  11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\MstNNTController.cs:820-889 (WA_Mst_NNT_Delete)
+    ///   biz:  11.BackEnd\V10\idn.Loyalty.Biz\Master.cs:20940-21017 (WAS_Mst_NNT_Delete)
+    ///         -> Master.cs:21018-21154 (Mst_NNT_Delete)
+    ///         -> Master.cs:23469-23525 (Mst_NNT_DeleteX)
+    ///
+    /// Nghiệp vụ:
+    /// - Nhận body JSON chứa MST (Mst_NNTDeleteRequest).
+    /// - Gate kiểm tra if (MST != null && !TUtils.CUtils.IsNullOrEmpty(MST)) (Mst_NNTController.cs:620).
+    ///   Nếu MST rỗng hoặc null: throw ServiceException("invalid_departmentcode", "invalid_departmentcode") (dòng :648, giữ nguyên lỗi copy-paste của gate nguồn).
+    /// - Chuẩn hoá strMST = StdParam(MST) (Master.cs:23495).
+    /// - Mở transaction toàn bộ quá trình xoá (Master.cs:21051 _cf.db.BeginTransaction()).
+    /// - Kiểm tra tồn tại trong DB bằng Mst_NNT_CheckDB với strFlagExistToCheck = "Yes" ("1") (Master.cs:23501-23508).
+    ///   Nếu không tồn tại: await tx.RollbackAsync() và trả 400 ErridnLoyalty.Mst_NNT_CheckDB_NNTNotFound (tham số Check.MST, strMST).
+    /// - Xoá dòng bằng .Remove() và SaveChangesAsync() (Master.cs:23516-23521).
+    /// - DDL không có FK nào tham chiếu tới Mst_NNT.
+    /// - Commit transaction (Master.cs:21117 TDALUtils.DBUtils.CommitSafety).
+    /// - Bắt ngoại lệ (catch Exception) rollback và trả mã lỗi Mst_NNT_Delete (Master.cs:21038).
+    /// - Thành công trả về Ok(new { Success = true, Data = (object?)null }) (Mst_NNTController.cs:643-644).
+    /// </summary>
+    [HttpPost("delete")]
+    public async Task<IActionResult> Delete([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Mst_NNTDeleteRequest? req)
+    {
+        var input = req?.Mst_NNT ?? req;
+        var strMST = StdParam(input?.MST);
+
+        // 1. Kiểm tra MST rỗng: gate Mst_NNTController.cs:620, :648
+        // Nguồn ném ServiceException("invalid_departmentcode", "invalid_departmentcode") do copy-paste nhầm từ Department
+        if (string.IsNullOrEmpty(strMST))
+        {
+            return PortResult.Fail("invalid_departmentcode", "invalid_departmentcode");
+        }
+
+        // 2. Mở 1 transaction toàn bộ quá trình xoá (Master.cs:21051 _cf.db.BeginTransaction())
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // 3. Kiểm tra tồn tại trong DB bằng EF.Functions.Like (Mst_NNT_CheckDB strFlagExistToCheck = "1", Master.cs:23501-23508)
+            var nnt = await _db.Set<Mst_NNT>().FirstOrDefaultAsync(x =>
+                EF.Functions.Like((x.MST ?? "").ToLower(), PortQuery.Equal(strMST), PortQuery.Esc));
+
+            if (nnt == null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_NNT_CheckDB_NNTNotFound", "Check.MST", strMST);
+            }
+
+            // 4. Xoá dòng và lưu DB (Master.cs:23516-23521)
+            _db.Set<Mst_NNT>().Remove(nnt);
+            await _db.SaveChangesAsync();
+
+            // 5. Commit transaction (Master.cs:21117)
+            await tx.CommitAsync();
+
+            return Ok(new
+            {
+                Success = true,
+                Data = (object?)null
+            });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return PortResult.Fail("Mst_NNT_Delete", "Exception", ex.Message);
+        }
+    }
+
     private static string? StdParam(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim().ToUpperInvariant();
     private static string? StdStr(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
     private static string StdFlag(string? s) => s?.Trim() == "1" ? "1" : "0";
@@ -866,6 +937,15 @@ public class Mst_NNTUpdateRequest
     public string? AreaCode { get; set; }
     public string? FlagActive { get; set; }
     public string? Remark { get; set; }
+}
+
+/// <summary>
+/// Request DTO cho action Delete — Mst_NNTController.cs:601
+/// </summary>
+public class Mst_NNTDeleteRequest
+{
+    public Mst_NNTDeleteRequest? Mst_NNT { get; set; }
+    public string? MST { get; set; }
 }
 
 /// <summary>
