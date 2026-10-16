@@ -24,8 +24,8 @@ public class SysAccessSearchReq
 }
 
 /// <summary>
-/// Port 1:1 Sys_AccessController — màn phân quyền truy cập hệ thống (#300).
-/// Nguồn Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Sys_AccessController.cs:27-109
+/// Port 1:1 Sys_AccessController — màn phân quyền truy cập hệ thống (#300 Search, #301 Get).
+/// Nguồn Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Sys_AccessController.cs:27-109, 110-217
 /// Nguồn API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\SysAccessController.cs:20-91 (WA_Sys_Access_Get)
 /// Nguồn BIZ: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\System.cs:757-850 (WAS_Sys_Access_Get)
 ///            D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\System.cs:290-512 (Sys_Access_Get)
@@ -65,6 +65,18 @@ public class Sys_AccessControllerPort : ControllerBase
     }
 
     /// <summary>
+    /// Port 1:1 Sys_AccessController.Get (gate :110-217) -> WA_Sys_Access_Get. Không nhận tham số từ client: Ft_RecordStart = "0", Ft_RecordCount = "123456000" (BaseController.cs:30-31),
+    /// where = strWhereClause_Sys_Access(OrgID = session, FlagActive = "1") nhưng hàm lọc chỉ xét GroupCode/ObjectCode (không được gán) -> không lọc gì (xem GetXAsync).
+    /// Data = danh sách (có thêm các cột so_* từ left join Sys_Object), rỗng -> null (gate :157-159, :197-204).
+    /// </summary>
+    [HttpPost("get")]
+    public async Task<IActionResult> Get()
+    {
+        var (_, rows) = await GetXAsync(null, null, null, 0, 123456000);
+        return Ok(new { Success = true, Data = rows.Count > 0 ? rows : null });
+    }
+
+    /// <summary>
     /// Thực hiện 2 bước theo đúng mã nguồn gốc BIZ (System.cs:290-512):
     /// Bước 1: Draft (#tbl_Sys_Access_Filter_Draft, System.cs:359-370)
     /// select distinct identity(bigint, 0, 1) MyIdxSeq, sa.GroupCode, sa.ObjectCode
@@ -89,9 +101,7 @@ public class Sys_AccessControllerPort : ControllerBase
     /// left join Sys_Object so on t.ObjectCode = so.ObjectCode
     /// order by t.MyIdxSeq asc
     /// 
-    /// GAP:
-    /// - Bảng Sys_Object chưa có ở hệ thống đích -> lược bỏ left join bảng Sys_Object,
-    ///   các thuộc tính mở rộng so_* được gán null theo đúng Luật số 3 (không bịa dữ liệu).
+    /// - Sys_Object ĐÃ port ở #317 -> left join thật (so_* lấy từ Sys_Object).
     /// - Phân quyền Sys_Access_CheckDeny (System.cs:332) được coi là GAP trong MiniLoyalty.
     /// </summary>
     private async Task<(int itemCount, List<object> rows)> GetXAsync(string? orgId, string? keyWord, string? flagActive, long recordStart, long recordCount)
