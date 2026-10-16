@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
@@ -200,11 +202,13 @@ public class Crd_CardControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly IConfiguration? _config;
+    private readonly IWebHostEnvironment? _env;
 
-    public Crd_CardControllerPort(AppDbContext db, IConfiguration? config = null)
+    public Crd_CardControllerPort(AppDbContext db, IConfiguration? config = null, IWebHostEnvironment? env = null)
     {
         _db = db;
         _config = config;
+        _env = env;
     }
 
     /// <summary>
@@ -1292,6 +1296,289 @@ public class Crd_CardControllerPort : ControllerBase
             await tx.RollbackAsync();
             return PortResult.Fail("Crd_Card_ApprException", "Exception", ex.Message);
         }
+    }
+
+    // ============================================================================================
+    // PORT 1:1 — Crd_CardController/Export (#006).
+    //
+    // Nguồn tầng Gate:
+    //   Crd_CardController.cs:421-541    Export -> Crd_CardService.WA_Crd_Card_Get
+    //   Crd_CardController.cs:546-582   GetImportDicColums (từ điển 31 cột xuất Excel)
+    //   Crd_CardController.cs:586-697   strWhereClause_Crd_Card (dựng mệnh đề lọc)
+    // Nguồn tầng API:
+    //   CrdCardController.cs:163-233    WA_Crd_Card_Get -> _biz.WAS_Crd_Card_Get
+    // Nguồn tầng Biz:
+    //   Master.Loyalty.cs:18824-18931   WAS_Crd_Card_Get
+    //   Master.Loyalty.cs:18932-19084   Crd_Card_Get
+    //   Master.Loyalty.cs:19452-19864   Crd_Card_GetX_New20251229 (bản LIVE đang được gọi)
+    //
+    // GIỮ ĐÚNG NGUỒN:
+    //   * Endpoint POST: /api/crd_card/export
+    //   * Toán tử lọc: tái sử dụng logic lọc từ Search (MemberNo, CarNo, VIN, PhoneNo, DLCPCode, CardSourceCode, FlagExceptionally, CardTypeUse: =; DLCodeRegis, CardStatus, MemberStatus: in; MemberActiveDateFrom/To: >=/<=; EffDateStartFrom/To: >=/<= trên ApproveDTimeUTC; InactiveDTimeFrom/To: >=/<=).
+    //   * Lấy toàn bộ danh sách phù hợp (không áp dụng phân trang Skip/Take).
+    //   * Sắp xếp: OrderByDescending(x => x.cc.CardNo) (Master.Loyalty.cs:19793).
+    //   * Nếu danh sách rỗng -> throw ServiceException("Không có dữ liệu") (Crd_CardController.cs:527) -> Fail("Crd_Card_Export", "Message", "Không có dữ liệu").
+    //   * Chuẩn hoá hiển thị tại Gate (Crd_CardController.cs:486-508):
+    //       - MemberGender: "1" -> "Nam", ngược lại -> "Nữ" (:488-495).
+    //       - cm_FlagShow: "1" -> "Active", "0" -> "Inactive", ngược lại -> "None" (:496-507).
+    //   * Từ điển 31 cột: GetImportDicColums() (Crd_CardController.cs:546-582).
+    //   * Xuất file Excel: Sheet "Crd_Card", tiền tố file "Crd_Card" (:516-517).
+    //   * Trả về Url = GetRequestBaseAddress() + url (:519-522).
+    // ============================================================================================
+
+    /// <summary>
+    /// Xuất danh sách thẻ hội viên ra file Excel — port 1:1 từ Crd_CardController.Export (Crd_CardController.cs:421-541).
+    /// </summary>
+    [HttpPost("export")]
+    public async Task<IActionResult> Export([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_CardControllerSearchReq? req)
+    {
+        req ??= new Crd_CardControllerSearchReq();
+
+        // 1. Xây dựng câu truy vấn lọc draft bám sát Crd_Card_GetX_New20251229 (Master.Loyalty.cs:19502-19525):
+        //    cm (Crd_Member) inner join cc (Crd_Card) với cc.CardNo là thẻ mới nhất của hội viên đó
+        //    (select top 1 cc.CardNo from Crd_Card cc where cc.MemberNo = cm.MemberNo order by cc.CreateDTimeUTC desc).
+        var query = from cm in _db.CrdMembers.AsNoTracking()
+                    join cc in _db.CrdCards.AsNoTracking() on cm.MemberNo equals cc.MemberNo
+                    where cc.CardNo == _db.CrdCards
+                        .Where(c => c.MemberNo == cm.MemberNo)
+                        .OrderByDescending(c => c.CreateDTimeUTC)
+                        .Select(c => c.CardNo)
+                        .FirstOrDefault()
+                    select new { cm, cc };
+
+        // 2. Áp dụng các điều kiện lọc từ strWhereClause_Crd_Card (Crd_CardController.cs:586-697):
+
+        // MemberNo: Crd_Member.MemberNo = (:593-596)
+        if (!string.IsNullOrWhiteSpace(req.MemberNo))
+        {
+            var pat = PortQuery.Equal(req.MemberNo);
+            query = query.Where(x => EF.Functions.Like((x.cm.MemberNo ?? "").ToLower(), pat, PortQuery.Esc));
+        }
+
+        // CarNo: Crd_Member.CarNo = (:601-604)
+        if (!string.IsNullOrWhiteSpace(req.CarNo))
+        {
+            var pat = PortQuery.Equal(req.CarNo);
+            query = query.Where(x => EF.Functions.Like((x.cm.CarNo ?? "").ToLower(), pat, PortQuery.Esc));
+        }
+
+        // VIN: Crd_Member.VIN = (:605-608)
+        if (!string.IsNullOrWhiteSpace(req.VIN))
+        {
+            var pat = PortQuery.Equal(req.VIN);
+            query = query.Where(x => EF.Functions.Like((x.cm.VIN ?? "").ToLower(), pat, PortQuery.Esc));
+        }
+
+        // PhoneNo: Crd_Member.PhoneNo = (:609-612)
+        if (!string.IsNullOrWhiteSpace(req.PhoneNo))
+        {
+            var pat = PortQuery.Equal(req.PhoneNo);
+            query = query.Where(x => EF.Functions.Like((x.cm.PhoneNo ?? "").ToLower(), pat, PortQuery.Esc));
+        }
+
+        // DLCodeRegis: Crd_Member.DLCodeRegis in ('x', 'y') (:617-625)
+        if (!string.IsNullOrWhiteSpace(req.DLCodeRegis))
+        {
+            var codes = req.DLCodeRegis.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                                       .Select(s => s.ToLowerInvariant()).ToList();
+            if (codes.Count > 0)
+            {
+                query = query.Where(x => codes.Contains((x.cm.DLCodeRegis ?? "").ToLower()));
+            }
+        }
+
+        // DLCPCode: Map_QueryDealer_Member.DLCPCode = (:626-629)
+        if (!string.IsNullOrWhiteSpace(req.DLCPCode))
+        {
+            var patDLCP = PortQuery.Equal(req.DLCPCode);
+            query = query.Where(x => _db.Set<Map_QueryDealer_Member>().Any(m => m.MemberNo == x.cm.MemberNo && EF.Functions.Like((m.DLCPCode ?? "").ToLower(), patDLCP, PortQuery.Esc)));
+        }
+
+        // CardStatus: Crd_Member.CardStatus in ('x', 'y') (:634-642)
+        // NGUỒN chỉ lọc trên Crd_Member.CardStatus (Tbl_Crd_Member + TblCrd_Member.CardStatus) — KHÔNG lọc cc.CardStatus.
+        if (!string.IsNullOrWhiteSpace(req.CardStatus))
+        {
+            var statuses = req.CardStatus.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                                         .Select(s => s.ToLowerInvariant()).ToList();
+            if (statuses.Count > 0)
+            {
+                query = query.Where(x => statuses.Contains((x.cm.CardStatus ?? "").ToLower()));
+            }
+        }
+
+        // MemberActiveDateFrom / To: Crd_Member.MemberActiveDate >= và <= (:643-650)
+        // Gate chuẩn hoá input bằng StdDate (Crd_CardController.cs:59-60) => 'yyyy-MM-dd' (nửa đêm), KHÔNG mở rộng cuối ngày.
+        if (!string.IsNullOrWhiteSpace(req.MemberActiveDateFrom) && DateTime.TryParse(req.MemberActiveDateFrom, out var dFrom))
+        {
+            query = query.Where(x => x.cm.MemberActiveDate >= dFrom.Date);
+        }
+        if (!string.IsNullOrWhiteSpace(req.MemberActiveDateTo) && DateTime.TryParse(req.MemberActiveDateTo, out var dTo))
+        {
+            query = query.Where(x => x.cm.MemberActiveDate <= dTo.Date);
+        }
+
+        // EffDateStartFrom / To: Crd_Card.ApproveDTimeUTC >= và <= (:651-664)
+        // StdDTimeBeginDay/StdDTimeEndDay -> StdDTimeUTC: đầu ngày VN (UTC+7) và cuối ngày VN đổi sang UTC.
+        if (!string.IsNullOrWhiteSpace(req.EffDateStartFrom) && DateTime.TryParse(req.EffDateStartFrom, out var effFrom))
+        {
+            var effFromUtc = effFrom.Date.AddHours(-7); // Đầu ngày VN (UTC+7) chuyển sang UTC
+            query = query.Where(x => x.cc.ApproveDTimeUTC >= effFromUtc);
+        }
+        if (!string.IsNullOrWhiteSpace(req.EffDateStartTo) && DateTime.TryParse(req.EffDateStartTo, out var effTo))
+        {
+            var effToUtc = effTo.Date.AddDays(1).AddSeconds(-1).AddHours(-7); // Cuối ngày VN chuyển sang UTC
+            query = query.Where(x => x.cc.ApproveDTimeUTC <= effToUtc);
+        }
+
+        // CardSourceCode: Crd_Member.CardSourceCode = (:665-668)
+        if (!string.IsNullOrWhiteSpace(req.CardSourceCode))
+        {
+            var pat = PortQuery.Equal(req.CardSourceCode);
+            query = query.Where(x => EF.Functions.Like((x.cm.CardSourceCode ?? "").ToLower(), pat, PortQuery.Esc));
+        }
+
+        // FlagExceptionally: Crd_Member.FlagExceptionCard = (:669-672)
+        // NGUỒN chỉ dùng cột Crd_Member.FlagExceptionCard — KHÔNG fallback sang FlagExceptionally.
+        if (!string.IsNullOrWhiteSpace(req.FlagExceptionally))
+        {
+            var pat = PortQuery.Equal(req.FlagExceptionally);
+            query = query.Where(x => EF.Functions.Like((x.cm.FlagExceptionCard ?? "").ToLower(), pat, PortQuery.Esc));
+        }
+
+        // InactiveDTimeFrom / To: Crd_Member.InactiveDTimeUTC >= và <= (:673-680)
+        // NGUỒN dùng thẳng CUtils.StrValue(input) với >= / <= — KHÔNG chuẩn hoá đầu/cuối ngày.
+        if (!string.IsNullOrWhiteSpace(req.InactiveDTimeFrom) && DateTime.TryParse(req.InactiveDTimeFrom, out var inactFrom))
+        {
+            query = query.Where(x => x.cm.InactiveDTimeUTC >= inactFrom);
+        }
+        if (!string.IsNullOrWhiteSpace(req.InactiveDTimeTo) && DateTime.TryParse(req.InactiveDTimeTo, out var inactTo))
+        {
+            query = query.Where(x => x.cm.InactiveDTimeUTC <= inactTo);
+        }
+
+        // CardTypeUse: Crd_Member.CardTypeUse = (:681-684)
+        if (!string.IsNullOrWhiteSpace(req.CardTypeUse))
+        {
+            var pat = PortQuery.Equal(req.CardTypeUse);
+            query = query.Where(x => EF.Functions.Like((x.cm.CardTypeUse ?? "").ToLower(), pat, PortQuery.Esc));
+        }
+
+        // MemberStatus: Crd_Member.MemberStatus in ('x', 'y') (:685-693)
+        if (!string.IsNullOrWhiteSpace(req.MemberStatus))
+        {
+            var mStatuses = req.MemberStatus.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                                            .Select(s => s.ToLowerInvariant()).ToList();
+            if (mStatuses.Count > 0)
+            {
+                query = query.Where(x => mStatuses.Contains((x.cm.MemberStatus ?? "").ToLower()));
+            }
+        }
+
+        // 3. Sắp xếp theo cc.CardNo desc (Master.Loyalty.cs:19793) và lấy toàn bộ phù hợp (không phân trang Skip/Take 10 dòng của Search)
+        var allPairs = await query
+            .OrderByDescending(x => x.cc.CardNo)
+            .Select(x => new CrdCardMemberPair(x.cm, x.cc))
+            .ToListAsync();
+
+        // 4. Kiểm tra danh sách rỗng: throw new ServiceException("Không có dữ liệu") (Crd_CardController.cs:527)
+        if (allPairs.Count == 0)
+        {
+            return PortResult.Fail("Crd_Card_Export", "Message", "Không có dữ liệu");
+        }
+
+        // 5. Ánh xạ dữ liệu sang model Crd_CardSearchItem kết hợp các phép tính toán:
+        var dataList = await BuildCrdCardItemsAsync(allPairs);
+
+        // 6. Chuẩn hoá giá trị hiển thị tại Gate (Crd_CardController.cs:486-508):
+        foreach (var item in dataList)
+        {
+            // MemberGender: "1" -> "Nam", ngược lại -> "Nữ" (:488-495)
+            item.MemberGender = string.Equals(item.MemberGender, "1") ? "Nam" : "Nữ";
+
+            // cm_FlagShow: "1" -> "Active", "0" -> "Inactive", ngược lại -> "None" (:496-507)
+            if (string.Equals(item.cm_FlagShow, "1"))
+            {
+                item.cm_FlagShow = "Active";
+            }
+            else if (string.Equals(item.cm_FlagShow, "0"))
+            {
+                item.cm_FlagShow = "Inactive";
+            }
+            else
+            {
+                item.cm_FlagShow = "None";
+            }
+        }
+
+        // 7. Xác định thư mục webRoot:
+        var webRoot = _env?.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = _env != null ? Path.Combine(_env.ContentRootPath, "wwwroot") : Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+        }
+
+        // 8. Xuất file Excel với từ điển 31 cột (Crd_CardController.cs:514-522, :546-582):
+        var dicColNames = GetImportDicColums();
+        try
+        {
+            var (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Crd_Card");
+            PortExcel.ExportToExcelFromList(dataList, dicColNames, physicalPath, "Crd_Card");
+
+            // Trả về JsonResultEntry với Data = { Url = GetRequestBaseAddress() + url } (:519-522)
+            return Ok(new
+            {
+                Success = true,
+                Data = new
+                {
+                    Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            return PortResult.Fail("Crd_Card_Export", "Exception", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Từ điển 31 cột xuất Excel của Crd_Card — port 1:1 từ Crd_CardController.GetImportDicColums (Crd_CardController.cs:546-582).
+    /// </summary>
+    private static Dictionary<string, string> GetImportDicColums()
+    {
+        return new Dictionary<string, string>()
+        {
+            { "MemberNo", "Mã hội viên" },
+            { "CardTypeUse", "Hạng sử dụng" },
+            { "CardTypeInit", "Hạng thực" },
+            { "CardSourceCode", "Loại kỳ thẻ" },
+            { "PointEnd", "Điểm tiêu dùng tích lũy (lũy kế)" },
+            { "AmountEnd", "Điểm tiêu dùng còn lại(lũy kế)" },
+            { "PointCardRank", "Điểm xét hạng T.kỳ hiện tại" },
+            { "PointAccumulated", "Điểm tích tiêu dùng T.kỳ hiện tại" },
+            { "PointUse", "Điểm tiêu T.kỳ hiện tại" },
+            { "QtyVisitAvail", "Lượt DV trong kỳ hiện tại" },
+            { "MemberName", "Tên khách hàng" },
+            { "MemberGender", "Giới tính" },
+            { "DateOfBirth", "Ngày sinh nhật" },
+            { "PhoneNo", "Số điện thoại" },
+            { "ProvinceName", "Tỉnh/TP" },
+            { "CarNo", "Biển số xe" },
+            { "VIN", "Số khung" },
+            { "BrandName", "Hiệu xe" },
+            { "ModelName", "Model" },
+            { "CardNo", "Mã kỳ xét hạng" },
+            { "EffDateStart", "Ngày bắt đầu kỳ xét hạng" },
+            { "EffDateEnd", "Ngày hết hạn xét hạng" },
+            { "MemberActiveDate", "Ngày kích hoạt HV" },
+            { "InactiveDTimeUTC", "Ngày hủy hội viên" },
+            { "CardStatus", "TT kỳ xét hạng" },
+            { "mdcp_DLCPCode", "Đại lý phát hành" },
+            { "DLCodeExceptionally", "Đại lý YC đặc cách" },
+            { "cm_FlagShow", "TT hội viên" },
+            { "DLCodeRequest", "Mã đại lý hủy hội viên" },
+            { "WarrantyExpiryDate", "Ngày hết hạn bảo hành" },
+            { "InvoiceDate", "Ngày hóa đơn" }
+        };
     }
 
     /// <summary>
