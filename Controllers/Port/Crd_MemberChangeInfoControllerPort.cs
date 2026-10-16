@@ -39,6 +39,19 @@ public class Crd_MemberChangeInfoGetByRequestNoReq
 }
 
 /// <summary>
+/// DTO nhận tham số cho Crd_MemberChangeInfoController/GetHistoryByMember (#030).
+/// Gate: Crd_MemberChangeInfoController.cs:306.
+/// </summary>
+public class Crd_MemberChangeInfoGetHistoryByMemberReq
+{
+    public string? MemberNo { get; set; }
+    public string? FinishDTimeFrom { get; set; }
+    public string? FinishDTimeTo { get; set; }
+    public string? OrgID { get; set; }
+    public string? DLCPCode { get; set; }
+}
+
+/// <summary>
 /// Port 1:1 Crd_MemberChangeInfoController — Crd_MemberChangeInfo (#027).
 /// Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Crd_MemberChangeInfoController.cs:33-144
 /// API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\CrdMemberChangeInfoController.cs:23-93
@@ -465,6 +478,250 @@ public class Crd_MemberChangeInfoControllerPort : ControllerBase
             {
                 Crd_MemberChangeInfo = objCrd_MemberChangeInfo,
                 Lst_Crd_MemberChangeInfoDtl = listCrd_MemberChangeInfoDtl
+            }
+        });
+    }
+
+    /// <summary>
+    /// Tra cứu lịch sử đề nghị sửa thông tin hội viên (Action GetHistoryByMember, #030).
+    /// Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Crd_MemberChangeInfoController.cs:306-445
+    /// API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\CrdMemberChangeInfoController.cs:98-166 (WA_Crd_MemberChangeInfo_GetForLookup)
+    /// Biz: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\Card.cs:28565-28665 (WAS_), 28282-28441 (Get), 27978-28280 (GetX)
+    /// </summary>
+    [HttpPost("gethistorybymember")]
+    public async Task<IActionResult> GetHistoryByMember([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_MemberChangeInfoGetHistoryByMemberReq? req)
+    {
+        req ??= new Crd_MemberChangeInfoGetHistoryByMemberReq();
+
+        // 1. Chuẩn hoá ngày duyệt sửa từ giờ VN sang UTC (Gate :329-339):
+        // FinishDTimeFrom: StdDTimeUTC(StdDTimeBeginDay(FinishDTimeFrom)) -> 00:00:00 VN trừ 7 tiếng
+        // FinishDTimeTo: StdDTimeUTC(StdDTimeEndDay(FinishDTimeTo)) -> 23:59:59 VN trừ 7 tiếng
+        string? finishFromUtc = null;
+        if (!string.IsNullOrWhiteSpace(req.FinishDTimeFrom))
+        {
+            if (DateTime.TryParse(req.FinishDTimeFrom.Trim(), out var dtFrom))
+            {
+                finishFromUtc = dtFrom.Date.AddHours(-7).ToString("yyyy-MM-dd HH:mm:ss");
+            }
+        }
+
+        string? finishToUtc = null;
+        if (!string.IsNullOrWhiteSpace(req.FinishDTimeTo))
+        {
+            if (DateTime.TryParse(req.FinishDTimeTo.Trim(), out var dtTo))
+            {
+                finishToUtc = dtTo.Date.AddDays(1).AddSeconds(-1).AddHours(-7).ToString("yyyy-MM-dd HH:mm:ss");
+            }
+        }
+
+        // 2. Truy vấn Crd_MemberChangeInfo kết hợp Crd_Member (Card.cs:28051-28066)
+        // Bảng tạm #tbl_Crd_MemberChangeInfo_Filter_Draft thực hiện INNER JOIN Crd_Member trên MemberNo (Card.cs:28060-28062):
+        // Loại bỏ đề nghị có MemberNo không tồn tại trong Crd_Member.
+        // Lọc cố định: RequestStatus = 'FINISH' (Gate :343, :1020) và RequestType = 'CHANGEINFO' (Gate :348).
+        // KHÔNG lọc OrgID (Gate :974-1025); KHÔNG có KeyWord.
+        var query = from cmci in _db.Set<Crd_MemberChangeInfo>()
+                    join cm in _db.CrdMembers on cmci.MemberNo equals cm.MemberNo
+                    where cmci.RequestStatus == "FINISH"
+                          && cmci.RequestType == "CHANGEINFO"
+                    select new { cmci, cm };
+
+        // Lọc MemberNo với toán tử = nếu có truyền (Gate :342, :985-988)
+        if (!string.IsNullOrWhiteSpace(req.MemberNo))
+        {
+            var p_MemberNo = PortQuery.Equal(req.MemberNo.Trim());
+            query = query.Where(x => EF.Functions.Like((x.cmci.MemberNo ?? "").ToLower(), p_MemberNo, PortQuery.Esc));
+        }
+
+        // Lọc FinishDTimeUTC >= finishFromUtc (Gate :344, :1001-1004)
+        if (!string.IsNullOrEmpty(finishFromUtc))
+        {
+            query = query.Where(x => x.cmci.FinishDTimeUTC != null && string.Compare(x.cmci.FinishDTimeUTC, finishFromUtc) >= 0);
+        }
+
+        // Lọc FinishDTimeUTC <= finishToUtc (Gate :345, :1005-1008)
+        if (!string.IsNullOrEmpty(finishToUtc))
+        {
+            query = query.Where(x => x.cmci.FinishDTimeUTC != null && string.Compare(x.cmci.FinishDTimeUTC, finishToUtc) <= 0);
+        }
+
+        // 3. Sắp xếp thứ tự: cmci.LogLUDTimeUTC asc (Card.cs:28065)
+        query = query.OrderBy(x => x.cmci.LogLUDTimeUTC);
+
+        var rawList = await query.ToListAsync();
+
+        // Nếu không tìm thấy bản ghi nào, trả Data với 2 mảng null (Gate :326-327, :428-432)
+        if (rawList.Count == 0)
+        {
+            return Ok(new
+            {
+                Success = true,
+                Data = new
+                {
+                    Lst_Crd_MemberChangeInfo = (object?)null,
+                    Lst_Crd_MemberChangeInfoDtl = (object?)null
+                }
+            });
+        }
+
+        // 4. Ánh xạ các cột hiển thị của Crd_MemberChangeInfo (Card.cs:28100-28164)
+        var userDLCPCode = !string.IsNullOrWhiteSpace(req.DLCPCode) ? req.DLCPCode.Trim().ToUpperInvariant() : "HTV";
+
+        var resultList = new List<Crd_MemberChangeInfo>();
+        foreach (var row in rawList)
+        {
+            var cmci = row.cmci;
+            var cm = row.cm;
+
+            // Cột DLCodeRequest: vì @strFlagIsLookupByMember = '1', nếu @strDLCPCode <> 'HTV' và cmci.DLCodeRequest <> @strDLCPCode thì 'N/A' (Card.cs:28109-28117)
+            var dlCodeRequest = cmci.DLCodeRequest;
+            if (userDLCPCode != "HTV" && !string.Equals(cmci.DLCodeRequest, userDLCPCode, StringComparison.OrdinalIgnoreCase))
+            {
+                dlCodeRequest = "N/A";
+            }
+
+            // Đơn vị duyệt: prefix 'HTV,' (Card.cs:28138)
+            var approveDLCode = "HTV," + (cmci.ApproveDLCode ?? "");
+
+            // FlagApproveAF: vì RequestStatus = 'FINISH' (không thuộc PENDING, APPROVE) nên luôn trả '0' (Card.cs:28145-28151)
+            var flagApproveAF = "0";
+
+            var item = new Crd_MemberChangeInfo
+            {
+                RequestNo = cmci.RequestNo,
+                NetworkID = cmci.NetworkID,
+                OrgID = cmci.OrgID,
+                MemberNo = cmci.MemberNo,
+                DLCodeRequest = dlCodeRequest,
+                RequestType = cmci.RequestType,
+                RequestStatus = cmci.RequestStatus,
+                Remark = cmci.Remark,
+                RemarkHTV = cmci.RemarkHTV,
+                AttachFilePath = cmci.AttachFilePath,
+                AttachFileName = cmci.AttachFileName,
+                AttachFileSize = cmci.AttachFileSize,
+                AttachFileBase64 = cmci.AttachFileBase64,
+                CreateDTimeUTC = cmci.CreateDTimeUTC, // Cột CreateDTimeUTC giữ nguyên UTC (Gate :368-385)
+                CreateBy = cmci.CreateBy,
+                LUDTimeUTC = ConvertUtcToLocal(cmci.LUDTimeUTC ?? cmci.LogLUDTimeUTC), // Đổi sang Local (+7h, Gate :375)
+                LUBy = cmci.LUBy,
+                ApproveDTimeUTC = ConvertUtcToLocal(cmci.ApproveDTimeUTC), // Đổi sang Local (+7h, Gate :379)
+                ApproveBy = cmci.ApproveBy,
+                FinishDTimeUTC = ConvertUtcToLocal(cmci.FinishDTimeUTC), // Đổi sang Local (+7h, Gate :383)
+                FinishBy = cmci.FinishBy,
+                RejectDTimeUTC = cmci.RejectDTimeUTC,
+                RejectBy = cmci.RejectBy,
+                LogLUDTimeUTC = cmci.LogLUDTimeUTC,
+                LogLUBy = cmci.LogLUBy,
+                FlagFileUpload = cmci.FlagFileUpload,
+                AttFileId = cmci.AttFileId,
+
+                // Các cột mở rộng từ bảng Crd_Member (Card.cs:28139-28144)
+                cm_MemberName = cm.MemberName,
+                cm_CarNo = cm.CarNo,
+                cm_PhoneNo = cm.PhoneNo,
+                cm_VIN = cm.VIN,
+                cm_AmountEnd = cm.AmountEnd,
+                cm_CardTypeUse = cm.CardTypeUse,
+
+                ApproveDLCode = approveDLCode,
+                FlagApproveAF = flagApproveAF
+            };
+
+            resultList.Add(item);
+        }
+
+        // 5. Truy vấn danh sách chi tiết Crd_MemberChangeInfoDtl (Card.cs:28171-28208)
+        var requestNos = resultList.Select(x => x.RequestNo).ToList();
+        var dtlRawList = await _db.Set<Crd_MemberChangeInfoDtl>()
+            .Where(x => requestNos.Contains(x.RequestNo))
+            .ToListAsync();
+
+        List<Crd_MemberChangeInfoDtl>? listDtl = null;
+        if (dtlRawList.Count > 0)
+        {
+            var provinces = await _db.Set<Mst_Province>().ToListAsync();
+            var districts = await _db.Set<Mst_District>().ToListAsync();
+            var carModels = await _db.Set<Mst_CarModel>().ToListAsync();
+            var carBrands = await _db.Set<Mst_CarBrand>().ToListAsync();
+
+            // Sắp xếp dtl theo thứ tự của request cha trong resultList (Card.cs:28204: order by t.MyIdxSeq asc)
+            var requestOrder = resultList.Select((item, idx) => new { item.RequestNo, idx })
+                                         .ToDictionary(x => x.RequestNo, x => x.idx);
+
+            var orderedDtl = dtlRawList.OrderBy(d => requestOrder.TryGetValue(d.RequestNo, out var idx) ? idx : int.MaxValue)
+                                       .ThenBy(d => d.ColumnCode);
+
+            // Bổ sung thông tin từ đề nghị cha vào từng dòng Dtl (Gate :392-425)
+            var dicHeader = resultList.ToDictionary(h => h.RequestNo, h => h);
+
+            listDtl = new List<Crd_MemberChangeInfoDtl>();
+            foreach (var dtl in orderedDtl)
+            {
+                var itemDtl = new Crd_MemberChangeInfoDtl
+                {
+                    RequestNo = dtl.RequestNo,
+                    NetworkID = dtl.NetworkID,
+                    OrgID = dtl.OrgID,
+                    ColumnCode = dtl.ColumnCode,
+                    ColumnValueOld = dtl.ColumnValueOld,
+                    ColumnValueNew = dtl.ColumnValueNew,
+                    Remark = dtl.Remark,
+                    RequestDtlStatus = dtl.RequestDtlStatus,
+                    LogLUDTimeUTC = dtl.LogLUDTimeUTC,
+                    LogLUBy = dtl.LogLUBy,
+
+                    // Join bảng danh mục để lấy tên (Card.cs:28176-28203):
+                    ProvinceNameOld = provinces.FirstOrDefault(p => string.Equals(p.ProvinceCode, dtl.ColumnValueOld, StringComparison.OrdinalIgnoreCase))?.ProvinceName,
+                    ProvinceNameNew = provinces.FirstOrDefault(p => string.Equals(p.ProvinceCode, dtl.ColumnValueNew, StringComparison.OrdinalIgnoreCase))?.ProvinceName,
+                    DistrictNameOld = districts.FirstOrDefault(d => string.Equals(d.DistrictCode, dtl.ColumnValueOld, StringComparison.OrdinalIgnoreCase))?.DistrictName,
+                    DistrictNameNew = districts.FirstOrDefault(d => string.Equals(d.DistrictCode, dtl.ColumnValueNew, StringComparison.OrdinalIgnoreCase))?.DistrictName,
+                    ModelNameNew = carModels.FirstOrDefault(m => string.Equals(m.ModelCode, dtl.ColumnValueNew, StringComparison.OrdinalIgnoreCase))?.ModelName,
+                    // LỖI NGUỒN GIỮ NGUYÊN: dev nguồn join mcmo trên ColumnValueNew tại Card.cs:28199
+                    ModelNameOld = carModels.FirstOrDefault(m => string.Equals(m.ModelCode, dtl.ColumnValueNew, StringComparison.OrdinalIgnoreCase))?.ModelName,
+                    // LỖI NGUỒN GIỮ NGUYÊN: dev nguồn join mcbo trên ColumnValueNew tại Card.cs:28201
+                    BrandNameOld = carBrands.FirstOrDefault(b => string.Equals(b.BrandCode, dtl.ColumnValueNew, StringComparison.OrdinalIgnoreCase))?.BrandName,
+                    BrandNameNew = carBrands.FirstOrDefault(b => string.Equals(b.BrandCode, dtl.ColumnValueNew, StringComparison.OrdinalIgnoreCase))?.BrandName
+                };
+
+                // Bổ sung 22 trường từ Crd_MemberChangeInfo cha vào từng dòng Dtl (Gate :402-423)
+                if (dicHeader.TryGetValue(dtl.RequestNo, out var cmci))
+                {
+                    itemDtl.MemberNo = cmci.MemberNo;
+                    itemDtl.DLCodeRequest = cmci.DLCodeRequest; // Đã qua che 'N/A' nếu user khác đại lý đề nghị
+                    itemDtl.RequestType = cmci.RequestType;
+                    itemDtl.RequestStatus = cmci.RequestStatus;
+                    itemDtl.CreateDTimeUTC = cmci.CreateDTimeUTC; // Giữ nguyên UTC
+                    itemDtl.CreateBy = cmci.CreateBy;
+                    itemDtl.LUDTimeUTC = cmci.LUDTimeUTC; // Giờ local (+7h)
+                    itemDtl.LUBy = cmci.LUBy;
+                    itemDtl.ApproveDTimeUTC = cmci.ApproveDTimeUTC; // Giờ local (+7h)
+                    itemDtl.ApproveBy = cmci.ApproveBy;
+                    itemDtl.FinishDTimeUTC = cmci.FinishDTimeUTC; // Giờ local (+7h)
+                    itemDtl.FinishBy = cmci.FinishBy;
+                    itemDtl.RejectDTimeUTC = cmci.RejectDTimeUTC;
+                    itemDtl.RejectBy = cmci.RejectBy;
+                    itemDtl.ApproveDLCode = cmci.ApproveDLCode; // Có prefix 'HTV,'
+                    itemDtl.FlagApproveAF = cmci.FlagApproveAF; // '0'
+                    itemDtl.cm_MemberName = cmci.cm_MemberName;
+                    itemDtl.cm_CarNo = cmci.cm_CarNo;
+                    itemDtl.cm_PhoneNo = cmci.cm_PhoneNo;
+                    itemDtl.cm_VIN = cmci.cm_VIN;
+                    itemDtl.cm_AmountEnd = cmci.cm_AmountEnd;
+                    itemDtl.cm_CardTypeUse = cmci.cm_CardTypeUse;
+                }
+
+                listDtl.Add(itemDtl);
+            }
+        }
+
+        // 6. Kết quả trả về (Gate :427-432)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Lst_Crd_MemberChangeInfo = resultList,
+                Lst_Crd_MemberChangeInfoDtl = (listDtl != null && listDtl.Count > 0) ? listDtl : null
             }
         });
     }

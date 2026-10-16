@@ -287,6 +287,101 @@ public class Crd_MemberChangeInfoSeeder : IPortSeeder
             );
         }
 
+        // 4. Seed các bản ghi REQ10..REQ14 phục vụ GetHistoryByMember (#030)
+        if (!await db.Set<Crd_MemberChangeInfo>().AnyAsync(r => r.RequestNo == "REQ10"))
+        {
+            db.Set<Crd_MemberChangeInfo>().AddRange(
+                new Crd_MemberChangeInfo
+                {
+                    RequestNo = "REQ10",
+                    MemberNo = "MB001",
+                    NetworkID = "1001",
+                    OrgID = "ORG01",
+                    DLCodeRequest = "VN040",
+                    RequestType = "CHANGEINFO",
+                    RequestStatus = "FINISH",
+                    ApproveDLCode = "VN040",
+                    CreateDTimeUTC = "2026-08-10 02:00:00",
+                    FinishDTimeUTC = "2026-08-10 10:00:00",
+                    LogLUDTimeUTC = "2026-08-10 10:00:00",
+                    LUDTimeUTC = "2026-08-10 10:00:00",
+                    ApproveDTimeUTC = "2026-08-10 09:00:00",
+                    CreateBy = "seed",
+                    LUBy = "seed"
+                },
+                new Crd_MemberChangeInfo
+                {
+                    RequestNo = "REQ11",
+                    MemberNo = "MB001",
+                    NetworkID = "1001",
+                    OrgID = "ORG01",
+                    DLCodeRequest = "VN041",
+                    RequestType = "CHANGEINFO",
+                    RequestStatus = "FINISH",
+                    ApproveDLCode = "VN041",
+                    CreateDTimeUTC = "2026-08-11 01:00:00",
+                    FinishDTimeUTC = "2026-08-11 05:00:00",
+                    LogLUDTimeUTC = "2026-08-11 05:00:00",
+                    LUDTimeUTC = "2026-08-11 05:00:00",
+                    ApproveDTimeUTC = "2026-08-11 04:00:00",
+                    CreateBy = "seed",
+                    LUBy = "seed"
+                },
+                new Crd_MemberChangeInfo
+                {
+                    RequestNo = "REQ12",
+                    MemberNo = "MB002",
+                    NetworkID = "1001",
+                    OrgID = "ORG01",
+                    DLCodeRequest = "VN040",
+                    RequestType = "CHANGEINFO",
+                    RequestStatus = "FINISH",
+                    ApproveDLCode = "VN040",
+                    CreateDTimeUTC = "2026-08-12 03:00:00",
+                    FinishDTimeUTC = "2026-08-12 08:00:00",
+                    LogLUDTimeUTC = "2026-08-12 08:00:00",
+                    LUDTimeUTC = "2026-08-12 08:00:00",
+                    ApproveDTimeUTC = "2026-08-12 07:00:00",
+                    CreateBy = "seed",
+                    LUBy = "seed"
+                },
+                new Crd_MemberChangeInfo
+                {
+                    RequestNo = "REQ13",
+                    MemberNo = "MB001",
+                    NetworkID = "1001",
+                    OrgID = "ORG01",
+                    DLCodeRequest = "VN040",
+                    RequestType = "CANCELMEMBER",
+                    RequestStatus = "FINISH",
+                    ApproveDLCode = "VN040",
+                    CreateDTimeUTC = "2026-08-13 02:00:00",
+                    FinishDTimeUTC = "2026-08-13 08:00:00",
+                    LogLUDTimeUTC = "2026-08-13 08:00:00",
+                    LUDTimeUTC = "2026-08-13 08:00:00",
+                    CreateBy = "seed",
+                    LUBy = "seed"
+                },
+                new Crd_MemberChangeInfo
+                {
+                    RequestNo = "REQ14",
+                    MemberNo = "MB999", // kiểm chứng loại bỏ do MB999 không tồn tại trong Crd_Member
+                    NetworkID = "1001",
+                    OrgID = "ORG01",
+                    DLCodeRequest = "VN040",
+                    RequestType = "CHANGEINFO",
+                    RequestStatus = "FINISH",
+                    ApproveDLCode = "VN040",
+                    CreateDTimeUTC = "2026-08-14 02:00:00",
+                    FinishDTimeUTC = "2026-08-14 08:00:00",
+                    LogLUDTimeUTC = "2026-08-14 08:00:00",
+                    LUDTimeUTC = "2026-08-14 08:00:00",
+                    CreateBy = "seed",
+                    LUBy = "seed"
+                }
+            );
+        }
+
         await db.SaveChangesAsync();
     }
 }
