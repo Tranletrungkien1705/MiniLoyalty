@@ -1,10 +1,10 @@
-# PARITY_PROGRESS — port 1-1 `2022.7.Loyalty` → MiniLoyalty
+| 257 | Prm_CarRecommendController/GetByPRMCRCodeSys | Đã làm | cc162b6 |# PARITY_PROGRESS — port 1-1 `2022.7.Loyalty` → MiniLoyalty
 
 Nguồn mẫu số: `D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers` (mỗi dòng = 1 action public). Sinh bằng `scripts\parity\gen-ledger.ps1` ngày 2026-10-15.
 
 **Mẫu số (N)**: 337
 
-**Tiến độ hiện tại**: 241/337 (71.51%)
+**Tiến độ hiện tại**: 242/337 (71.81%)
 
 Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã có` (đã port từ trước, có bằng chứng) · `Bỏ` (scaffold/không nghiệp vụ, ghi lý do) · `Cần xem tay`.
 
