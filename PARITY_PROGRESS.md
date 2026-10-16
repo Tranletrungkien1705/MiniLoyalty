@@ -4,7 +4,7 @@ Nguồn mẫu số: `D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.Web
 
 **Mẫu số (N)**: 337
 
-**Tiến độ hiện tại**: 222/337 (65.88%)
+**Tiến độ hiện tại**: 223/337 (66.17%)
 
 Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã có` (đã port từ trước, có bằng chứng) · `Bỏ` (scaffold/không nghiệp vụ, ghi lý do) · `Cần xem tay`.
 
@@ -344,6 +344,6 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 332 | Sys_UserController/Delete | Đã làm | dd1dfe7 |
 | 333 | Sys_UserController/DeleteMultiple | Đã làm | b3ee587 |
 | 334 | Sys_UserController/Import | Đã làm | 26ebac0 |
-| 335 | Sys_UserController/Export | Chưa làm | - |
+| 335 | Sys_UserController/Export | Đã làm | b51c005 |
 | 336 | Sys_UserController/ExportTemplate | Chưa làm | - |
 | 337 | Sys_UserInGroupController/Save | Đã làm | c6dddfa |
