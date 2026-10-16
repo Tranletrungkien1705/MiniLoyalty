@@ -11,14 +11,15 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 /// <summary>
-/// Port 1:1 Mst_NNTController.cs — Mst_NNT (#172)
+/// Port 1:1 Mst_NNTController.cs — Mst_NNT (#172 Search, #173 GetAllActive)
 /// Chuỗi gọi nguồn:
-///   gate: 13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Mst_NNTController.cs:26-187 (Search), :666-698 (strWhereClause_Mst_NNT)
+///   gate: 13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Mst_NNTController.cs:26-187 (Search), :189-289 (GetAllActive), :666-698 (strWhereClause_Mst_NNT)
 ///   API:  11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\MstNNTController.cs:20-89 (WA_Mst_NNT_Get)
 ///   biz:  11.BackEnd\V10\idn.Loyalty.Biz\Master.cs:7933-8030 (WAS_Mst_NNT_Get) -> :8126-8295 (Mst_NNT_Get) -> :21344-21524 (Mst_NNT_GetX)
 ///
 /// Bỏ qua có chủ đích (loại Đ):
-/// - CheckGatewayAuthentication, CheckAuthorize (Mst_NNTController.cs:37-38)
+/// - CheckGatewayAuthentication, CheckAuthorize (Mst_NNTController.cs:37-38, :198-199)
+/// - WA_Sys_User_GetForCurrentUser (Mst_NNTController.cs:227)
 /// - Sys_User_CheckAuthorize (Master.cs:8199-8212)
 /// - Sys_User_GetAbilityViewOfUser / #tbl_Mst_NNT_ViewAbility (Master.cs:21382-21386)
 /// - RequestLog/ReturnLog (Master.cs:8180-8187, :8284-8292)
@@ -75,6 +76,38 @@ public class Mst_NNTControllerPort : ControllerBase
         {
             Success = true,
             Data = pageInfo
+        });
+    }
+
+    /// <summary>
+    /// Port 1:1 GetAllActive action từ gate Mst_NNTController.cs:189-289.
+    /// Chuỗi gọi nguồn:
+    ///   gate: Mst_NNTController.cs:189-289 (GetAllActive), :666-698 (strWhereClause_Mst_NNT)
+    ///   API:  MstNNTController.cs:20-89 (WA_Mst_NNT_Get)
+    ///   biz:  Master.cs:7933-8030 (WAS_Mst_NNT_Get) -> :8126-8295 (Mst_NNT_Get) -> :21344-21524 (Mst_NNT_GetX)
+    ///
+    /// Nghiệp vụ:
+    /// - Không nhận body/tham số (Mst_NNTController.cs:189).
+    /// - Ft_RecordStart = "0", Ft_RecordCount = "123456000" (BaseController.cs:30-31, Mst_NNTController.cs:264-265).
+    /// - Lọc FlagActive = "1" (Mst_NNTController.cs:235-238, :687-695 toán tử IN).
+    /// - Bỏ qua xác thực session/user hiện tại (loại Đ), chạy theo nhánh SysAdmin (Mst_NNTController.cs:241-250): không lọc OrgID, không lọc KeyWord.
+    /// - Sắp xếp theo mnnt.MST asc (Master.cs:21411).
+    /// - Trả về mảng tràn List&lt;Mst_NNTSearchResultItem&gt;, nếu rỗng trả null (Mst_NNTController.cs:208, :271-276).
+    /// </summary>
+    [HttpPost("getallactive")]
+    public async Task<IActionResult> GetAllActive()
+    {
+        // BaseController.cs:30-31: Ft_RecordStart = "0", Ft_RecordCount = "123456000"
+        // Mst_NNTController.cs:235-238: strWhereClause_Mst_NNT(new Mst_NNTSearch { FlagActive = "1" })
+        var (_, rows) = await GetXAsync(null, null, "1", 0, 123456000);
+
+        // Mst_NNTController.cs:208, :271-276: List<Mst_NNT> listMst_NNT = null;
+        // if (objRT_Mst_NNT.Lst_Mst_NNT != null && objRT_Mst_NNT.Lst_Mst_NNT.Count > 0) listMst_NNT = objRT_Mst_NNT.Lst_Mst_NNT;
+        // objJsonResultEntry.Data = listMst_NNT;
+        return Ok(new
+        {
+            Success = true,
+            Data = rows.Count > 0 ? rows : null
         });
     }
 
