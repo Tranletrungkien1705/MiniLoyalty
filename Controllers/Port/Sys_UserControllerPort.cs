@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
@@ -284,8 +285,8 @@ public class Sys_UserDeleteReq
 }
 
 /// <summary>
-/// Controller Port 1:1 cho Sys_UserController — hạng mục #323 (Search), #324 (GetByUserCode), #325 (GetByMST), #327 (GetForCurrentUser), #328 (GetAllActive), #329 (Create), #330 (CreateCP), #331 (Update), #332 (Delete), #333 (DeleteMultiple), #334 (Import).
-/// Nguồn Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Sys_UserController.cs:498-561, 565-683, 685-837, 841-912, 916-976, 978-1042, 1046-1235
+/// Controller Port 1:1 cho Sys_UserController — hạng mục #323 (Search), #324 (GetByUserCode), #325 (GetByMST), #327 (GetForCurrentUser), #328 (GetAllActive), #329 (Create), #330 (CreateCP), #331 (Update), #332 (Delete), #333 (DeleteMultiple), #334 (Import), #335 (Export).
+/// Nguồn Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Sys_UserController.cs:498-561, 565-683, 685-837, 841-912, 916-976, 978-1042, 1046-1235, 1240-1318
 /// Nguồn API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\SysUserController.cs:199-270, 421-492, 569-640, 643-714
 /// Nguồn Biz LIVE: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\System.cs:8365-8478, 7987-8363 (Sys_User_Get_New20191104), 11222-11323 (WAS_Sys_User_Create), 9218-9391, 10160-10828 (Sys_User_CreateForNetworkX_New20200110), 12524-12617 (WAS_Sys_User_Update), 12243-12523 (Sys_User_Update_New20191226), 13092-13171 (WAS_Sys_User_Delete), 12619-12732 (Sys_User_Delete)
 /// Route: api/sys_user
@@ -297,14 +298,16 @@ public class Sys_UserControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly IConfiguration? _config;
+    private readonly IWebHostEnvironment? _env;
 
     // Hằng số che mật khẩu từ nguồn: TConst.BizMix.Default_PasswordMask = "*********" (Const.Main.BE.cs:13, System.cs:8170, 8211)
     private const string Default_PasswordMask = "*********";
 
-    public Sys_UserControllerPort(AppDbContext db, IConfiguration? config = null)
+    public Sys_UserControllerPort(AppDbContext db, IConfiguration? config = null, IWebHostEnvironment? env = null)
     {
         _db = db;
         _config = config;
+        _env = env;
     }
 
     /// <summary>
@@ -1602,6 +1605,168 @@ public class Sys_UserControllerPort : ControllerBase
             Success = true,
             Data = (object?)null
         });
+    }
+
+    /// <summary>
+    /// Port 1:1 Sys_UserController.Export (#335, gate Sys_UserController.cs:1240-1318).
+    /// Chuỗi gọi:
+    ///   Gate Sys_UserController.cs:1240 -> Sys_UserService.Instance.WA_Sys_User_Get (:1286)
+    ///   -> SysUserController.WA_Sys_User_Get (SysUserController.cs:199-270)
+    ///   -> WAS_Sys_User_Get (System.cs:8365-8478)
+    ///   -> Sys_User_Get_New20191104 (System.cs:7987-8363).
+    /// Tham số nhận qua body JSON: { OrgID, KeyWord, FlagActive } (Sys_UserSearchReq).
+    /// Bộ lọc tái sử dụng từ strWhereClause_Sys_User (Sys_UserController.cs:1394-1419):
+    ///   - KeyWord: EF.Functions.Like trên 4 cột UserName, PhoneNo, EMail, UserCode (:1401-1407)
+    ///   - OrgID: EF.Functions.Like toán tử '=' (:1409-1412)
+    ///   - FlagActive: EF.Functions.Like toán tử '=' (:1413-1416)
+    /// Sắp xếp: OrderBy(x => x.UserCode) (System.cs:8127: "order by su.UserCode asc")
+    /// Phân trang: Gate truyền Ft_RecordStart = "0", Ft_RecordCount = Ft_RecordCount (:1279-1280) -> lấy toàn bộ.
+    /// Nếu không có dữ liệu: throw new mbiz.core.Exceptions.ServiceException("Không có dữ liệu") (:1304)
+    ///   -> trả về lỗi 400 PortResult.Fail("Sys_User_Export", "Message", "Không có dữ liệu").
+    /// Từ điển cột xuất Excel: GetImportDicColums() (gate :1291, :1357-1369) gồm 7 cột:
+    ///   UserCode, UserName, PhoneNo, EMail, MST, mdcpo_DLCPCode, FlagActive.
+    /// Xuất file Excel: PortExcel.ExportToExcelFromList(users, dicColNames, physicalPath, "Sys_User") (:1294).
+    /// Trả về: Success = true, Data = new { Url = ... } (:1296-1299).
+    /// </summary>
+    [HttpPost("export")]
+    public async Task<IActionResult> Export(
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Sys_UserSearchReq? req)
+    {
+        var r = req ?? new Sys_UserSearchReq();
+
+        // 1. Khởi tạo truy vấn bảng Sys_User (#tbl_Sys_User_Filter_Draft trong System.cs:8110-8128)
+        var q = _db.Set<Sys_User>().AsNoTracking().AsQueryable();
+
+        // 2. Lọc theo KeyWord: Sys_UserController.cs:1399-1407
+        // sbSql.AddWhereClause(Tbl_Sys_User + TblSys_User.UserName, "%" + CUtils.StrValue(data.KeyWord) + "%", "like", "or")
+        // sbSql.AddWhereClause(Tbl_Sys_User + TblSys_User.PhoneNo, "%" + CUtils.StrValue(data.KeyWord) + "%", "like", "or")
+        // sbSql.AddWhereClause(Tbl_Sys_User + TblSys_User.EMail, "%" + CUtils.StrValue(data.KeyWord) + "%", "like", "or")
+        // sbSql.AddWhereClause(Tbl_Sys_User + TblSys_User.UserCode, "%" + CUtils.StrValue(data.KeyWord) + "%", "like", "or")
+        if (!string.IsNullOrWhiteSpace(r.KeyWord))
+        {
+            var kw = PortQuery.Contains(r.KeyWord);
+            q = q.Where(x =>
+                EF.Functions.Like((x.UserName ?? "").ToLower(), kw, PortQuery.Esc) ||
+                EF.Functions.Like((x.PhoneNo ?? "").ToLower(), kw, PortQuery.Esc) ||
+                EF.Functions.Like((x.EMail ?? "").ToLower(), kw, PortQuery.Esc) ||
+                EF.Functions.Like((x.UserCode ?? "").ToLower(), kw, PortQuery.Esc));
+        }
+
+        // 3. Lọc theo OrgID: Sys_UserController.cs:1409-1412
+        // sbSql.AddWhereClause(Tbl_Sys_User + TblSys_User.OrgID, CUtils.StrValue(data.OrgID), "=")
+        if (!string.IsNullOrWhiteSpace(r.OrgID))
+        {
+            var org = PortQuery.Equal(r.OrgID);
+            q = q.Where(x => EF.Functions.Like((x.OrgID ?? "").ToLower(), org, PortQuery.Esc));
+        }
+
+        // 4. Lọc theo FlagActive: Sys_UserController.cs:1413-1416
+        // sbSql.AddWhereClause(Tbl_Sys_User + TblSys_User.FlagActive, CUtils.StrValue(data.FlagActive), "=")
+        if (!string.IsNullOrWhiteSpace(r.FlagActive))
+        {
+            var fa = PortQuery.Equal(r.FlagActive);
+            q = q.Where(x => EF.Functions.Like((x.FlagActive ?? "").ToLower(), fa, PortQuery.Esc));
+        }
+
+        // 5. Sắp xếp theo UserCode asc: System.cs:8127 ("order by su.UserCode asc")
+        var ordered = q.OrderBy(x => x.UserCode);
+
+        // 6. Lấy toàn bộ danh sách phù hợp (gate :1279-1280 Ft_RecordStart="0", Ft_RecordCount=Ft_RecordCount)
+        var users = await ordered.ToListAsync();
+
+        // 7. Kiểm tra dữ liệu rỗng: gate Sys_UserController.cs:1287, 1304
+        // throw new mbiz.core.Exceptions.ServiceException("Không có dữ liệu")
+        if (users == null || users.Count == 0)
+        {
+            return PortResult.Fail("Sys_User_Export", "Message", "Không có dữ liệu");
+        }
+
+        // 8. Join bảng phụ Map_DealerCP_Org để lấy mdcpo_DLCPCode (System.cs:8193, 8204-8205)
+        var orgIds = users.Select(u => u.OrgID).Where(c => !string.IsNullOrEmpty(c)).Distinct().ToList();
+        if (orgIds.Count > 0)
+        {
+            var dealerMappings = await (
+                from mo in _db.Set<Mst_Org>().AsNoTracking()
+                where orgIds.Contains(mo.OrgID)
+                join mdcpo in _db.Set<Map_DealerCP_Org>().AsNoTracking() on mo.OrgID equals mdcpo.OrgID into mdcpoGroup
+                from mdcpo in mdcpoGroup.DefaultIfEmpty()
+                select new
+                {
+                    OrgID = mo.OrgID,
+                    DLCPCode = mdcpo != null ? mdcpo.DLCPCode : null
+                }
+            ).ToListAsync();
+
+            var dealerDict = dealerMappings
+                .GroupBy(x => x.OrgID)
+                .ToDictionary(g => g.Key, g => g.FirstOrDefault()?.DLCPCode);
+
+            foreach (var u in users)
+            {
+                if (u.OrgID != null && dealerDict.TryGetValue(u.OrgID, out var dlcpCode))
+                {
+                    u.mdcpo_DLCPCode = dlcpCode;
+                }
+            }
+        }
+
+        // 9. Xác định thư mục webRoot
+        var webRoot = _env?.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = _env != null ? Path.Combine(_env.ContentRootPath, "wwwroot") : Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+        }
+
+        // 10. Lấy từ điển 7 cột xuất Excel: GetImportDicColums() (gate Sys_UserController.cs:1291, 1357-1369)
+        var dicColNames = GetImportDicColums();
+
+        try
+        {
+            // Sinh đường dẫn file Excel: GenExcelExportFilePath (gate Sys_UserController.cs:1293)
+            var (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Sys_User");
+
+            // Xuất danh sách ra Excel: ExcelExport.ExportToExcelFromList (gate Sys_UserController.cs:1294) với sheet "Sys_User"
+            PortExcel.ExportToExcelFromList(users, dicColNames, physicalPath, "Sys_User");
+
+            // Trả về Url tải file (gate Sys_UserController.cs:1296-1299)
+            return Ok(new
+            {
+                Success = true,
+                Data = new
+                {
+                    Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            return PortResult.Fail("Sys_User_Export", "Exception", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Từ điển 7 cột xuất Excel: gate Sys_UserController.cs:1291, 1357-1369 (GetImportDicColums).
+    /// Giữ đúng thứ tự và nhãn cột từ nguồn:
+    /// 1. UserCode -> "Mã người dùng (*)"
+    /// 2. UserName -> "Tên người dùng (*)"
+    /// 3. PhoneNo -> "Số điện thoại"
+    /// 4. EMail -> "Địa chỉ mail"
+    /// 5. MST -> "Mã số thuế"
+    /// 6. mdcpo_DLCPCode -> "Mã đại lý"
+    /// 7. FlagActive -> "Trạng thái"
+    /// </summary>
+    private static Dictionary<string, string> GetImportDicColums()
+    {
+        return new Dictionary<string, string>
+        {
+            { "UserCode", "Mã người dùng (*)" },
+            { "UserName", "Tên người dùng (*)" },
+            { "PhoneNo", "Số điện thoại" },
+            { "EMail", "Địa chỉ mail" },
+            { "MST", "Mã số thuế" },
+            { "mdcpo_DLCPCode", "Mã đại lý" },
+            { "FlagActive", "Trạng thái" }
+        };
     }
 
     /// <summary>
