@@ -251,7 +251,8 @@ public class Mst_ResignReasonControllerPort : ControllerBase
             }
 
             // Mst_ResignReason_CheckResignReason (OrgID, ResignReason, "0", "") (:25443-25456)
-            if (bUpd_ResignReason && !string.Equals(strResignReason, strResignReason_DB, StringComparison.OrdinalIgnoreCase))
+            // StringEqual của nguồn so sánh PHÂN BIỆT hoa/thường (quyết định chung như Mst_Department): đổi tên chỉ khác hoa/thường sẽ vấp chính nó -> báo tồn tại (như nguồn)
+            if (bUpd_ResignReason && !string.Equals(strResignReason, strResignReason_DB, StringComparison.Ordinal))
             {
                 var nameExist = await _db.Set<Mst_ResignReason>().AsNoTracking()
                     .AnyAsync(x => EF.Functions.Like((x.OrgID ?? "").ToLower(), PortQuery.Equal(strOrgID ?? ""), PortQuery.Esc)
