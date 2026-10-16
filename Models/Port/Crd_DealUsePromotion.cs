@@ -287,3 +287,80 @@ public class Crd_DealUsePromotionSeeder : IPortSeeder
         await db.SaveChangesAsync();
     }
 }
+
+/// <summary>
+/// Seeder dữ liệu mẫu phục vụ kiểm thử Crd_DealUsePromotionController/Search (#023).
+/// Order => 73 (chưa dùng trong dải 10-99). Idempotent.
+/// </summary>
+public class Crd_DealUsePromotionSearchSeeder : IPortSeeder
+{
+    public int Order => 73;
+
+    public async Task SeedAsync(AppDbContext db)
+    {
+        const string net = "1001";
+        const string user = "seed";
+
+        var members = new[]
+        {
+            new { MemberNo = "MEM_PRM_01", MemberName = "Nguyen Van A", PhoneNo = "0988000001", MemberStatus = "APPROVE", LogLUDTime = DateTime.Parse("2026-10-01T10:00:00Z", null, System.Globalization.DateTimeStyles.RoundtripKind) },
+            new { MemberNo = "MEM_PRM_02", MemberName = "Tran Thi B", PhoneNo = "0988000002", MemberStatus = "APPROVE", LogLUDTime = DateTime.Parse("2026-10-02T10:00:00Z", null, System.Globalization.DateTimeStyles.RoundtripKind) },
+            new { MemberNo = "MEM_PRM_03", MemberName = "Le Van C", PhoneNo = "0988000003", MemberStatus = "APPROVE", LogLUDTime = DateTime.Parse("2026-10-03T10:00:00Z", null, System.Globalization.DateTimeStyles.RoundtripKind) },
+            new { MemberNo = "MEM_PRM_04", MemberName = "Pham Van D", PhoneNo = "0988000001", MemberStatus = "APPROVE", LogLUDTime = DateTime.Parse("2026-10-04T10:00:00Z", null, System.Globalization.DateTimeStyles.RoundtripKind) },
+        };
+
+        foreach (var m in members)
+        {
+            if (!await db.Set<CrdMember>().AnyAsync(x => x.MemberNo == m.MemberNo))
+            {
+                db.Set<CrdMember>().Add(new CrdMember
+                {
+                    MemberNo = m.MemberNo,
+                    MemberName = m.MemberName,
+                    PhoneNo = m.PhoneNo,
+                    MemberStatus = m.MemberStatus,
+                    NetworkID = net,
+                    CreateDTimeUTC = m.LogLUDTime,
+                    CreateBy = user,
+                    LUDTimeUTC = m.LogLUDTime,
+                    LUBy = user,
+                    LogLUDTimeUTC = m.LogLUDTime,
+                    LogLUBy = user
+                });
+            }
+        }
+
+        var cards = new[]
+        {
+            new { CardNo = "CARD_PRM_01", MemberNo = "MEM_PRM_01", CardStatus = "APPROVE", CardTypeUse = "GOLD", LogLUDTime = DateTime.Parse("2026-10-01T10:00:00Z", null, System.Globalization.DateTimeStyles.RoundtripKind) },
+            new { CardNo = "CARD_PRM_02", MemberNo = "MEM_PRM_02", CardStatus = "APPROVE", CardTypeUse = "SILVER", LogLUDTime = DateTime.Parse("2026-10-02T10:00:00Z", null, System.Globalization.DateTimeStyles.RoundtripKind) },
+            new { CardNo = "CARD_PRM_03", MemberNo = "MEM_PRM_03", CardStatus = "APPROVE", CardTypeUse = "PLATINUM", LogLUDTime = DateTime.Parse("2026-10-03T10:00:00Z", null, System.Globalization.DateTimeStyles.RoundtripKind) },
+            new { CardNo = "CARD_PRM_04", MemberNo = "MEM_PRM_04", CardStatus = "PENDING", CardTypeUse = "GOLD", LogLUDTime = DateTime.Parse("2026-10-04T10:00:00Z", null, System.Globalization.DateTimeStyles.RoundtripKind) },
+        };
+
+        foreach (var c in cards)
+        {
+            if (!await db.Set<CrdCard>().AnyAsync(x => x.CardNo == c.CardNo))
+            {
+                db.Set<CrdCard>().Add(new CrdCard
+                {
+                    CardNo = c.CardNo,
+                    MemberNo = c.MemberNo,
+                    CardStatus = c.CardStatus,
+                    CardTypeUse = c.CardTypeUse,
+                    CardTypeInit = c.CardTypeUse,
+                    CardSourceCode = "NEW",
+                    NetworkID = net,
+                    CreateDTimeUTC = c.LogLUDTime,
+                    CreateBy = user,
+                    LUDTimeUTC = c.LogLUDTime,
+                    LUBy = user,
+                    LogLUDTimeUTC = c.LogLUDTime,
+                    LogLUBy = user
+                });
+            }
+        }
+
+        await db.SaveChangesAsync();
+    }
+}

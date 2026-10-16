@@ -13,16 +13,21 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ===========================================================================================
-// PORT 1:1 từ dự án nguồn 2022.7.Loyalty — Crd_DealUsePromotionController/Save (#022).
+// PORT 1:1 từ dự án nguồn 2022.7.Loyalty — Crd_DealUsePromotionController (Save #022, Search #023).
 //
 // Nguồn tra cứu (chỉ đọc):
-//   - Gate:     13.ClientGate/V10/idn.Loyalty.WebAPI/Controllers/Crd_DealUsePromotionController.cs:32-120
-//   - API:      11.BackEnd/V10/idn.Loyalty.Biz.Web/Controllers/CrdDealUsePromotionController.cs:23-93
+//   - Gate:     13.ClientGate/V10/idn.Loyalty.WebAPI/Controllers/Crd_DealUsePromotionController.cs:32-120 (Save)
+//               Crd_DealUsePromotionController.cs:124-203 (Search), :460-477 (strWhereClause_Crd_Card)
+//   - API:      11.BackEnd/V10/idn.Loyalty.Biz.Web/Controllers/CrdDealUsePromotionController.cs:23-93 (Save)
+//               CrdDealUsePromotionController.cs:169-239 (Search WA_Crd_Card_GetForPromotion)
 //   - Biz LIVE: 11.BackEnd/V10/idn.Loyalty.Biz/Master.Loyalty.cs:16214-16309 (WAS_Crd_DealUsePromotion_Save)
 //               Master.Loyalty.cs:16061-16212 (Crd_DealUsePromotion_Save)
 //               Master.Loyalty.cs:15549-16059 (Crd_DealUsePromotion_SaveX)
 //               Transaction.AddPoint.cs:1072-1484 (Crd_DealUsePromotion_PerformX)
 //               Card.cs:13271-13339 (Crd_Member_UpdateDTime)
+//               Master.Loyalty.cs:16790-16903 (WAS_Crd_Card_GetForPromotion)
+//               Master.Loyalty.cs:16904-17062 (Crd_Card_GetForPromotion)
+//               Master.Loyalty.cs:17063-17460 (Crd_Card_GetForPromotionX)
 // ===========================================================================================
 
 /// <summary>
@@ -50,6 +55,121 @@ public class Crd_DealUsePromotionDtlInput
     public double? QtyPr { get; set; }
     public double? QtyPrUsed { get; set; }
     public double? QtyPrChTotal { get; set; }
+}
+
+/// <summary>
+/// DTO yêu cầu tìm kiếm thẻ hội viên để sử dụng ưu đãi Crd_DealUsePromotion/Search (#023).
+/// Nguồn gate: Crd_DealUsePromotionController.cs:124.
+/// </summary>
+public class Crd_DealUsePromotionSearchReq
+{
+    public string? PhoneNo { get; set; }
+    public string? MemberNo { get; set; }
+    public int Ft_PageIndex { get; set; } = 0;
+    public int Ft_PageSize { get; set; } = 10;
+}
+
+/// <summary>
+/// DTO thông tin thẻ hội viên trả về từ Crd_DealUsePromotion/Search (#023).
+/// Chứa đầy đủ thuộc tính từ Crd_Card và Crd_Member theo model nguồn Crd_Card.cs:1-120.
+/// </summary>
+public class Crd_DealUsePromotionSearchItem
+{
+    public long? MyIdxSeq { get; set; }
+
+    // Crd_Card fields (Crd_Card.cs:11-54)
+    public string? CardNo { get; set; }
+    public string? CardNoPrev { get; set; }
+    public string? NetworkID { get; set; }
+    public string? MemberNo { get; set; }
+    public string? DLCodeExceptionally { get; set; }
+    public string? CardSourceCode { get; set; }
+    public string? RankPolicyCode { get; set; }
+    public double? PointBonus { get; set; }
+    public double? PointPurchaseAddCar { get; set; }
+    public DateTime? EffDateStart { get; set; }
+    public DateTime? EffDateEnd { get; set; }
+    public double? PointTotal { get; set; }
+    public double? PointBlock { get; set; }
+    public double? PointAvail { get; set; }
+    public double? AmountTotal { get; set; }
+    public double? AmountBlock { get; set; }
+    public double? AmountAvail { get; set; }
+    public double? QtyVisitTotal { get; set; }
+    public double? QtyVisitBlock { get; set; }
+    public double? QtyVisitAvail { get; set; }
+    public double? PointCardRank { get; set; }
+    public double? TotalAmountPeriod { get; set; }
+    public string? CardTypeUse { get; set; }
+    public string? CardTypeInit { get; set; }
+    public string? CardTypeUsePrev { get; set; }
+    public string? CardTypeInitPrev { get; set; }
+    public DateTime? CardActiveDate { get; set; }
+    public string? FlagExceptionally { get; set; }
+    public string? RankActionType { get; set; }
+    public string? CardTypeUseExpect { get; set; }
+    public string? CardTypeInitExpect { get; set; }
+    public DateTime? CreateDTimeUTC { get; set; }
+    public string? CreateBy { get; set; }
+    public DateTime? LUDTimeUTC { get; set; }
+    public string? LUBy { get; set; }
+    public DateTime? ApproveDTimeUTC { get; set; }
+    public string? ApproveBy { get; set; }
+    public DateTime? CancelDTimeUTC { get; set; }
+    public string? CancelBy { get; set; }
+    public string? CardStatus { get; set; }
+    public string? Remark { get; set; }
+    public DateTime? LogLUDTimeUTC { get; set; }
+    public string? LogLUBy { get; set; }
+
+    // Crd_Member fields (Crd_Card.cs:56-120)
+    public string? MemberName { get; set; }
+    public string? MemberStatus { get; set; }
+    public string? IDCardNo { get; set; }
+    public string? MemberGender { get; set; }
+    public string? MemAddress { get; set; }
+    public DateTime? DateOfBirth { get; set; }
+    public string? PhoneNo { get; set; }
+    public string? CarNo { get; set; }
+    public string? VIN { get; set; }
+    public string? ModelCode { get; set; }
+    public string? ModelName { get; set; }
+    public string? BrandName { get; set; }
+    public string? ProvinceCode { get; set; }
+    public string? ProvinceName { get; set; }
+    public string? DistrictCode { get; set; }
+    public string? DistrictName { get; set; }
+    public DateTime? WarrantyExpiryDate { get; set; }
+    public DateTime? InvoiceDate { get; set; }
+    public DateTime? MemberActiveDate { get; set; }
+    public DateTime? InactiveDTimeUTC { get; set; }
+    public double? PointBegin { get; set; }
+    public double? PointEnd { get; set; }
+    public double? RevenueMiss { get; set; }
+    public double? QtyVisitMiss { get; set; }
+    public string? cc_FlagShow { get; set; }
+    public string? cm_FlagShow { get; set; }
+    public double? AmountEnd { get; set; }
+    public string? mdcp_DLCPCode { get; set; }
+    public string? mdcp_DLCPName { get; set; }
+    public string? mcm_ModelName { get; set; }
+    public double? PointExpiry { get; set; }
+    public double? AmountRef { get; set; }
+    public double? ConvertValue { get; set; }
+    public double? ConvertPoint { get; set; }
+    public double? PolicyAmountUnit { get; set; }
+    public double? PolicyPointUnit { get; set; }
+    public string? PolicyCode { get; set; }
+    public string? ParamCode { get; set; }
+    public string? ParamPointUnit { get; set; }
+    public string? ParamAmountUnit { get; set; }
+    public double? PointAccumulated { get; set; }
+    public double? PointUse { get; set; }
+    public string? TradeMarkCode { get; set; }
+    public string? DLCodeRequest { get; set; }
+    public double? PointVoucher { get; set; }
+    public string? PurchaseType { get; set; }
+    public string? PurchaseTypeName { get; set; }
 }
 
 [ApiController]
@@ -449,5 +569,159 @@ public class Crd_DealUsePromotionControllerPort : ControllerBase
             await tx.RollbackAsync();
             return PortResult.Fail("Crd_DealUsePromotion_Save", "Exception", ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Port 1:1 action Search — Tìm kiếm thẻ hội viên để sử dụng ưu đãi Crd_DealUsePromotion/Search (#023).
+    /// Nguồn: Crd_DealUsePromotionController.cs:124-203 (gate), CrdDealUsePromotionController.cs:169-239 (API),
+    /// Master.Loyalty.cs:16790-17460 (biz WAS_Crd_Card_GetForPromotion, Crd_Card_GetForPromotion, Crd_Card_GetForPromotionX).
+    /// </summary>
+    [HttpPost("search")]
+    public async Task<IActionResult> Search([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_DealUsePromotionSearchReq? req)
+    {
+        req ??= new Crd_DealUsePromotionSearchReq();
+
+        // 1. Join Crd_Card và Crd_Member (Master.Loyalty.cs:17192-17193)
+        // và Guard cứng CardStatus == 'APPROVE' (Master.Loyalty.cs:17196)
+        var query = from cc in _db.CrdCards
+                    join cm in _db.CrdMembers on cc.MemberNo equals cm.MemberNo
+                    where cc.CardStatus == "APPROVE"
+                    select new { cc, cm };
+
+        // 2. Lọc PhoneNo trên Crd_Member với toán tử '=' nguyên chuỗi (Crd_DealUsePromotionController.cs:470-473)
+        if (!string.IsNullOrWhiteSpace(req.PhoneNo))
+        {
+            var p_PhoneNo = PortQuery.Equal(req.PhoneNo);
+            query = query.Where(x => EF.Functions.Like((x.cm.PhoneNo ?? "").ToLower(), p_PhoneNo, PortQuery.Esc));
+        }
+
+        // 3. Lọc MemberNo trên Crd_Member với toán tử '=' nguyên chuỗi (Crd_DealUsePromotionController.cs:466-469)
+        if (!string.IsNullOrWhiteSpace(req.MemberNo))
+        {
+            var p_MemberNo = PortQuery.Equal(req.MemberNo);
+            query = query.Where(x => EF.Functions.Like((x.cm.MemberNo ?? "").ToLower(), p_MemberNo, PortQuery.Esc));
+        }
+
+        // 4. Sắp xếp: order by cc.LogLUDTimeUTC desc, cc.CardNo desc (Master.Loyalty.cs:17197, :17246)
+        var ordered = query.OrderByDescending(x => x.cc.LogLUDTimeUTC).ThenByDescending(x => x.cc.CardNo);
+
+        // 5. Đếm tổng số bản ghi MyCount (#tbl_Crd_Card_Filter_Draft, Master.Loyalty.cs:17201)
+        var itemCount = await ordered.CountAsync();
+
+        // 6. Xử lý phân trang theo Bài học A.12 và A.7:
+        var pageSize = req.Ft_PageSize;
+        var pageIndex = req.Ft_PageIndex;
+        var ps = pageSize <= 0 ? 10 : pageSize;
+        var pageCount = (pageSize <= 0 || pageIndex < 0 || itemCount == 0) ? 0 : (itemCount % ps == 0 ? itemCount / ps : itemCount / ps + 1);
+
+        List<Crd_DealUsePromotionSearchItem> dataList;
+
+        if (pageSize <= 0 || pageIndex < 0 || itemCount == 0)
+        {
+            dataList = new List<Crd_DealUsePromotionSearchItem>();
+        }
+        else
+        {
+            long recordStart = (long)pageIndex * pageSize;
+            long recordCount = pageSize;
+
+            var rows = await ordered
+                .Skip((int)Math.Min(recordStart, int.MaxValue))
+                .Take((int)Math.Min(recordCount, int.MaxValue))
+                .ToListAsync();
+
+            dataList = rows.Select((x, idx) => MapToSearchItem(x.cc, x.cm, recordStart + idx)).ToList();
+        }
+
+        var pageInfo = new PageInfo<Crd_DealUsePromotionSearchItem>(
+            dataList,
+            itemCount,
+            pageCount,
+            pageIndex,
+            pageSize
+        );
+
+        return Ok(new { Success = true, Data = pageInfo });
+    }
+
+    private static Crd_DealUsePromotionSearchItem MapToSearchItem(CrdCard cc, CrdMember cm, long? idx = null)
+    {
+        return new Crd_DealUsePromotionSearchItem
+        {
+            MyIdxSeq = idx,
+
+            // Crd_Card fields (Crd_Card.cs:11-54)
+            CardNo = cc.CardNo,
+            CardNoPrev = cc.CardNoPrev,
+            NetworkID = cc.NetworkID,
+            MemberNo = cc.MemberNo,
+            DLCodeExceptionally = cc.DLCodeExceptionally,
+            CardSourceCode = cc.CardSourceCode,
+            RankPolicyCode = cc.RankPolicyCode,
+            PointBonus = cc.PointBonus,
+            PointPurchaseAddCar = cc.PointPurchaseAddCar,
+            EffDateStart = cc.EffDateStart,
+            EffDateEnd = cc.EffDateEnd,
+            PointTotal = cc.PointTotal,
+            PointBlock = cc.PointBlock,
+            PointAvail = cc.PointAvail,
+            AmountTotal = cc.AmountTotal,
+            AmountBlock = cc.AmountBlock,
+            AmountAvail = cc.AmountAvail,
+            QtyVisitTotal = cc.QtyVisitTotal,
+            QtyVisitBlock = cc.QtyVisitBlock,
+            QtyVisitAvail = cc.QtyVisitAvail,
+            PointCardRank = cc.PointCardRank,
+            TotalAmountPeriod = cc.TotalAmountPeriod,
+            CardTypeUse = cc.CardTypeUse,
+            CardTypeInit = cc.CardTypeInit,
+            CardTypeUsePrev = cc.CardTypeUsePrev,
+            CardTypeInitPrev = cc.CardTypeInitPrev,
+            CardActiveDate = cc.CardActiveDate,
+            FlagExceptionally = cc.FlagExceptionally,
+            RankActionType = cc.RankActionType,
+            CardTypeUseExpect = cc.CardTypeUseExpect,
+            CardTypeInitExpect = cc.CardTypeInitExpect,
+            CreateDTimeUTC = cc.CreateDTimeUTC,
+            CreateBy = cc.CreateBy,
+            LUDTimeUTC = cc.LUDTimeUTC,
+            LUBy = cc.LUBy,
+            ApproveDTimeUTC = cc.ApproveDTimeUTC,
+            ApproveBy = cc.ApproveBy,
+            CancelDTimeUTC = cc.CancelDTimeUTC,
+            CancelBy = cc.CancelBy,
+            CardStatus = cc.CardStatus,
+            Remark = cc.Remark,
+            LogLUDTimeUTC = cc.LogLUDTimeUTC,
+            LogLUBy = cc.LogLUBy,
+
+            // Crd_Member fields (Crd_Card.cs:56-120)
+            MemberName = cm.MemberName,
+            MemberStatus = cm.MemberStatus,
+            IDCardNo = cm.IDCardNo,
+            MemberGender = cm.MemberGender,
+            MemAddress = cm.MemAddress,
+            DateOfBirth = cm.DateOfBirth,
+            PhoneNo = cm.PhoneNo,
+            CarNo = cm.CarNo,
+            VIN = cm.VIN,
+            ModelCode = cm.ModelCode,
+            ModelName = cm.ModelName,
+            TradeMarkCode = cm.TradeMarkCode,
+            ProvinceCode = cm.ProvinceCode,
+            DistrictCode = cm.DistrictCode,
+            WarrantyExpiryDate = cm.WarrantyExpiryDate,
+            InvoiceDate = cm.InvoiceDate,
+            MemberActiveDate = cm.MemberActiveDate,
+            InactiveDTimeUTC = cm.InactiveDTimeUTC,
+            PointBegin = cm.PointBegin,
+            PointEnd = cm.PointEnd,
+            AmountEnd = cm.AmountEnd,
+            PointVoucher = cm.PointVoucher,
+            PurchaseType = cm.PurchaseType,
+            mdcp_DLCPCode = cm.DLCodeRegis,
+            DLCodeRequest = cm.DLCodeRegis,
+            mcm_ModelName = cm.ModelName
+        };
     }
 }
