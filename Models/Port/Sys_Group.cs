@@ -70,6 +70,11 @@ public class Sys_UserInGroup
 
     /// <summary>Mã nhóm người dùng (PK ghép) - Sys_UserInGroup.cs:11</summary>
     public string GroupCode { get; set; } = "";
+
+    /// <summary>Thời điểm cập nhật UTC - model nguồn Sys_UserInGroup.LogLUDTimeUTC (suig.* của Sys_Group_Get)</summary>
+    public DateTime? LogLUDTimeUTC { get; set; }
+
+    public string? LogLUBy { get; set; }
 }
 
 /// <summary>Cấu hình EF cho <see cref="Sys_UserInGroup"/>.</summary>
@@ -110,9 +115,9 @@ public class Sys_GroupSeeder : IPortSeeder
         if (!await db.Set<Sys_UserInGroup>().AnyAsync())
         {
             await db.Set<Sys_UserInGroup>().AddRangeAsync(
-                new Sys_UserInGroup { UserCode = "U1", GroupCode = "G01" },
-                new Sys_UserInGroup { UserCode = "U2", GroupCode = "G01" },
-                new Sys_UserInGroup { UserCode = "U3", GroupCode = "G02" }
+                new Sys_UserInGroup { UserCode = "U1", GroupCode = "G01", LogLUBy = "seed", LogLUDTimeUTC = new DateTime(2026, 10, 10, 10, 0, 0, DateTimeKind.Utc) },
+                new Sys_UserInGroup { UserCode = "U2", GroupCode = "G01", LogLUBy = "seed", LogLUDTimeUTC = new DateTime(2026, 10, 10, 10, 0, 0, DateTimeKind.Utc) },
+                new Sys_UserInGroup { UserCode = "U3", GroupCode = "G02", LogLUBy = "seed", LogLUDTimeUTC = new DateTime(2026, 10, 10, 10, 0, 0, DateTimeKind.Utc) }
             );
         }
 

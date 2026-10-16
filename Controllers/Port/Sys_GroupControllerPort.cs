@@ -14,8 +14,9 @@ namespace MiniLoyalty.Controllers.Port;
 // PORT 1:1 — Sys_GroupController:
 //   - Search (#307)
 //   - GetAllActive (#308)
+//   - GetByGroupCode (#309)
 //
-// Nguồn gate: Sys_GroupController.cs:27-135 (Search), 136-243 (GetAllActive) -> WA_Sys_Group_Get
+// Nguồn gate: Sys_GroupController.cs:27-135 (Search), 136-243 (GetAllActive), 244-310 (GetByGroupCode) -> WA_Sys_Group_Get
 //   - Search: Nhận OrgID, KeyWord, FlagActive, Ft_PageIndex = 0, Ft_PageSize = 10
 //   - GetAllActive: Nhận FlagActive = "1" (:163), OrgID đưa vào request nhưng không lọc
 //   - Hàm lọc strWhereClause_Sys_Group (:917-932):
@@ -182,6 +183,78 @@ public class Sys_GroupControllerPort : ControllerBase
             Data = rows.Count > 0 ? rows : null
         });
     }
+
+    /// <summary>
+    /// Port 1:1 GetByGroupCode action từ gate Sys_GroupController.cs:244-310 (#309).
+    /// </summary>
+    [HttpPost("getbygroupcode")]
+    public async Task<IActionResult> GetByGroupCode([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Sys_GroupGetByGroupCodeReq? req)
+    {
+        // Gate Sys_GroupController.cs:265: nếu GroupCode rỗng -> trả Data = null (không gọi DB)
+        if (req == null || string.IsNullOrWhiteSpace(req.GroupCode))
+        {
+            return Ok(new
+            {
+                Success = true,
+                Data = (object?)null
+            });
+        }
+
+        var groupCode = req.GroupCode.Trim();
+
+        // Gate :267-289, Biz WAS_Sys_Group_Get System.cs:2550 -> Sys_Group_Get_New20191102 :2318
+        // Truy vấn 1 bản ghi Sys_Group theo GroupCode bằng Like với toán tử = (không phân biệt hoa/thường)
+        var matchedGroup = await _db.Set<Sys_Group>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => EF.Functions.Like((x.GroupCode ?? "").ToLower(), PortQuery.Equal(groupCode), PortQuery.Esc));
+
+        // Gate :290-297: Nếu không tìm thấy nhóm -> Data = null
+        if (matchedGroup == null)
+        {
+            return Ok(new
+            {
+                Success = true,
+                Data = (object?)null
+            });
+        }
+
+        // Biz System.cs:2374-2393: Truy vấn Sys_UserInGroup theo GroupCode
+        // Left join Sys_Group (sg) để lấy sg_GroupCode, sg_GroupName, sg_FlagActive
+        // Left join Sys_User (su) để lấy su_UserCode, su_UserName, su_FlagSysAdmin, su_FlagActive
+        // (Entity Sys_User chưa có trong repo -> gán null cho các cột su_... và ghi GAP)
+        var groupCodePattern = PortQuery.Equal(matchedGroup.GroupCode);
+        var usersInGroup = await (from suig in _db.Set<Sys_UserInGroup>().AsNoTracking()
+                                  where EF.Functions.Like((suig.GroupCode ?? "").ToLower(), groupCodePattern, PortQuery.Esc)
+                                  join sg in _db.Set<Sys_Group>().AsNoTracking()
+                                      on suig.GroupCode equals sg.GroupCode into sgJoin
+                                  from sg in sgJoin.DefaultIfEmpty()
+                                  select new Sys_UserInGroupRes
+                                  {
+                                      UserCode = suig.UserCode,
+                                      GroupCode = suig.GroupCode,
+                                      LogLUDTimeUTC = suig.LogLUDTimeUTC,
+                                      LogLUBy = suig.LogLUBy,
+                                      su_UserCode = null,
+                                      su_UserName = null,
+                                      su_FlagSysAdmin = null,
+                                      su_FlagActive = null,
+                                      sg_GroupCode = sg != null ? sg.GroupCode : null,
+                                      sg_GroupName = sg != null ? sg.GroupName : null,
+                                      sg_FlagActive = sg != null ? sg.FlagActive : null
+                                  }).ToListAsync();
+
+        var res = new Sys_GroupGetByGroupCodeRes
+        {
+            objSys_Group = matchedGroup,
+            Lst_Sys_UserInGroup = usersInGroup
+        };
+
+        return Ok(new
+        {
+            Success = true,
+            Data = res
+        });
+    }
 }
 
 /// <summary>
@@ -225,3 +298,45 @@ public class Sys_GroupGetAllActiveRes
     public string? LogLUBy { get; set; }
     public string? MST { get; set; }
 }
+
+/// <summary>
+/// DTO request cho action GetByGroupCode — Sys_GroupController.cs:244 (#309).
+/// </summary>
+public class Sys_GroupGetByGroupCodeReq
+{
+    public string? GroupCode { get; set; }
+    public string? OrgID { get; set; }
+}
+
+/// <summary>
+/// DTO response cho action GetByGroupCode (Gate Sys_GroupController.cs:293).
+/// Gồm 2 property: objSys_Group và Lst_Sys_UserInGroup.
+/// </summary>
+public class Sys_GroupGetByGroupCodeRes
+{
+    public Sys_Group? objSys_Group { get; set; }
+    public List<Sys_UserInGroupRes> Lst_Sys_UserInGroup { get; set; } = new();
+}
+
+/// <summary>
+/// DTO từng dòng trong Lst_Sys_UserInGroup (SQL System.cs:2374-2393).
+/// Gồm các trường cơ sở của Sys_UserInGroup và các cột mở rộng từ Sys_User và Sys_Group.
+/// </summary>
+public class Sys_UserInGroupRes
+{
+    public string UserCode { get; set; } = "";
+    public string GroupCode { get; set; } = "";
+    public DateTime? LogLUDTimeUTC { get; set; }
+    public string? LogLUBy { get; set; }
+    // (suig.* không có cột MST)
+
+    public string? su_UserCode { get; set; }
+    public string? su_UserName { get; set; }
+    public string? su_FlagSysAdmin { get; set; }
+    public string? su_FlagActive { get; set; }
+
+    public string? sg_GroupCode { get; set; }
+    public string? sg_GroupName { get; set; }
+    public string? sg_FlagActive { get; set; }
+}
+
