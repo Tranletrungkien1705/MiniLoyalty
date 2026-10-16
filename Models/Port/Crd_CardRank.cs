@@ -245,6 +245,72 @@ public class Crd_CardRankSeeder : IPortSeeder
             LUBy = "seed"
         });
 
+        // Bản ghi phục vụ duyệt xuống hạng ApproveRankDown (#009)
+        if (!await db.CrdMembers.AnyAsync(m => m.MemberNo == "MBDOWN01"))
+        {
+            db.CrdMembers.Add(new CrdMember
+            {
+                MemberNo = "MBDOWN01",
+                NetworkID = "1001",
+                OrgID = "1001",
+                DLCodeRegis = "VS058", // 5 ký tự chuẩn theo Card.cs:27706
+                MemberName = "Nguyen Van Down",
+                IDCardNo = "001099000009",
+                PhoneNo = "0909999999",
+                MemberStatus = "APPROVE",
+                CardTypeUse = "GOLD",
+                CardTypeInit = "GOLD",
+                PointBegin = 0,
+                PointAvail = 100,
+                AmountBegin = 0,
+                AmountAvail = 1000000,
+                QtyVisitBegin = 0,
+                QtyVisitAvail = 1,
+                PointCardRank = 100,
+                CreateDTimeUTC = new DateTime(2025, 1, 15, 10, 0, 0, DateTimeKind.Utc),
+                CreateBy = "seed",
+                LUDTimeUTC = new DateTime(2025, 1, 15, 10, 0, 0, DateTimeKind.Utc),
+                LUBy = "seed"
+            });
+        }
+        if (!await db.CrdCards.AnyAsync(c => c.CardNo == "CARD_DOWN_01"))
+        {
+            db.CrdCards.Add(new CrdCard
+            {
+                CardNo = "CARD_DOWN_01",
+                MemberNo = "MBDOWN01",
+                NetworkID = "1001",
+                CardTypeUse = "GOLD",
+                CardTypeInit = "GOLD",
+                CardStatus = "APPROVE",
+                EffDateStart = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                EffDateEnd = new DateTime(2025, 12, 31, 0, 0, 0, DateTimeKind.Utc), // Đã hết hạn trước dtimeSys
+                CreateDTimeUTC = new DateTime(2025, 1, 15, 10, 0, 0, DateTimeKind.Utc),
+                CreateBy = "seed",
+                LUDTimeUTC = new DateTime(2025, 1, 15, 10, 0, 0, DateTimeKind.Utc),
+                LUBy = "seed"
+            });
+        }
+
         await db.SaveChangesAsync();
+    }
+}
+
+/// <summary>
+/// Bảng sinh sequence cho CardRankNo — port 1:1 Seq_CardRankNo (Seq.cs:138, SeqType.CardRankNo; PK AutoId tự tăng).
+/// </summary>
+public class Seq_CardRankNo
+{
+    public long AutoId { get; set; }
+    public string? Remark { get; set; }
+}
+
+public class Seq_CardRankNoConfig : IEntityTypeConfiguration<Seq_CardRankNo>
+{
+    public void Configure(EntityTypeBuilder<Seq_CardRankNo> b)
+    {
+        b.ToTable("Seq_CardRankNo");
+        b.HasKey(x => x.AutoId);
+        b.Property(x => x.AutoId).ValueGeneratedOnAdd();
     }
 }
