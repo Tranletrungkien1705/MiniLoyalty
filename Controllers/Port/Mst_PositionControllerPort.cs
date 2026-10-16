@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
@@ -14,7 +16,7 @@ namespace MiniLoyalty.Controllers.Port
 {
 
 // ============================================================================================
-// PORT 1:1 — port 1:1 Mst_PositionController.cs — Mst_Position (#197, #198, #199, #200, #201, #202, #203).
+// PORT 1:1 — port 1:1 Mst_PositionController.cs — Mst_Position (#197, #198, #199, #200, #201, #202, #203, #204).
 //
 // Nguồn controller (tầng gate):
 //   - Mst_PositionController.cs:26-106   Search -> WA_Mst_Position_Get (#197)
@@ -24,6 +26,7 @@ namespace MiniLoyalty.Controllers.Port
 //   - Mst_PositionController.cs:325-391  Update -> WA_Mst_Position_Update (#201)
 //   - Mst_PositionController.cs:395-456  Delete -> WA_Mst_Position_Delete (#202)
 //   - Mst_PositionController.cs:458-522  DeleteMultiple -> WA_Mst_Position_Delete (#203)
+//   - Mst_PositionController.cs:527-605  Export -> WA_Mst_Position_Get (#204)
 //   - Mst_PositionController.cs:624-652  strWhereClause_Mst_Position (mệnh đề lọc Search & GetAllActive)
 //   - Mst_PositionController.cs:654-673  strWhereClause_Mst_Position_By_PositionCode (mệnh đề lọc GetByPositionCode)
 // Nguồn API:
@@ -147,6 +150,14 @@ public class MstPositionDeleteReq
 }
 
 /// <summary>
+/// Port 1:1 tham số đầu vào của Export (gate Mst_PositionController.cs:527).
+/// Kế thừa MstPositionSearchReq (OrgID, KeyWord, FlagActive, Ft_PageIndex, Ft_PageSize).
+/// </summary>
+public class MstPositionExportReq : MstPositionSearchReq
+{
+}
+
+/// <summary>
 /// DTO dòng kết quả tìm kiếm chức danh — 9 cột từ bảng Mst_Position + MyIdxSeq (0-based) + mnnt_NNTFullName (left join Mst_NNT).
 /// Nguồn: MasterData.cs:23157-23173, idn.Loyalty.Common\Models\HRM\Mst_Position.cs:1-22.
 /// </summary>
@@ -172,10 +183,12 @@ public class Mst_PositionControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly IConfiguration? _config;
+    private readonly IWebHostEnvironment? _env;
 
-    public Mst_PositionControllerPort(AppDbContext db, IConfiguration? config = null)
+    public Mst_PositionControllerPort(AppDbContext db, IWebHostEnvironment? env = null, IConfiguration? config = null)
     {
         _db = db;
+        _env = env;
         _config = config;
     }
 
@@ -613,6 +626,118 @@ public class Mst_PositionControllerPort : ControllerBase
 
         // 3. Thành công trả Data = null (gate Mst_PositionController.cs:508-509)
         return Ok(new { Success = true, Data = (object?)null });
+    }
+
+    // ============================================================================================
+    // Export — nguồn gate Mst_PositionController.cs:527-605 (#204) -> API WA_Mst_Position_Get
+    // (MstPositionController.cs:17-88) -> biz WAS_Mst_Position_Get (MasterData.cs:23357-23450)
+    // -> biz Mst_Position_Get (MasterData.cs:23226-23355, luôn Rollback :23318, KHÔNG ghi DB)
+    // -> biz Mst_Position_GetX (MasterData.cs:23056-23224).
+    //
+    // Quy trình và thứ tự xử lý:
+    //   1. Body JSON: { OrgID, KeyWord, FlagActive } (gate :527, :548-553).
+    //   2. Gọi GetXAsync(req.KeyWord, req.OrgID, req.FlagActive, 0, int.MaxValue, null).
+    //      Nguồn: strWhereClause_Mst_Position (:624-652):
+    //        - KeyWord: like '%KeyWord%' trên PositionName (:629-632). KHÔNG lọc PositionCode.
+    //        - OrgID: CÓ lọc bằng toán tử '=' nếu OrgID được truyền (:633-636).
+    //        - FlagActive: tách dấu phẩy -> toán tử IN ('a','b') (:641-649).
+    //      Ft_RecordStart = "0" (:566), Ft_RecordCount = Ft_RecordCount (nguồn gán từ cấu hình/hằng số, ở đây int.MaxValue) (:567).
+    //   3. Kiểm tra danh sách kết quả: gate :574, :589-592
+    //      Nếu danh sách rỗng (rows == null || rows.Count == 0) -> throw ServiceException("Không có dữ liệu") (:591)
+    //      -> trả về 400 ErridnLoyalty.Mst_Position_Export kèm Params Message = "Không có dữ liệu".
+    //   4. Từ điển cột xuất Excel: gate :578 -> GetImportDicColums() (:609-619).
+    //      Dùng chung từ điển Import cho Export theo chuẩn nguồn tại dòng 578.
+    //      Gồm 3 cột theo thứ tự:
+    //      - PositionName: "Tên chức danh (*)" (:614)
+    //      - PositionDesc: "Mô tả" (:615)
+    //      - FlagActive: "Trạng thái" (:617)
+    //      (Lưu ý: PositionCode và Remark bị comment ở nguồn :613, :616 nên không đưa vào file export).
+    //   5. Sinh đường dẫn file xuất: BaseController.GenExcelExportFilePath (:580) -> PortExcel.GenExcelExportFilePath(webRoot, "Mst_Position").
+    //      Tên sheet: "Mst_Position" (:581).
+    //      Ghi file qua PortExcel.ExportToExcelFromList(rows, dicColNames, physicalPath, "Mst_Position") (:581).
+    //   6. Trả URL tải file với Success = true, Data = { Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath } (:582-586).
+    //
+    // Bỏ qua có chủ đích (loại Đ):
+    //   - CheckGatewayAuthentication: gate Mst_PositionController.cs:537, API MstPositionController.cs:40-45
+    //   - CheckAuthorize: gate Mst_PositionController.cs:538 (hệ thống đích chưa có hệ phân quyền)
+    //   - Sys_Access_CheckDenyV30: MasterData.cs:23284-23288
+    //   - Ghi RequestLog/ReturnLog: MasterData.cs:23267-23274, 23345-23352
+    //   - Cột MyIdxSeq, OrgID, PositionCode, mnnt_NNTFullName có trong list kết quả nhưng không nằm trong từ điển -> không xuất ra file
+    // ============================================================================================
+    [HttpPost("export")]
+    public async Task<IActionResult> Export([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] MstPositionSearchReq? req)
+    {
+        var r = req ?? new MstPositionSearchReq();
+
+        // Gọi GetXAsync(keyWord, orgIdEqual, flagActiveCsv, recordStart, recordCount):
+        // KeyWord lọc trên PositionName (like %kw%), OrgID lọc theo tham số client (=), FlagActive IN tách dấu phẩy.
+        // RecordStart = 0, RecordCount = int.MaxValue (gate Mst_PositionController.cs:566-567).
+        var (_, rows) = await GetXAsync(
+            keyWord: r.KeyWord,
+            orgIdEqual: r.OrgID,
+            flagActiveCsv: r.FlagActive,
+            recordStart: 0,
+            recordCount: int.MaxValue);
+
+        // Nguồn Mst_PositionController.cs:574, 590-592: nếu danh sách null hoặc Count == 0 -> throw ServiceException("Không có dữ liệu")
+        if (rows == null || rows.Count == 0)
+        {
+            return PortResult.Fail("Mst_Position_Export", "Message", "Không có dữ liệu");
+        }
+
+        // Tạo thư mục và đường dẫn file Excel xuất: GenExcelExportFilePath(prefix) (gate :580)
+        var webRoot = _env?.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = _env != null
+                ? Path.Combine(_env.ContentRootPath, "wwwroot")
+                : Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+        }
+
+        // Dùng từ điển GetImportDicColums() (gate :578, :609-619) — dùng từ điển Import cho Export theo chuẩn nguồn
+        var dicColNames = GetImportDicColums();
+        string virtualPath;
+        try
+        {
+            string physicalPath;
+            (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Mst_Position");
+
+            // Ghi danh sách ra file Excel với tên sheet "Mst_Position" (gate :581)
+            PortExcel.ExportToExcelFromList(rows, dicColNames, physicalPath, "Mst_Position");
+        }
+        catch (Exception ex)
+        {
+            // Nguồn (gate :594-598) bắt mọi ngoại lệ (kể cả lỗi ghi file) và trả Success=false, không để thành HTTP 500.
+            return PortResult.Fail("Mst_Position_Export", "Exception", ex.Message);
+        }
+
+        // Trả URL tải file: Data = { Url = GetRequestBaseAddress() + url } (gate :583-586)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+            }
+        });
+    }
+
+    /// <summary>
+    /// Từ điển cột xuất Excel: dùng chung từ điển Import cho Export theo chuẩn nguồn tại gate Mst_PositionController.cs:578, :609-619.
+    /// Gồm 3 cột:
+    ///   - PositionName: "Tên chức danh (*)" (:614)
+    ///   - PositionDesc: "Mô tả" (:615)
+    ///   - FlagActive: "Trạng thái" (:617)
+    /// (PositionCode và Remark bị comment ở nguồn :613, :616).
+    /// </summary>
+    private static Dictionary<string, string> GetImportDicColums()
+    {
+        return new Dictionary<string, string>
+        {
+            { "PositionName", "Tên chức danh (*)" },
+            { "PositionDesc", "Mô tả" },
+            { "FlagActive", "Trạng thái" }
+        };
     }
 
     /// <summary>
