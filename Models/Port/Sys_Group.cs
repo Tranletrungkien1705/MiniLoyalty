@@ -75,6 +75,11 @@ public class Sys_UserInGroup
     public DateTime? LogLUDTimeUTC { get; set; }
 
     public string? LogLUBy { get; set; }
+
+    /// <summary>Cột NetworkID/MST của bảng Sys_UserInGroup — Sys_UserInGroup_Save chèn t_sg.NetworkID, t_sg.MST (System.cs/zTemp.cs:1412-1426)</summary>
+    public string? NetworkID { get; set; }
+
+    public string? MST { get; set; }
 }
 
 /// <summary>Cấu hình EF cho <see cref="Sys_UserInGroup"/>.</summary>
