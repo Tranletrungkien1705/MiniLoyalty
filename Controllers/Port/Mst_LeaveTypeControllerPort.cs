@@ -11,11 +11,13 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục loại nghỉ phép (Mst_LeaveType) của dự án nguồn 2022.7.Loyalty (#166).
+// PORT 1:1 — màn danh mục loại nghỉ phép (Mst_LeaveType) của dự án nguồn 2022.7.Loyalty (#166, #167).
 //
 // Nguồn controller (tầng gate):
 //   Mst_LeaveTypeController.cs:25-105         Search -> WA_Mst_LeaveType_Get (#166)
+//   Mst_LeaveTypeController.cs:107-167        GetAllActive -> WA_Mst_LeaveType_Get (#167)
 //   Mst_LeaveTypeController.cs:171-186        strWhereClause_Mst_LeaveType (hàm lọc Search)
+//   Mst_LeaveTypeController.cs:188-199        strWhereClause_Mst_LeaveType_Active (hàm lọc GetAllActive)
 // Nguồn API:
 //   MstLeaveTypeController.cs:17-88           WA_Mst_LeaveType_Get (mã lỗi mặc định "WA_Mst_LeaveType_Get" :25)
 // Nguồn biz:
@@ -26,25 +28,27 @@ namespace MiniLoyalty.Controllers.Port;
 //   12.Dev.Common\idn.Loyalty.Common\Models\HRM\Mst_LeaveType.cs:11-19 (đúng 9 cột model)
 //
 // GIỮ ĐÚNG NGUỒN:
-//   * Endpoint là POST (nguồn gate Mst_LeaveTypeController.cs:25).
+//   * Endpoint là POST (nguồn gate Mst_LeaveTypeController.cs:25, :107).
 //   * Lọc KeyWord: like '%kw%' trên LeaveType (Mst_LeaveTypeController.cs:176-179).
 //     CẢNH BÁO: KeyWord CHỈ lọc trên cột LeaveType, KHÔNG lọc LeaveTypeCode hay LeaveTypeDesc.
-//   * Lọc FlagActive: toán tử '=' nguyên chuỗi (Mst_LeaveTypeController.cs:180-183) — KHÔNG IN, KHÔNG tách dấu phẩy.
-//     "0,1" -> so sánh bằng chuỗi "0,1" -> 0 dòng.
-//   * OrgID: gate nhận OrgID (:25, :55) và đọc header NetworkID/OrgID (:36-37, :66-67),
-//     nhưng strWhereClause_Mst_LeaveType (:171-186) và SQL biz KHÔNG dùng OrgID hay NetworkID để lọc -> không lọc.
-//   * Chuẩn hoá: gate chỉ gọi CUtils.StrValue (:178, :182), KHÔNG gọi StdParam/StdStr/StdFlag trên KeyWord hay FlagActive.
+//   * Lọc FlagActive: toán tử '=' nguyên chuỗi (Mst_LeaveTypeController.cs:180-183, :195) — KHÔNG IN, KHÔNG tách dấu phẩy.
+//     "0,1" -> so sánh bằng chuỗi "0,1" -> 0 dòng. GetAllActive truyền cứng "1" (:129).
+//   * OrgID: gate nhận OrgID (:25, :55) và đọc header NetworkID/OrgID (:36-37, :66-67, :118-119),
+//     nhưng strWhereClause_Mst_LeaveType (:171-186), strWhereClause_Mst_LeaveType_Active (:188-199)
+//     và SQL biz KHÔNG dùng OrgID hay NetworkID để lọc -> không lọc.
+//   * Chuẩn hoá: gate chỉ gọi CUtils.StrValue (:178, :182, :195), KHÔNG gọi StdParam/StdStr/StdFlag trên KeyWord hay FlagActive.
 //   * Chia trang theo mlt.LeaveTypeCode asc (MasterData.cs:31653), select cuối sắp theo t.MyIdxSeq asc (MasterData.cs:31692).
 //   * MyIdxSeq 0-based identity (MasterData.cs:31647).
-//   * PageSize = 0 -> DataList rỗng `[]`, PageCount = 0, ItemCount = MyCount (gate :80-88).
-//   * DDL: không có DDL trong repo (source_excerpt.txt:137) -> PK = LeaveTypeCode suy từ draft distinct và inner join
+//   * GetAllActive: trả danh sách phẳng List<Mst_LeaveType> khi có dữ liệu, trả Data = null khi rỗng (Mst_LeaveTypeController.cs:126, 149-154), không bọc PageInfo.
+//   * Search: PageSize = 0 -> DataList rỗng `[]`, PageCount = 0, ItemCount = MyCount (gate :80-88).
+//   * DDL: không có DDL trong repo (source_excerpt.txt:113) -> PK = LeaveTypeCode suy từ draft distinct và inner join
 //     (MasterData.cs:31648, :31691), DDL chưa xác minh.
 //   * Transaction: Mst_LeaveType_Get mở transaction (:31786) nhưng luôn RollbackSafety (:31839, :31847, :31862)
 //     vì chỉ là hàm đọc -> port không mở transaction.
-//   * Tài khoản viết cứng tại Mst_LeaveTypeController.cs:62-63 (GwUserCode, GwPassword) — CẤM chép giá trị.
+//   * Tài khoản viết cứng tại Mst_LeaveTypeController.cs:62-63, :135-136 (GwUserCode, GwPassword) — CẤM chép giá trị.
 //
 // Bỏ qua có chủ đích (loại Đ):
-//   * CheckGatewayAuthentication (:34), CheckAuthorize (:35) — hệ thống đích chưa có hệ phân quyền.
+//   * CheckGatewayAuthentication (:34, :116), CheckAuthorize (:35, :117) — hệ thống đích chưa có hệ phân quyền.
 //   * Sys_User_CheckAuthentication (:31801-31805), Sys_Access_CheckDenyV30 (:31808-31810), drAbilityOfUser (:31630, :31642).
 //   * Ghi RequestLog/ReturnLog: MasterData.cs:31789-31796, 31866-31873.
 // ============================================================================================
@@ -97,6 +101,26 @@ public class Mst_LeaveTypeControllerPort : ControllerBase
         {
             Success = true,
             Data = new PageInfo<object>(rows, itemCount, pageCount, pageIndex, pageSize)
+        });
+    }
+
+    /// <summary>
+    /// Port 1:1 <c>Mst_LeaveTypeController.GetAllActive</c> (nguồn gate Mst_LeaveTypeController.cs:107-167).
+    /// Chuỗi gọi: Mst_LeaveTypeController.GetAllActive (gate :107-167) -> MstLeaveTypeController.WA_Mst_LeaveType_Get (API :17-88)
+    /// -> MasterData.WAS_Mst_LeaveType_Get (biz :31878-31968) -> MasterData.Mst_LeaveType_Get (biz :31748-31876) -> MasterData.Mst_LeaveType_GetX (biz :31591-31746).
+    /// Lọc FlagActive = "1" qua hàm strWhereClause_Mst_LeaveType_Active (Mst_LeaveTypeController.cs:188-199).
+    /// Tái sử dụng GetXAsync(null, "1", 0, 123456000) (Ft_RecordStart = "0", Ft_RecordCount = "123456000" tại :142-143).
+    /// Khi có dữ liệu trả về mảng phẳng; khi rỗng trả Data = null (Mst_LeaveTypeController.cs:126, 149-154), không bọc PageInfo.
+    /// Tài khoản viết cứng tại Mst_LeaveTypeController.cs:135-136 (GwUserCode, GwPassword) — CẤM chép giá trị.
+    /// </summary>
+    [HttpPost("getallactive")]
+    public async Task<IActionResult> GetAllActive()
+    {
+        var (_, rows) = await GetXAsync(null, "1", 0, 123456000);
+        return Ok(new
+        {
+            Success = true,
+            Data = rows.Count > 0 ? rows : null
         });
     }
 
