@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using System.IO;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
@@ -221,9 +223,12 @@ public class Crd_MemberControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
 
-    public Crd_MemberControllerPort(AppDbContext db)
+    private readonly IWebHostEnvironment? _env;
+
+    public Crd_MemberControllerPort(AppDbContext db, IWebHostEnvironment? env = null)
     {
         _db = db;
+        _env = env;
     }
 
     /// <summary>
@@ -426,6 +431,73 @@ public class Crd_MemberControllerPort : ControllerBase
     /// Ánh xạ danh sách (CrdMember, CrdCard) sang model Crd_MemberSearchItem kèm lookup các bảng danh mục
     /// theo câu truy vấn Select chi tiết (Card.cs:20400-20549).
     /// </summary>
+    /// <summary>
+    /// Port 1:1 Crd_MemberController.Export (gate Crd_MemberController.cs:1348-1450, #054): cùng bộ lọc và nguồn dữ liệu với Search
+    /// (WA_Crd_Member_GetRegister), Ft_RecordStart = "0", lấy toàn bộ; RegisFinishDTimeUTC đã đổi giờ địa phương như Search (gate :1417-1423).
+    /// Rỗng => ServiceException("Không có dữ liệu") (:1440); có dữ liệu => GetImportDicColums() (:1461-1488, 24 cột), sheet và tiền tố file "Crd_Member",
+    /// trả Data = { Url = GetRequestBaseAddress() + url } (:1429-1438).
+    /// </summary>
+    [HttpPost("export")]
+    public async Task<IActionResult> Export([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_MemberSearchReq? req)
+    {
+        var r = req ?? new Crd_MemberSearchReq();
+        r.Ft_PageIndex = 0;
+        r.Ft_PageSize = int.MaxValue;
+        var res = await Search(r);
+        var dataObj = (res as OkObjectResult)?.Value?.GetType().GetProperty("Data")?.GetValue((res as OkObjectResult)!.Value);
+        var rows = (dataObj as PageInfo<Crd_MemberSearchItem>)?.DataList;
+        if (rows == null || rows.Count == 0)
+        {
+            return PortResult.Fail("Crd_Member_Export", "Message", "Không có dữ liệu");
+        }
+
+        var webRoot = _env?.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = _env != null ? Path.Combine(_env.ContentRootPath, "wwwroot") : Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+        }
+
+        try
+        {
+            var (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Crd_Member");
+            PortExcel.ExportToExcelFromList(rows, GetExportDicColums(), physicalPath, "Crd_Member");
+            return Ok(new { Success = true, Data = new { Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath } });
+        }
+        catch (Exception ex)
+        {
+            return PortResult.Fail("Crd_Member_Export", "Exception", ex.Message);
+        }
+    }
+
+    /// <summary>Từ điển cột Export — gate Crd_MemberController.cs:1461-1488 (GetImportDicColums, 24 cột, đúng thứ tự).</summary>
+    private static Dictionary<string, string> GetExportDicColums() => new()
+    {
+        { "DLCodeRegis", "Đại lý phát hành" },
+        { "MemberNo", "Mã thẻ hội viên" },
+        { "CardTypeUse", "Hạng sử dụng" },
+        { "CardTypeInit", "Hạng thực" },
+        { "RegistrationDate", "Ngày đăng ký" },
+        { "MemberActiveDate", "Ngày kích hoạt hội viên" },
+        { "RegisStatus", "Trạng thái" },
+        { "MemberName", "Tên khách hàng" },
+        { "IDCardNo", "CMND/CCCD" },
+        { "PhoneNo", "Số điện thoại" },
+        { "mpv_ProvinceName", "Tỉnh/TP" },
+        { "CarNo", "Biển số xe" },
+        { "VIN", "Số VIN" },
+        { "ModelName", "Model" },
+        { "WarrantyExpiryDate", "Ngày hết hạn bảo hành" },
+        { "InvoiceDate", "Ngày hóa đơn" },
+        { "cc_CardNo", "Mã kỳ xét hạng" },
+        { "EffDateStart", "Ngày bắt đầu kỳ xét hạng" },
+        { "RegisFinishDTimeUTC", "Ngày duyệt F" },
+        { "RegisFinishBy", "Người duyệt" },
+        { "DLCodeExceptionally", "Đại lý YC đặc cách" },
+        { "mcs_CardSourceName", "Loại xét kỳ thẻ" },
+        { "SourceRegisType", "Nguồn mở thẻ" },
+        { "ReqMemberRegisterCodeSys", "Mã lượt đăng ký" }
+    };
+
     private async Task<List<Crd_MemberSearchItem>> BuildMemberItemsAsync(
         List<CrdMemberCardPair> pagedPairs,
         long recordStart)
