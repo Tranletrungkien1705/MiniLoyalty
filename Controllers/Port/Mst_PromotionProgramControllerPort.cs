@@ -22,6 +22,7 @@ namespace MiniLoyalty.Controllers.Port;
 //   - Update (#209) — action GHI cập nhật (dùng chung SaveCoreAsync, FlagActive theo client, nếu FlagActive='0' ghi đè EffDateEnd bằng DateTime.Now)
 //   - Delete (#210) — action GHI xóa (1 transaction, kiểm tra EffDateStart <= now, xóa Spec, Dtl, Header)
 //   - Export (#211) — action ĐỌC xuất Excel 7 cột từ điển GetImportDicColums(), phân trang toàn bộ 123456000, FlagActive bị bỏ qua
+//   - ExportTemplate (#212) — action ĐỌC xuất file Excel mẫu 4 cột từ điển GetImportDicColumsTemplate(), danh sách rỗng 0 dòng, không đọc DB
 //
 // Nguồn tra cứu (chỉ đọc):
 //   - Gate controller: 13.ClientGate/V10/idn.Loyalty.WebAPI/Controllers/Mst_PromotionProgramController.cs
@@ -38,6 +39,8 @@ namespace MiniLoyalty.Controllers.Port;
 //     * Export: :573-656 (body { OrgID, KeyWord, FlagActive }, strWhereClause chỉ lọc KeyWord -> FlagActive và OrgID BỊ BỎ QUA.
 //       Ft_RecordStart="0", Ft_RecordCount="123456000". Nếu rỗng ném ServiceException "Không có dữ liệu" -> 400 ErridnLoyalty.Mst_PromotionProgram_Export.
 //       Từ điển GetImportDicColums() :691-702 gồm 7 cột. Tên file prefix và sheet "Mst_PromotionProgram" :632-633).
+//     * ExportTemplate: :658-690 (danh sách rỗng List<Mst_PromotionProgram>, từ điển GetImportDicColumsTemplate() :704-713 gồm 4 cột,
+//       prefix và sheet "Mst_PromotionProgram" :670-671, Data { Url } :673-676, không kiểm quyền, không đọc DB).
 //     * strWhereClause_Mst_PromotionProgram: :718-730 (chỉ lọc KeyWord -> PrProgramCode like '%kw%', OrgID KHÔNG dùng)
 //     * strWhereClause_Mst_PromotionProgram_By_PrProgramCode: :732-743 (lọc PrProgramCode =)
 //   - Service: WA_Mst_PromotionProgram_Get (11.BackEnd/V10/idn.Loyalty.Biz.Web/Controllers/MstPromotionProgramController.cs:22-90)
@@ -426,6 +429,54 @@ public class Mst_PromotionProgramControllerPort : ControllerBase
         });
     }
 
+    // ============================================================================================
+    // ExportTemplate — nguồn gate Mst_PromotionProgramController.cs:658-689 (#212).
+    // Action này KHÔNG kiểm quyền ở nguồn (không có CheckGatewayAuthentication và không có CheckAuthorize).
+    // Không gọi tầng service, không truy vấn cơ sở dữ liệu.
+    // Khởi tạo danh sách rỗng kiểu Mst_PromotionProgram (:666).
+    // Lấy từ điển 4 cột mẫu từ GetImportDicColumsTemplate (:668, :704-713) gồm 4 cột:
+    //   1. PrProgramCode -> "Mã chương trình (*)"
+    //   2. PrProgramName -> "Tên chương trình (*)"
+    //   3. EffDateStart -> "Ngày hiệu lực (*)"
+    //   4. EffDateEnd -> "Ngày hết hạn (*)"
+    // Sinh đường dẫn file mẫu qua PortExcel.GenExcelExportFilePath(_env.WebRootPath, "Mst_PromotionProgram") (:670).
+    // Xuất file Excel qua PortExcel.ExportToExcelFromList(list, dicColNames, physicalPath, "Mst_PromotionProgram") (:671).
+    // Trả về Success = true, Data = { Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath } (:672-676).
+    // Không có nhánh báo lỗi khi danh sách rỗng (khác với Export).
+    // (Controller nguồn KHÔNG có action Import -> không kiểm upload lại).
+    // ============================================================================================
+    [HttpPost("exporttemplate")]
+    public IActionResult ExportTemplate()
+    {
+        // Khởi tạo danh sách rỗng kiểu Mst_PromotionProgram (gate Mst_PromotionProgramController.cs:666)
+        var list = new List<Mst_PromotionProgram>();
+
+        // Lấy từ điển 4 cột mẫu import (gate Mst_PromotionProgramController.cs:668)
+        var dicColNames = GetImportDicColumsTemplate();
+
+        // Xác định thư mục webRoot và sinh đường dẫn file (gate Mst_PromotionProgramController.cs:670)
+        var webRoot = _env.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = Path.Combine(_env.ContentRootPath, "wwwroot");
+        }
+
+        var (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Mst_PromotionProgram");
+
+        // Ghi danh sách rỗng ra file Excel với tên sheet Mst_PromotionProgram (gate Mst_PromotionProgramController.cs:671)
+        PortExcel.ExportToExcelFromList(list, dicColNames, physicalPath, "Mst_PromotionProgram");
+
+        // Trả URL tải file với Success = true (gate Mst_PromotionProgramController.cs:672-676)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+            }
+        });
+    }
+
     #region DicColums
     /// <summary>
     /// Từ điển 7 cột xuất Excel: gate Mst_PromotionProgramController.cs:630, 691-702 (GetImportDicColums).
@@ -449,6 +500,25 @@ public class Mst_PromotionProgramControllerPort : ControllerBase
             { "EffDateEnd", "Ngày hết hạn" },
             { "ListDealer", "Đại lý áp dụng" },
             { "FlagActive", "Trạng thái" }
+        };
+    }
+
+    /// <summary>
+    /// Từ điển 4 cột mẫu Excel: gate Mst_PromotionProgramController.cs:668, 704-713 (GetImportDicColumsTemplate).
+    /// Giữ đúng thứ tự 4 cột từ nguồn:
+    /// 1. PrProgramCode -> "Mã chương trình (*)"
+    /// 2. PrProgramName -> "Tên chương trình (*)"
+    /// 3. EffDateStart -> "Ngày hiệu lực (*)"
+    /// 4. EffDateEnd -> "Ngày hết hạn (*)"
+    /// </summary>
+    private static Dictionary<string, string> GetImportDicColumsTemplate()
+    {
+        return new Dictionary<string, string>
+        {
+            { "PrProgramCode", "Mã chương trình (*)" },
+            { "PrProgramName", "Tên chương trình (*)" },
+            { "EffDateStart", "Ngày hiệu lực (*)" },
+            { "EffDateEnd", "Ngày hết hạn (*)" }
         };
     }
     #endregion
