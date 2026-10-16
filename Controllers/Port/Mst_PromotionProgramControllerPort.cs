@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
@@ -19,6 +21,7 @@ namespace MiniLoyalty.Controllers.Port;
 //   - Save (#208) — action GHI upsert xóa-ghi lại trong 1 transaction (ép FlagActive = '1')
 //   - Update (#209) — action GHI cập nhật (dùng chung SaveCoreAsync, FlagActive theo client, nếu FlagActive='0' ghi đè EffDateEnd bằng DateTime.Now)
 //   - Delete (#210) — action GHI xóa (1 transaction, kiểm tra EffDateStart <= now, xóa Spec, Dtl, Header)
+//   - Export (#211) — action ĐỌC xuất Excel 7 cột từ điển GetImportDicColums(), phân trang toàn bộ 123456000, FlagActive bị bỏ qua
 //
 // Nguồn tra cứu (chỉ đọc):
 //   - Gate controller: 13.ClientGate/V10/idn.Loyalty.WebAPI/Controllers/Mst_PromotionProgramController.cs
@@ -32,6 +35,9 @@ namespace MiniLoyalty.Controllers.Port;
 //       2. :480-484 nếu StdFlag(FlagActive) == "0" (kể cả khi không gửi) -> EffDateEnd = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") - giờ máy chủ, không UTC).
 //     * Delete: :506-569 (PrProgramCode rỗng -> ném ServiceException("invalid_BirthPolicyNo", "invalid_BirthPolicyNo") :555;
 //       ngược lại gọi WA_Mst_PromotionProgram_Save với FlagIsDelete = "1", Data = null).
+//     * Export: :573-656 (body { OrgID, KeyWord, FlagActive }, strWhereClause chỉ lọc KeyWord -> FlagActive và OrgID BỊ BỎ QUA.
+//       Ft_RecordStart="0", Ft_RecordCount="123456000". Nếu rỗng ném ServiceException "Không có dữ liệu" -> 400 ErridnLoyalty.Mst_PromotionProgram_Export.
+//       Từ điển GetImportDicColums() :691-702 gồm 7 cột. Tên file prefix và sheet "Mst_PromotionProgram" :632-633).
 //     * strWhereClause_Mst_PromotionProgram: :718-730 (chỉ lọc KeyWord -> PrProgramCode like '%kw%', OrgID KHÔNG dùng)
 //     * strWhereClause_Mst_PromotionProgram_By_PrProgramCode: :732-743 (lọc PrProgramCode =)
 //   - Service: WA_Mst_PromotionProgram_Get (11.BackEnd/V10/idn.Loyalty.Biz.Web/Controllers/MstPromotionProgramController.cs:22-90)
@@ -100,6 +106,14 @@ public class MstPromotionProgramDeleteReq
     public string? PrProgramCode { get; set; }
 }
 
+/// <summary>Port 1:1 <c>Export</c> — body nhận OrgID, KeyWord, FlagActive (Mst_PromotionProgramController.cs:573, 594-599, #211).</summary>
+public class MstPromotionProgramExportReq
+{
+    public string? OrgID { get; set; }               // Tổ chức — gate nhận (:573, :597) nhưng strWhereClause_Mst_PromotionProgram (:718-730) KHÔNG dùng OrgID -> không lọc
+    public string? KeyWord { get; set; }             // Từ khoá tìm theo mã chương trình (PrProgramCode like '%kw%') — :573, :596, :724-727
+    public string? FlagActive { get; set; }          // Cờ hoạt động — gate nhận (:573, :598) nhưng strWhereClause_Mst_PromotionProgram (:718-730) KHÔNG lọc FlagActive -> BỊ BỎ QUA
+}
+
 /// <summary>
 /// Port 1:1 <c>Save</c> request — body nhận Mst_PromotionProgram, Lst_Mst_PromotionProgramDtl, Lst_Mst_PromotionProgramSpec (gate :319-322, #208).
 /// </summary>
@@ -145,11 +159,13 @@ public class Mst_PromotionProgramControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly IConfiguration _config;
+    private readonly IWebHostEnvironment _env;
 
-    public Mst_PromotionProgramControllerPort(AppDbContext db, IConfiguration config)
+    public Mst_PromotionProgramControllerPort(AppDbContext db, IConfiguration config, IWebHostEnvironment env)
     {
         _db = db;
         _config = config;
+        _env = env;
     }
 
     /// <summary>
@@ -331,6 +347,111 @@ public class Mst_PromotionProgramControllerPort : ControllerBase
             Data = (object?)null
         });
     }
+
+    /// <summary>
+    /// Port 1:1 <c>Mst_PromotionProgramController.Export</c> (nguồn gate Mst_PromotionProgramController.cs:573-656, #211).
+    /// Chuỗi gọi: gate Export -> API WA_Mst_PromotionProgram_Get (MstPromotionProgramController.cs:22-90)
+    /// -> BIZ WAS_Mst_PromotionProgram_Get (Master.Loyalty.cs:13997-14119)
+    /// -> BIZ Mst_PromotionProgram_Get (Master.Loyalty.cs:14120-14279)
+    /// -> BIZ Mst_PromotionProgram_GetX (Master.Loyalty.cs:14280-14543).
+    ///
+    /// GIỮ ĐÚNG NGUỒN:
+    ///   * Tham số nhận qua body: OrgID, KeyWord, FlagActive (Mst_PromotionProgramController.cs:573, 594-599).
+    ///   * CẢNH BÁO BẪY NGUỒN (FlagActive bị bỏ qua):
+    ///     Hàm strWhereClause_Mst_PromotionProgram (:718-730) CHỈ xử lý data.KeyWord (PrProgramCode like '%kw%').
+    ///     Hoàn toàn không có nhánh nào lọc FlagActive hoặc OrgID => FlagActive và OrgID BỊ BỎ QUA, KHÔNG LỌC.
+    ///   * Phân trang xuất toàn bộ: Ft_RecordStart = "0", Ft_RecordCount = "123456000" (:612-613), Rt_Cols_Mst_PromotionProgram = "*" (:616).
+    ///   * Thứ tự: GetXAsync giống Search #205, sắp theo LogLUDTimeUTC desc (Master.Loyalty.cs:14349).
+    ///   * Nếu danh sách rỗng (rows == null || rows.Count == 0):
+    ///     ném ServiceException("Không có dữ liệu") (:643) -> trả HTTP 400 ErridnLoyalty.Mst_PromotionProgram_Export.
+    ///   * Từ điển cột: GetImportDicColums() (gate Mst_PromotionProgramController.cs:630, 691-702) gồm đúng 7 cột:
+    ///       1. MyIdxSeq -> "Số thứ tự"
+    ///       2. PrProgramCode -> "Mã chương trình"
+    ///       3. PrProgramName -> "Tên chương trình"
+    ///       4. EffDateStart -> "Ngày hiệu lực"
+    ///       5. EffDateEnd -> "Ngày hết hạn"
+    ///       6. ListDealer -> "Đại lý áp dụng"
+    ///       7. FlagActive -> "Trạng thái"
+    ///   * Sinh đường dẫn file xuất: BaseController.GenExcelExportFilePath (:632)
+    ///     -> PortExcel.GenExcelExportFilePath(webRoot, "Mst_PromotionProgram").
+    ///   * Tên sheet: "Mst_PromotionProgram" (:633).
+    ///   * Ghi file qua PortExcel.ExportToExcelFromList(rows, dicColNames, physicalPath, "Mst_PromotionProgram") (:633).
+    ///   * Trả URL tải file với Success = true, Data = { Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath } (:634-638).
+    ///
+    /// Bỏ qua có chủ đích (loại Đ):
+    ///   * CheckGatewayAuthentication, CheckAuthorize (:583-584)
+    ///   * Sys_User_CheckAuthorize: Master.Loyalty.cs:1592-1606
+    ///   * Ghi RequestLog/ReturnLog
+    /// </summary>
+    [HttpPost("export")]
+    public async Task<IActionResult> Export(
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] MstPromotionProgramExportReq? req)
+    {
+        req ??= new MstPromotionProgramExportReq();
+
+        // Nguồn gate Mst_PromotionProgramController.cs:594-599:
+        // strWhereClause_Mst_PromotionProgram (:718-730) CHỈ xử lý KeyWord (PrProgramCode like '%kw%').
+        // OrgID và FlagActive truyền vào nhưng hàm lọc KHÔNG sử dụng -> FlagActive và OrgID BỊ BỎ QUA.
+        // Ft_RecordStart = "0", Ft_RecordCount = "123456000", Rt_Cols_Mst_PromotionProgram = "*" (:612-616).
+        var (_, rows) = await GetXAsync(req.KeyWord, 0, 123456000);
+
+        // Nguồn :626, :643: nếu danh sách rỗng -> throw ServiceException("Không có dữ liệu") -> 400 ErridnLoyalty.Mst_PromotionProgram_Export
+        if (rows == null || rows.Count == 0)
+        {
+            return PortResult.Fail("Mst_PromotionProgram_Export", "Message", "Không có dữ liệu");
+        }
+
+        // Tạo thư mục và đường dẫn file Excel xuất: BaseController.GenExcelExportFilePath (:632)
+        var webRoot = _env.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = Path.Combine(_env.ContentRootPath, "wwwroot");
+        }
+
+        // Lấy từ điển cột: Mst_PromotionProgramController.cs:630 gọi GetImportDicColums() (7 cột)
+        var dicColNames = GetImportDicColums();
+        var (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Mst_PromotionProgram");
+
+        // Ghi danh sách ra file Excel: ExcelExport.ExportToExcelFromList (:633) với sheet "Mst_PromotionProgram"
+        PortExcel.ExportToExcelFromList(rows, dicColNames, physicalPath, "Mst_PromotionProgram");
+
+        // Trả URL tải file: Data = { Url = GetRequestBaseAddress() + url } (:635-638)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+            }
+        });
+    }
+
+    #region DicColums
+    /// <summary>
+    /// Từ điển 7 cột xuất Excel: gate Mst_PromotionProgramController.cs:630, 691-702 (GetImportDicColums).
+    /// Giữ đúng thứ tự 7 cột từ nguồn:
+    /// 1. MyIdxSeq -> "Số thứ tự"
+    /// 2. PrProgramCode -> "Mã chương trình"
+    /// 3. PrProgramName -> "Tên chương trình"
+    /// 4. EffDateStart -> "Ngày hiệu lực"
+    /// 5. EffDateEnd -> "Ngày hết hạn"
+    /// 6. ListDealer -> "Đại lý áp dụng"
+    /// 7. FlagActive -> "Trạng thái"
+    /// </summary>
+    private static Dictionary<string, string> GetImportDicColums()
+    {
+        return new Dictionary<string, string>
+        {
+            { "MyIdxSeq", "Số thứ tự" },
+            { "PrProgramCode", "Mã chương trình" },
+            { "PrProgramName", "Tên chương trình" },
+            { "EffDateStart", "Ngày hiệu lực" },
+            { "EffDateEnd", "Ngày hết hạn" },
+            { "ListDealer", "Đại lý áp dụng" },
+            { "FlagActive", "Trạng thái" }
+        };
+    }
+    #endregion
 
     /// <summary>
     /// Nghiệp vụ xóa 1 chương trình khuyến mại — 1 transaction duy nhất.
