@@ -892,10 +892,12 @@ public class Mst_DepartmentControllerPort : ControllerBase
 
                 await tx.CommitAsync();
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                // Nguồn (gate :719-723) bắt MỌI ngoại lệ và trả Success=false; không để văng ra thành HTTP 500.
+                // Các dòng trước dòng này đã commit (import một phần) — giữ đúng hành vi nguồn. Cùng mẫu với Create.
                 await tx.RollbackAsync();
-                throw;
+                return PortResult.Fail("Mst_Department_Import", "Exception", ex.Message);
             }
         }
 
@@ -969,10 +971,20 @@ public class Mst_DepartmentControllerPort : ControllerBase
 
         // Dùng từ điển GetImportDicColums() (gate :786, :851-862) — dùng từ điển Import cho Export là của nguồn
         var dicColNames = GetImportDicColums();
-        var (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Mst_Department");
+        string virtualPath;
+        try
+        {
+            string physicalPath;
+            (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Mst_Department");
 
-        // Ghi danh sách ra file Excel với tên sheet "Mst_Department" (gate :789)
-        PortExcel.ExportToExcelFromList(rows, dicColNames, physicalPath, "Mst_Department");
+            // Ghi danh sách ra file Excel với tên sheet "Mst_Department" (gate :789)
+            PortExcel.ExportToExcelFromList(rows, dicColNames, physicalPath, "Mst_Department");
+        }
+        catch (Exception ex)
+        {
+            // Nguồn (gate :801-805) bắt mọi ngoại lệ (kể cả lỗi ghi file) và trả Success=false, không để thành HTTP 500.
+            return PortResult.Fail("Mst_Department_Export", "Exception", ex.Message);
+        }
 
         // Trả URL tải file: Data = { Url = GetRequestBaseAddress() + url } (gate :791-793)
         return Ok(new
@@ -1089,10 +1101,12 @@ public class Mst_DepartmentControllerPort : ControllerBase
 
             return null;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            // Nguồn (gate :503-507, :569-573) bắt MỌI ngoại lệ và trả Success=false; không để văng ra thành HTTP 500.
+            // Dùng chung cho Delete và DeleteMultiple. Cùng mẫu với Create/Update.
             await tx.RollbackAsync();
-            throw;
+            return PortResult.Fail("Mst_Department_Delete", "Exception", ex.Message);
         }
     }
 
