@@ -15,7 +15,9 @@ namespace MiniLoyalty.Controllers.Port;
 //
 // Nguồn controller (tầng gate):
 //   Mst_PersonalBackgroundController.cs:25-105   Search              -> WA_Mst_PersonalBackground_Get (#188)
+//   Mst_PersonalBackgroundController.cs:107-167  GetAllActive        -> WA_Mst_PersonalBackground_Get (#189)
 //   Mst_PersonalBackgroundController.cs:171-186  strWhereClause_Mst_PersonalBackground (mệnh đề lọc Search)
+//   Mst_PersonalBackgroundController.cs:188-199  strWhereClause_Mst_PersonalBackground_Active (mệnh đề lọc GetAllActive)
 // Nguồn API:
 //   MstPersonalBackgroundController.cs:17-88     WA_Mst_PersonalBackground_Get
 // Nguồn biz:
@@ -92,7 +94,26 @@ public class Mst_PersonalBackgroundControllerPort : ControllerBase
     }
 
     /// <summary>
-    /// Lọc + đếm + chia trang theo PersonalBGCode asc — dùng cho Search.
+    /// Port 1:1 <c>Mst_PersonalBackgroundController.GetAllActive</c> (nguồn gate Mst_PersonalBackgroundController.cs:107-167, #189).
+    /// Nguồn gọi <c>strWhereClause_Mst_PersonalBackground_Active</c> với <c>FlagActive = "1"</c> (:127-130).
+    /// Hàm lọc dùng toán tử '=' nguyên chuỗi (:195), không lọc OrgID hay KeyWord.
+    /// Ft_RecordStart = "0", Ft_RecordCount = "123456000" (BaseController.cs:30-31, gate :142-143).
+    /// Trả về mảng trần lst_Mst_PersonalBackground, null khi rỗng (gate :126, :149-154).
+    /// </summary>
+    [HttpPost("getallactive")]
+    public async Task<IActionResult> GetAllActive()
+    {
+        // Gọi GetXAsync với keyWord = null, flagActive = "1", recordStart = 0, recordCount = 123456000
+        // (nguồn: gate Mst_PersonalBackgroundController.cs:127-130, :142-143, BaseController.cs:30-31).
+        var (_, rows) = await GetXAsync(null, "1", 0, 123456000);
+
+        // Nguồn: lst_Mst_PersonalBackground = null khi rỗng (gate Mst_PersonalBackgroundController.cs:126, :149-154),
+        // Data = lst_Mst_PersonalBackground (mảng trần List<object>, null khi rỗng).
+        return Ok(new { Success = true, Data = rows.Count > 0 ? rows : null });
+    }
+
+    /// <summary>
+    /// Lọc + đếm + chia trang theo PersonalBGCode asc — dùng cho Search và GetAllActive.
     /// Trả (itemCount, rows): itemCount = tổng số dòng sau lọc (MyCount, SQL :44991); rows = trang đã cắt kèm MyIdxSeq 0-based (:45021).
     /// </summary>
     private async Task<(int itemCount, List<object> rows)> GetXAsync(string? keyWord, string? flagActive, long recordStart, long recordCount)
