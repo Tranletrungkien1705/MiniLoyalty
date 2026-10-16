@@ -197,3 +197,180 @@ public class Crd_MemberSeeder : IPortSeeder
         await db.SaveChangesAsync();
     }
 }
+
+/// <summary>
+/// Seeder bổ sung dữ liệu kiểm thử cho Crd_MemberController/GetByMemberNo (#040).
+/// Idempotent, Order => 56 theo đúng đề bài #040.
+/// </summary>
+public class Crd_MemberGetByMemberNoSeeder : IPortSeeder
+{
+    public int Order => 56;
+
+    public async Task SeedAsync(AppDbContext db)
+    {
+        if (await db.Set<CrdMember>().AnyAsync(x => x.MemberNo == "MB4001"))
+        {
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+
+        // MB4001: MemberNo "MB4001", MemberName "Pham Van Dung", MemberStatus "APPROVE", DLCodeRegis "DL4001", PhoneNo "0901000040", CarNo "30A-40001", VIN "VIN40000000000001", CardTypeUse "G", CardTypeInit "G", RegisStatus "F", RegistrationDate "2026-01-01", RegisFinishDTimeUTC DateTime(2026, 1, 5, 3, 0, 0, Utc) -> sau khi cong +7 thanh "2026-01-05 10:00:00".
+        db.Set<CrdMember>().Add(new CrdMember
+        {
+            MemberNo = "MB4001",
+            NetworkID = "DEMO",
+            OrgID = "ORG01",
+            DLCodeRegis = "DL4001",
+            MemberName = "Pham Van Dung",
+            MemberStatus = "APPROVE",
+            PhoneNo = "0901000040",
+            CarNo = "30A-40001",
+            VIN = "VIN40000000000001",
+            CardTypeUse = "G",
+            CardTypeInit = "G",
+            RegisStatus = "F",
+            RegistrationDate = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            RegisFinishDTimeUTC = new DateTime(2026, 1, 5, 3, 0, 0, DateTimeKind.Utc),
+            CustomerCode = "CUS4001",
+            ProvinceCode = "P01",
+            DistrictCode = "D01",
+            IDCardNo = "ID4001",
+            DateOfBirth = new DateTime(1990, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            MemAddress = "Ha Noi",
+            ModelCode = "M01",
+            TradeMarkCode = "TM01",
+            CreateDTimeUTC = now,
+            CreateBy = "seed",
+            LUDTimeUTC = now,
+            LUBy = "seed",
+            LogLUDTimeUTC = now,
+            LogLUBy = "seed"
+        });
+
+        // The Crd_Card cho MB4001 gom 2 the:
+        // CD4001_OLD: MemberNo "MB4001", CardSourceCode "NEW", CreateDTimeUTC now.AddDays(-10)
+        // CD4001_NEW: MemberNo "MB4001", CardSourceCode "REPLACE", CreateDTimeUTC now.AddDays(-1)
+        if (!await db.Set<CrdCard>().AnyAsync(x => x.CardNo == "CD4001_OLD"))
+        {
+            db.Set<CrdCard>().Add(new CrdCard
+            {
+                CardNo = "CD4001_OLD",
+                MemberNo = "MB4001",
+                NetworkID = "DEMO",
+                CardSourceCode = "NEW",
+                CardTypeUse = "G",
+                CardTypeInit = "G",
+                CardStatus = "APPROVE",
+                CreateDTimeUTC = now.AddDays(-10),
+                CreateBy = "seed",
+                LUDTimeUTC = now,
+                LUBy = "seed",
+                LogLUDTimeUTC = now,
+                LogLUBy = "seed"
+            });
+        }
+
+        if (!await db.Set<CrdCard>().AnyAsync(x => x.CardNo == "CD4001_NEW"))
+        {
+            db.Set<CrdCard>().Add(new CrdCard
+            {
+                CardNo = "CD4001_NEW",
+                MemberNo = "MB4001",
+                NetworkID = "DEMO",
+                CardSourceCode = "REPLACE",
+                CardTypeUse = "G",
+                CardTypeInit = "G",
+                CardStatus = "APPROVE",
+                CreateDTimeUTC = now.AddDays(-1),
+                CreateBy = "seed",
+                LUDTimeUTC = now,
+                LUBy = "seed",
+                LogLUDTimeUTC = now,
+                LogLUBy = "seed"
+            });
+        }
+
+        // Anh xa Map_QueryDealer_Member cho MB4001: DLCPCode "DL4001", MemberNo "MB4001"
+        if (!await db.Set<Map_QueryDealer_Member>().AnyAsync(x => x.DLCPCode == "DL4001" && x.MemberNo == "MB4001"))
+        {
+            db.Set<Map_QueryDealer_Member>().Add(new Map_QueryDealer_Member
+            {
+                DLCPCode = "DL4001",
+                MemberNo = "MB4001",
+                NetworkID = "DEMO",
+                QueryDate = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                FlagActive = "1",
+                LogLUDTimeUTC = now,
+                LogLUBy = "seed"
+            });
+        }
+
+        // MB4002: MemberNo "MB4002", MemberName "Hoang Thi Hoa", MemberStatus "PENDING", DLCodeRegis "DL4001"
+        db.Set<CrdMember>().Add(new CrdMember
+        {
+            MemberNo = "MB4002",
+            NetworkID = "DEMO",
+            OrgID = "ORG01",
+            DLCodeRegis = "DL4001",
+            MemberName = "Hoang Thi Hoa",
+            MemberStatus = "PENDING",
+            CustomerCode = "CUS4002",
+            ProvinceCode = "P01",
+            DistrictCode = "D01",
+            IDCardNo = "ID4002",
+            PhoneNo = "0901000042",
+            CarNo = "30A-40002",
+            VIN = "VIN40000000000002",
+            CardTypeUse = "N",
+            CardTypeInit = "N",
+            RegisStatus = "P",
+            DateOfBirth = new DateTime(1992, 2, 2, 0, 0, 0, DateTimeKind.Utc),
+            MemAddress = "Ha Noi",
+            ModelCode = "M01",
+            TradeMarkCode = "TM01",
+            RegistrationDate = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            CreateDTimeUTC = now,
+            CreateBy = "seed",
+            LUDTimeUTC = now,
+            LUBy = "seed",
+            LogLUDTimeUTC = now,
+            LogLUBy = "seed"
+        });
+
+        // MB4003: MemberNo "MB4003", MemberName "Do Van Giang", MemberStatus "CANCEL", DLCodeRegis "DL4001"
+        db.Set<CrdMember>().Add(new CrdMember
+        {
+            MemberNo = "MB4003",
+            NetworkID = "DEMO",
+            OrgID = "ORG01",
+            DLCodeRegis = "DL4001",
+            MemberName = "Do Van Giang",
+            MemberStatus = "CANCEL",
+            CustomerCode = "CUS4003",
+            ProvinceCode = "P01",
+            DistrictCode = "D01",
+            IDCardNo = "ID4003",
+            PhoneNo = "0901000043",
+            CarNo = "30A-40003",
+            VIN = "VIN40000000000003",
+            CardTypeUse = "N",
+            CardTypeInit = "N",
+            RegisStatus = "C",
+            DateOfBirth = new DateTime(1985, 3, 3, 0, 0, 0, DateTimeKind.Utc),
+            MemAddress = "Ha Noi",
+            ModelCode = "M01",
+            TradeMarkCode = "TM01",
+            RegistrationDate = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            CreateDTimeUTC = now,
+            CreateBy = "seed",
+            LUDTimeUTC = now,
+            LUBy = "seed",
+            LogLUDTimeUTC = now,
+            LogLUBy = "seed"
+        });
+
+        await db.SaveChangesAsync();
+    }
+}
+
