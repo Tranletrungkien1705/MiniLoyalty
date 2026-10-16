@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using MiniLoyalty.Data;
 using MiniLoyalty.Models.Port;
 
@@ -15,6 +16,7 @@ namespace MiniLoyalty.Controllers.Port;
 //   - Search (#307)
 //   - GetAllActive (#308)
 //   - GetByGroupCode (#309)
+//   - Create (#310)
 //
 // Nguồn gate: Sys_GroupController.cs:27-135 (Search), 136-243 (GetAllActive), 244-310 (GetByGroupCode) -> WA_Sys_Group_Get
 //   - Search: Nhận OrgID, KeyWord, FlagActive, Ft_PageIndex = 0, Ft_PageSize = 10
@@ -27,18 +29,28 @@ namespace MiniLoyalty.Controllers.Port;
 //   - Gate Search map kết quả (:85-110): Lấy Lst_Sys_Group, map đếm user từ Lst_Sys_UserInGroup theo GroupCode.
 //     Trả ra mảng object gồm 7 trường: GroupCode, GroupName, MST, FlagActive, LogLUDTimeUTC, LogLUBy, QtyUserInGroup.
 //   - Gate GetAllActive (:183-228): Trả listSys_Group trần (null nếu rỗng), không map Sys_GroupExt hay QtyUserInGroup.
+//   - Gate Create (:314-398): Body rỗng -> throw ServiceException("strJson null") -> 400.
+//     Deser objSys_Group -> WA_Sys_Group_Create -> WAS_Sys_Group_Create -> Sys_Group_Create_New20191102 (zTemp.cs:1034-1251).
+//     Trả Success = true, Data = null.
 //
-// Nguồn API: SysGroupController.cs:20-91
-// Nguồn biz: System.cs:2510-2625 (WAS_Sys_Group_Get) -> :2171-2508 (Sys_Group_Get_New20191102)
+// Nguồn API: SysGroupController.cs:20-91 (Get), 94-165 (Create)
+// Nguồn biz: System.cs:2510-2625 (WAS_Sys_Group_Get), 2938-3018 (WAS_Sys_Group_Create)
 //   - Draft (:2304-2319): select distinct identity(bigint, 0, 1) MyIdxSeq, sg.GroupCode ... order by sg.GroupCode asc
 //   - Summary (:2322): select Count(0) MyCount from #tbl_Sys_Group_Filter_Draft
 //   - Select cuối (:2356-2363): select t.MyIdxSeq, sg.* from #tbl_Sys_Group_Filter t inner join Sys_Group sg ... order by t.MyIdxSeq asc
+//   - Create_New20191102 (zTemp.cs:1034-1251):
+//     * StdParam(GroupCode), GroupName.Trim()
+//     * GroupCode rỗng -> Sys_Group_Create_InvalidGroupCode
+//     * GroupName.Length < 1 -> Sys_Group_Create_InvalidGroupName
+//     * Sys_Group_CheckDB (GroupCode, FlagExistToCheck: No) -> Sys_Group_CheckDB_GroupCodeExist
+//     * Sys_User_CheckDB (WAUserCode, Yes, Active) -> GAP
+//     * Save DB: GroupCode, NetworkID, MST, GroupName, FlagActive="1", LogLUDTimeUTC=UtcNow, LogLUBy="port"
 //
 // Bỏ qua có chủ đích (loại Đ):
-//   - CheckGatewayAuthentication: Sys_GroupController.cs:36, :149, SysGroupController.cs:43-48
-//   - CheckAuthorize: Sys_GroupController.cs:37, :150, Sys_User_CheckAuthorize (System.cs:2236-2249)
-//   - Sys_Access_CheckDenyV30: System.cs:2268-2272
-//   - Ghi RequestLog/ReturnLog: System.cs:2217-2224, 2498-2505
+//   - CheckGatewayAuthentication: Sys_GroupController.cs:36, :149, :334, SysGroupController.cs:43-48, :117-122
+//   - CheckAuthorize: Sys_GroupController.cs:37, :150, :335, Sys_User_CheckAuthorize (System.cs:2236-2249, zTemp.cs:1094-1108)
+//   - Sys_Access_CheckDenyV30: System.cs:2268-2272, zTemp.cs:1126-1130
+//   - Ghi RequestLog/ReturnLog: System.cs:2217-2224, 2498-2505, zTemp.cs:1075-1082, 1241-1248
 // ============================================================================================
 
 /// <summary>
@@ -50,10 +62,12 @@ namespace MiniLoyalty.Controllers.Port;
 public class Sys_GroupControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly IConfiguration? _config;
 
-    public Sys_GroupControllerPort(AppDbContext db)
+    public Sys_GroupControllerPort(AppDbContext db, IConfiguration? config = null)
     {
         _db = db;
+        _config = config;
     }
 
     /// <summary>
@@ -255,6 +269,119 @@ public class Sys_GroupControllerPort : ControllerBase
             Data = res
         });
     }
+
+    /// <summary>
+    /// Port 1:1 Create action từ gate Sys_GroupController.cs:314-398 (#310).
+    /// Chuỗi gọi: gate Sys_GroupController.Create -> WA_Sys_Group_Create -> WAS_Sys_Group_Create -> Sys_Group_Create_New20191102 (zTemp.cs:1034-1251).
+    ///
+    /// Quy trình nghiệp vụ:
+    ///   0. Body rỗng / null: gate Sys_GroupController.cs:324-331 ném ServiceException("strJson null") -> 400 ErridnLoyalty.Sys_Group_Create (P2).
+    ///   1. Mở transaction: zTemp.cs:1072 _cf.db.BeginTransaction(). Lỗi -> rollback + trả lỗi.
+    ///   2. Chuẩn hoá: strGroupCode = StdParam(objGroupCode), strGroupName = string.Format("{0}", objGroupName).Trim().
+    ///   3. Kiểm tra rỗng đầu vào:
+    ///      - strGroupCode rỗng hoặc null -> ErridnLoyalty.Sys_Group_Create_InvalidGroupCode (zTemp.cs:1142-1151).
+    ///      - strGroupName dài &lt; 1 -> ErridnLoyalty.Sys_Group_Create_InvalidGroupName (zTemp.cs:1161-1170).
+    ///   4. Kiểm tra DB (thứ tự):
+    ///      - Sys_Group_CheckDB (GroupCode, FlagExistToCheck: No) -> nếu đã tồn tại ném ErridnLoyalty.Sys_Group_CheckDB_GroupCodeExist (zTemp.cs:1153-1159, System.cs:1577-1587).
+    ///      - Sys_User_CheckDB (WAUserCode, FlagExistToCheck: Yes, FlagActive: Active) -> kiểm tra user thực hiện (zTemp.cs:1173-1184).
+    ///        (GAP: Entity Sys_User chưa có trong hệ thống đích, bỏ qua kiểm tra chi tiết và lấy MST từ req nếu có).
+    ///   5. Lưu DB (zTemp.cs:1189-1210): GroupCode, NetworkID (lấy từ config _config["Biz_NetworkID"] ?? "1001"),
+    ///      MST, GroupName, FlagActive = "1" (TConst.Flag.Yes), LogLUDTimeUTC = DateTime.UtcNow, LogLUBy = "port".
+    ///   6. Commit transaction, trả Ok(new { Success = true, Data = (object?)null }) (gate :384-385).
+    /// </summary>
+    [HttpPost("create")]
+    public async Task<IActionResult> Create([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Sys_GroupCreateReq? req)
+    {
+        // 0. Body rỗng: gate Sys_GroupController.cs:324-331 if (string.IsNullOrEmpty(strJson)) throw new ServiceException("strJson null")
+        if (req == null)
+        {
+            return PortResult.Fail("Sys_Group_Create", "Check.strJson", null);   // gate :324-330 ServiceException("strJson null") -> mã mặc định Sys_Group_Create
+        }
+
+
+        // 1. Mở transaction (zTemp.cs:1072 _cf.db.BeginTransaction())
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // 2. Chuẩn hoá tham số (zTemp.cs:1135-1136, TUtils.CUtils):
+            // GroupCode -> StdParam (Trim + ToUpper, rỗng -> null)
+            // GroupName -> string.Format("{0}", objGroupName).Trim()
+            var strGroupCode = StdParam(req.GroupCode);
+            var strGroupName = string.Format("{0}", req.GroupName).Trim();
+
+            // 3. Kiểm tra chuỗi rỗng (zTemp.cs:1142-1144, 1161-1163):
+            if (string.IsNullOrEmpty(strGroupCode))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Sys_Group_Create_InvalidGroupCode", "Check.strGroupCode", strGroupCode);
+            }
+
+            // 4. Kiểm tra DB (Sys_Group_CheckDB: GroupCode phải CHƯA tồn tại trong Sys_Group, zTemp.cs:1153-1159):
+            var groupCodePattern = PortQuery.Equal(strGroupCode);
+            var existGroup = await _db.Set<Sys_Group>()
+                .AsNoTracking()
+                .AnyAsync(x => EF.Functions.Like((x.GroupCode ?? "").ToLower(), groupCodePattern, PortQuery.Esc));
+            if (existGroup)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Sys_Group_CheckDB_GroupCodeExist", "Check.GroupCodeExist", strGroupCode);
+            }
+
+            // Sys_User_CheckDB: User thực hiện phải tồn tại và active (zTemp.cs:1175-1181)
+            // Lấy MST từ Sys_User (zTemp.cs:1183)
+            // GAP: Entity Sys_User chưa có trong hệ thống đích (chưa port #323-336), gán MST = req.MST nếu có, ngược lại null.
+                        if (strGroupName.Length < 1)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Sys_Group_Create_InvalidGroupName", "Check.strGroupName", strGroupName);
+            }
+
+            // MST: nguồn lấy từ Sys_User của người dùng đang đăng nhập (Sys_User_CheckDB -> dtDB_Sys_User.Rows[0]["MST"], :1175-1183); đích chưa có session/Sys_User -> nhận MST tuỳ chọn trong body (GAP)
+            var strMST = !string.IsNullOrWhiteSpace(req.MST) ? StdParam(req.MST) : null;
+
+            // NetworkID từ cấu hình theo luật A.13 / đề bài line 66 (bảng Sys_Group nguồn không có cột NetworkID)
+            var networkID = _config?["Biz_NetworkID"] ?? "1001";
+
+            // 5. Lưu DB (zTemp.cs:1189-1210):
+            var now = DateTime.UtcNow;
+            var newGroup = new Sys_Group
+            {
+                GroupCode = strGroupCode,
+                GroupName = strGroupName,
+                FlagActive = "1",
+                MST = strMST,
+                LogLUDTimeUTC = now,
+                LogLUBy = "port"
+            };
+
+            await _db.Set<Sys_Group>().AddAsync(newGroup);
+            await _db.SaveChangesAsync();
+
+            // 6. Commit transaction (zTemp.cs:1214)
+            await tx.CommitAsync();
+
+            return Ok(new
+            {
+                Success = true,
+                Data = (object?)null
+            });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return PortResult.Fail("Sys_Group_Create", "Exception", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Chuẩn hoá chuỗi mã theo CUtils.StdParam: Trim, viết HOA, rỗng -> null.
+    /// </summary>
+    private static string? StdParam(object? s)
+    {
+        if (s == null) return null;
+        var str = s.ToString()?.Trim().ToUpperInvariant();
+        return string.IsNullOrEmpty(str) ? null : str;
+    }
 }
 
 /// <summary>
@@ -338,5 +465,15 @@ public class Sys_UserInGroupRes
     public string? sg_GroupCode { get; set; }
     public string? sg_GroupName { get; set; }
     public string? sg_FlagActive { get; set; }
+}
+
+/// <summary>
+/// DTO request cho action Create — Sys_GroupController.cs:314 (#310).
+/// </summary>
+public class Sys_GroupCreateReq
+{
+    public string? GroupCode { get; set; }
+    public string? GroupName { get; set; }
+    public string? MST { get; set; }
 }
 
