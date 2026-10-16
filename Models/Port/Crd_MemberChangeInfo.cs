@@ -82,6 +82,35 @@ public class Crd_MemberChangeInfoConfig : IEntityTypeConfiguration<Crd_MemberCha
 }
 
 /// <summary>
+/// Model Crd_MemberColumnChange — cấu hình cột thay đổi thông tin hội viên (#031).
+/// Model nguồn: idn.Loyalty.Common.Models.Crd_MemberColumnChange.cs (9 thuộc tính).
+/// SQL nguồn: Card.cs:31705-31707, 31750-31751 (PK ghép: ColumnCode, OrgID).
+/// </summary>
+public class Crd_MemberColumnChange
+{
+    public string ColumnCode { get; set; } = "";
+    public string OrgID { get; set; } = "";
+    public string? NetworkID { get; set; }
+    public string? ColumnName { get; set; }
+    public string? FlagLinkMst { get; set; }
+    public string? MasterName { get; set; }
+    public string? Remark { get; set; }
+    public string? LogLUDTimeUTC { get; set; }
+    public string? LogLUBy { get; set; }
+}
+
+public class Crd_MemberColumnChangeConfig : IEntityTypeConfiguration<Crd_MemberColumnChange>
+{
+    public void Configure(EntityTypeBuilder<Crd_MemberColumnChange> b)
+    {
+        b.ToTable("Crd_MemberColumnChange");
+        b.HasKey(x => new { x.ColumnCode, x.OrgID });
+        b.Property(x => x.ColumnCode).IsRequired();
+        b.Property(x => x.OrgID).IsRequired();
+    }
+}
+
+/// <summary>
 /// Seeder dữ liệu mẫu cho Crd_MemberChangeInfo (Order => 52 theo đề bài #027).
 /// Idempotent. Đảm bảo có ít nhất 2 hội viên MB001, MB002 và 4 đề nghị REQ01..REQ04.
 /// </summary>
@@ -378,6 +407,73 @@ public class Crd_MemberChangeInfoSeeder : IPortSeeder
                     LUDTimeUTC = "2026-08-14 08:00:00",
                     CreateBy = "seed",
                     LUBy = "seed"
+                }
+            );
+        }
+
+        // 4. Seed dữ liệu cấu hình cột thay đổi thông tin hội viên (Crd_MemberColumnChange, #031)
+        if (!await db.Set<Crd_MemberColumnChange>().AnyAsync())
+        {
+            db.Set<Crd_MemberColumnChange>().AddRange(
+                new Crd_MemberColumnChange
+                {
+                    ColumnCode = "MemberName",
+                    OrgID = "ORG01",
+                    NetworkID = "1001",
+                    ColumnName = "Họ tên hội viên",
+                    FlagLinkMst = "0",
+                    MasterName = null,
+                    Remark = "Cấu hình đổi tên hội viên",
+                    LogLUBy = "seed",
+                    LogLUDTimeUTC = "2026-08-01 00:00:00"
+                },
+                new Crd_MemberColumnChange
+                {
+                    ColumnCode = "PhoneNo",
+                    OrgID = "ORG01",
+                    NetworkID = "1001",
+                    ColumnName = "Số điện thoại",
+                    FlagLinkMst = "0",
+                    MasterName = null,
+                    Remark = "Cấu hình đổi SĐT",
+                    LogLUBy = "seed",
+                    LogLUDTimeUTC = "2026-08-01 01:00:00"
+                },
+                new Crd_MemberColumnChange
+                {
+                    ColumnCode = "CarNo",
+                    OrgID = "ORG01",
+                    NetworkID = "1001",
+                    ColumnName = "Biển số xe",
+                    FlagLinkMst = "0",
+                    MasterName = null,
+                    Remark = "Cấu hình đổi biển số xe",
+                    LogLUBy = "seed",
+                    LogLUDTimeUTC = "2026-08-01 02:00:00"
+                },
+                new Crd_MemberColumnChange
+                {
+                    ColumnCode = "ProvinceCode",
+                    OrgID = "ORG01",
+                    NetworkID = "1001",
+                    ColumnName = "Tỉnh/Thành phố",
+                    FlagLinkMst = "1",
+                    MasterName = "Mst_Province",
+                    Remark = "Cấu hình đổi Tỉnh/TP",
+                    LogLUBy = "seed",
+                    LogLUDTimeUTC = "2026-08-01 03:00:00"
+                },
+                new Crd_MemberColumnChange
+                {
+                    ColumnCode = "DistrictCode",
+                    OrgID = "ORG01",
+                    NetworkID = "1001",
+                    ColumnName = "Quận/Huyện",
+                    FlagLinkMst = "1",
+                    MasterName = "Mst_District",
+                    Remark = "Cấu hình đổi Quận/Huyện",
+                    LogLUBy = "seed",
+                    LogLUDTimeUTC = "2026-08-01 04:00:00"
                 }
             );
         }

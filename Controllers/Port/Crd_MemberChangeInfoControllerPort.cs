@@ -52,6 +52,16 @@ public class Crd_MemberChangeInfoGetHistoryByMemberReq
 }
 
 /// <summary>
+/// DTO nhận tham số cho Crd_MemberChangeInfoController/GetMemberColumnChange (#031).
+/// Gate: Crd_MemberChangeInfoController.cs:447.
+/// Thêm OrgID tuỳ chọn theo bài học A.14.
+/// </summary>
+public class Crd_MemberColumnChangeGetReq
+{
+    public string? OrgID { get; set; }
+}
+
+/// <summary>
 /// Port 1:1 Crd_MemberChangeInfoController — Crd_MemberChangeInfo (#027).
 /// Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Crd_MemberChangeInfoController.cs:33-144
 /// API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\CrdMemberChangeInfoController.cs:23-93
@@ -737,5 +747,43 @@ public class Crd_MemberChangeInfoControllerPort : ControllerBase
             return dt.AddHours(7).ToString("yyyy-MM-dd HH:mm:ss");
         }
         return utcStr;
+    }
+
+    /// <summary>
+    /// Lấy danh sách cấu hình cột thay đổi thông tin hội viên (Action GetMemberColumnChange, #031).
+    /// Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Crd_MemberChangeInfoController.cs:447-512
+    /// API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\CrdMemberColumnChangeController.cs:23-93
+    /// Biz: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\Card.cs:31964-32066 (WAS_), 31809-31960 (Get), 31648-31807 (GetX)
+    /// </summary>
+    [HttpPost("getmembercolumnchange")]
+    public async Task<IActionResult> GetMemberColumnChange([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_MemberColumnChangeGetReq? req)
+    {
+        req ??= new Crd_MemberColumnChangeGetReq();
+
+        // 1. Truy vấn cấu hình cột Crd_MemberColumnChange (Card.cs:31703-31713, 31745-31753)
+        var query = _db.Set<Crd_MemberColumnChange>().AsQueryable();
+
+        // Lọc OrgID tuỳ chọn nếu client truyền theo bài học A.14 (Card.cs:31751)
+        if (!string.IsNullOrWhiteSpace(req.OrgID))
+        {
+            var p_OrgID = PortQuery.Equal(req.OrgID.Trim());
+            query = query.Where(x => EF.Functions.Like((x.OrgID ?? "").ToLower(), p_OrgID, PortQuery.Esc));
+        }
+
+        // Sắp xếp thứ tự: LogLUDTimeUTC asc (Card.cs:31712, 31752)
+        query = query.OrderBy(x => x.LogLUDTimeUTC);
+
+        var list = await query.ToListAsync();
+
+        // 2. Kết quả trả về JSON (Gate :489-499)
+        // Nếu không có phần tử nào -> trả về null (Gate :468, 489)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Lst_Crd_MemberColumnChange = (list != null && list.Count > 0) ? list : null
+            }
+        });
     }
 }
