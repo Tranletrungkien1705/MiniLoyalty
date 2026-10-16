@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using MiniLoyalty.Data;
 using MiniLoyalty.Models.Port;
 
@@ -15,6 +16,7 @@ namespace MiniLoyalty.Controllers.Port;
 //   - Search (#183)
 //   - GetAllActive (#184)
 //   - GetByPrProgramCode (#185)
+//   - Save (#186)
 //
 // Nguồn tra cứu (chỉ đọc):
 //   - Gate controller: 13.ClientGate/V10/idn.Loyalty.WebAPI/Controllers/Mst_ParamPromotionController.cs
@@ -32,11 +34,18 @@ namespace MiniLoyalty.Controllers.Port;
 //     * GetByPrProgramCode: :214-277 — tham số PrProgramCode. Neu null/rong -> Data=null (:234, :263-264).
 //       Loc theo PrProgramCode bang strWhereClause_Mst_ParamPromotion_By_PrProgramCode (:299-315, toan tu '=').
 //       Ft_RecordStart="0", Ft_RecordCount="1" (:251-252). Data la 1 OBJECT don, khong phai mang (:258-260).
-//   - Service: WA_Mst_ParamPromotion_Get (11.BackEnd/V10/idn.Loyalty.Biz.Web/Controllers/MstParamPromotionController.cs:97-167)
+//     * Save: :319-411. Check strJson (:329). Sequence bị comment (:351-378). 
+//   - Service: WA_Mst_ParamPromotion_Get, WA_Mst_ParamPromotion_Save (11.BackEnd/V10/idn.Loyalty.Biz.Web/Controllers/MstParamPromotionController.cs)
 //   - Biz LIVE:
 //     * WAS_Mst_ParamPromotion_Get: Master.Loyalty.cs:12170-12272
 //     * Mst_ParamPromotion_Get: Master.Loyalty.cs:12273-12426
 //     * Mst_ParamPromotion_GetX: Master.Loyalty.cs:12427-12598
+//     * WAS_Mst_ParamPromotion_Save: Master.Loyalty.cs:12080-12169
+//     * Mst_ParamPromotion_Save: Master.Loyalty.cs:11937-12078
+//     * Mst_ParamPromotion_SaveX: Master.Loyalty.cs:11695-11935.
+//       Chuan hoa StdParam cho PrProgramCode (:11767-11781).
+//       Kiem tra Mst_PromotionProgram (:11787).
+//       Xoa TOAN BO bang (delete where 1=1) (:11843-11852).
 //   - DDL: 11.BackEnd/V10/05.Refs.Biz/Migrate/20221006.QUYNHNTN/20221026.CreateDatabase.sql
 //     * Mst_ParamPromotion: :322-333 (10 cột), PK composite (PrProgramCode, ParamPrType) tại :337-340.
 //       FK ParamPrType -> Mst_ParamPromotionType(ParamPrType) tại :364-371 — chỉ ghi comment.
@@ -77,16 +86,26 @@ public class MstParamPromotionGetByPrProgramCodeReq
     public string? PrProgramCode { get; set; } // gate :214
 }
 
+/// <summary>
+/// Tham số request Save (#186)
+/// </summary>
+public class MstParamPromotionSaveReq
+{
+    public List<Mst_ParamPromotion>? Lst_Mst_ParamPromotion { get; set; }
+}
+
 [ApiController]
 [Route("api/mst_parampromotion")]
 [Produces("application/json")]
 public class Mst_ParamPromotionControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly IConfiguration _config;
 
-    public Mst_ParamPromotionControllerPort(AppDbContext db)
+    public Mst_ParamPromotionControllerPort(AppDbContext db, IConfiguration config)
     {
         _db = db;
+        _config = config;
     }
 
     /// <summary>
@@ -139,6 +158,101 @@ public class Mst_ParamPromotionControllerPort : ControllerBase
         // gate :251-252, :258-260
         var (_, rows) = await GetXAsync(null, 0, 1, req.PrProgramCode);
         return Ok(new { Success = true, Data = rows.Count > 0 ? rows[0] : null });
+    }
+
+    /// <summary>
+    /// Port 1:1 action Save của Mst_ParamPromotionController (gate :319-411).
+    /// Hành động XÓA TOAN BỘ bảng rồi GHI LẠI (Master.Loyalty.cs:11843-11852).
+    /// </summary>
+    [HttpPost("save")]
+    public async Task<IActionResult> Save([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] MstParamPromotionSaveReq? req)
+    {
+        // Gate :329-336
+        if (req == null || req.Lst_Mst_ParamPromotion == null)
+        {
+            return PortResult.Fail("Mst_ParamPromotion_Save", "Exception", "strJson null");
+        }
+
+        var list = req.Lst_Mst_ParamPromotion;
+        var now = DateTime.UtcNow;
+
+        // Chuẩn hoá và lấy danh sách PrProgramCode cần kiểm tra
+        var codesToCheck = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in list)
+        {
+            // StdParam cho PrProgramCode (Master.Loyalty.cs:11767-11781)
+            item.PrProgramCode = (item.PrProgramCode ?? "").Trim().ToUpper();
+            
+            // Các cột khác giữ nguyên theo input (PrProgramName, ParamPrType, QtyDateBefore, QtyDateAfter, Remark)
+            codesToCheck.Add(item.PrProgramCode);
+        }
+
+        // Mst_PromotionProgram_CheckDB(PrProgramCode, "1", "1", "1") (Master.Loyalty.cs:11787-11794, :13092-13175), kiểm từng dòng theo thứ tự input:
+        //   1. không tồn tại -> Mst_PromotionProgram_CheckDB_PrProgramCodeNotFound (:13128-13136)
+        //   2. FlagActive không thuộc "1" -> Mst_PromotionProgram_CheckDB_FlagActiveNotMatched (:13151-13162)
+        //   3. FlagShow không thuộc "1" (EffDateStart <= hôm nay(UTC+7) <= EffDateEnd, :13102-13108) -> nguồn ném
+        //      Mst_BirthPolicy_CheckDB_FlagShowNotMatched (copy-paste của dev nguồn, :13164-13172) — giữ đúng tên.
+        var today = DateTime.UtcNow.AddHours(7).Date;
+        var programs = new Dictionary<string, Mst_PromotionProgram>(StringComparer.OrdinalIgnoreCase);
+        foreach (var code in codesToCheck)
+        {
+            var pCode = PortQuery.Equal(code);
+            var prog = await _db.Set<Mst_PromotionProgram>().AsNoTracking()
+                .FirstOrDefaultAsync(x => EF.Functions.Like((x.PrProgramCode ?? "").ToLower(), pCode, PortQuery.Esc));
+            if (prog != null) programs[code] = prog;
+        }
+
+        foreach (var item in list)
+        {
+            if (!programs.TryGetValue(item.PrProgramCode, out var prog))
+            {
+                return PortResult.Fail("Mst_PromotionProgram_CheckDB_PrProgramCodeNotFound",
+                    "Check.PrProgramCode", item.PrProgramCode);
+            }
+            if (!"1".Contains(prog.FlagActive ?? ""))
+            {
+                return PortResult.Fail("Mst_PromotionProgram_CheckDB_FlagActiveNotMatched",
+                    "Check.PrProgramCode", item.PrProgramCode,
+                    "Check.strFlagActiveListToCheck", "1",
+                    "DB.FlagActive", prog.FlagActive);
+            }
+            var flagShow = (prog.EffDateStart.Date <= today && today <= prog.EffDateEnd.Date) ? "1" : "0";
+            if (flagShow != "1")
+            {
+                return PortResult.Fail("Mst_BirthPolicy_CheckDB_FlagShowNotMatched",
+                    "Check.BirthPolicyNo", item.PrProgramCode,
+                    "Check.strFlagShowListToCheck", "1",
+                    "DB.FlagShow", flagShow);
+            }
+
+            // Gán bắt buộc (Master.Loyalty.cs:11796-11800)
+            item.NetworkID = _config["Biz_NetworkID"] ?? "1001";
+            item.FlagActive = "1";
+            item.LogLUDTimeUTC = now;
+            item.LogLUBy = "port";
+        }
+
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // Xóa toàn bộ dữ liệu bảng (Master.Loyalty.cs:11843-11852 - điều kiện join đã bị comment)
+            await _db.Set<Mst_ParamPromotion>().ExecuteDeleteAsync();
+
+            // Insert lại dữ liệu mới
+            if (list.Count > 0)
+            {
+                _db.Set<Mst_ParamPromotion>().AddRange(list);
+                await _db.SaveChangesAsync();
+            }
+
+            await tx.CommitAsync();
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return PortResult.Fail("Mst_ParamPromotion_Save", "Exception", ex.Message);
+        }
     }
 
     /// <summary>
