@@ -4,14 +4,14 @@ Nguồn mẫu số: `D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.Web
 
 **Mẫu số (N)**: 337
 
-**Tiến độ hiện tại**: 210/337 (62.31%)
+**Tiến độ hiện tại**: 211/337 (62.61%)
 
 Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã có` (đã port từ trước, có bằng chứng) · `Bỏ` (scaffold/không nghiệp vụ, ghi lý do) · `Cần xem tay`.
 
 | # | Hạng mục | Trạng thái | Commit |
 |---|---|---|---|
 | 1 | Crd_CardController/Search | Đã làm | 2660097 |
-| 2 | Crd_CardController/GetDetailMember | Chưa làm | - |
+| 2 | Crd_CardController/GetDetailMember | Đã làm | 9d34ff7 |
 | 3 | Crd_CardController/GetDetailMember_New | Chưa làm | - |
 | 4 | Crd_CardController/RequestException | Chưa làm | - |
 | 5 | Crd_CardController/ApprException | Chưa làm | - |
