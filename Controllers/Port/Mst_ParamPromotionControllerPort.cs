@@ -14,6 +14,7 @@ namespace MiniLoyalty.Controllers.Port;
 // PORT 1:1 từ dự án nguồn 2022.7.Loyalty — Mst_ParamPromotionController:
 //   - Search (#183)
 //   - GetAllActive (#184)
+//   - GetByPrProgramCode (#185)
 //
 // Nguồn tra cứu (chỉ đọc):
 //   - Gate controller: 13.ClientGate/V10/idn.Loyalty.WebAPI/Controllers/Mst_ParamPromotionController.cs
@@ -28,6 +29,9 @@ namespace MiniLoyalty.Controllers.Port;
 //       -> lọc FlagActive bằng toán tử IN (tách dấu phẩy). Ft_RecordStart="0", Ft_RecordCount="123456000"
 //       (BaseController.cs:30-31). Data = listMst_ParamPromotion là MẢNG TRẦN; rỗng thì Data = null
 //       (:127, :153-155, :191-199). Khối Ext/tree đã bị comment -> KHÔNG port.
+//     * GetByPrProgramCode: :214-277 — tham số PrProgramCode. Neu null/rong -> Data=null (:234, :263-264).
+//       Loc theo PrProgramCode bang strWhereClause_Mst_ParamPromotion_By_PrProgramCode (:299-315, toan tu '=').
+//       Ft_RecordStart="0", Ft_RecordCount="1" (:251-252). Data la 1 OBJECT don, khong phai mang (:258-260).
 //   - Service: WA_Mst_ParamPromotion_Get (11.BackEnd/V10/idn.Loyalty.Biz.Web/Controllers/MstParamPromotionController.cs:97-167)
 //   - Biz LIVE:
 //     * WAS_Mst_ParamPromotion_Get: Master.Loyalty.cs:12170-12272
@@ -63,6 +67,14 @@ public class MstParamPromotionSearchReq
     public string? FlagActive { get; set; }          // Cờ hoạt động — lọc theo IN, tách dấu phẩy (gate :287-295)
     public int Ft_PageIndex { get; set; } = 0;       // Trang (0-based) — nguồn :23, :44
     public int Ft_PageSize { get; set; } = 10;       // Số dòng/trang — nguồn :23, :45 (mặc định 10)
+}
+
+/// <summary>
+/// Tham so request GetByPrProgramCode (#185)
+/// </summary>
+public class MstParamPromotionGetByPrProgramCodeReq
+{
+    public string? PrProgramCode { get; set; } // gate :214
 }
 
 [ApiController]
@@ -113,15 +125,33 @@ public class Mst_ParamPromotionControllerPort : ControllerBase
     }
 
     /// <summary>
+    /// Port 1:1 action GetByPrProgramCode của Mst_ParamPromotionController (gate :214-277).
+    /// </summary>
+    [HttpPost("getbyprprogramcode")]
+    public async Task<IActionResult> GetByPrProgramCode([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] MstParamPromotionGetByPrProgramCodeReq? req)
+    {
+        // gate :234, :263-264
+        if (string.IsNullOrWhiteSpace(req?.PrProgramCode))
+        {
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+
+        // gate :251-252, :258-260
+        var (_, rows) = await GetXAsync(null, 0, 1, req.PrProgramCode);
+        return Ok(new { Success = true, Data = rows.Count > 0 ? rows[0] : null });
+    }
+
+    /// <summary>
     /// Thực hiện các bước truy vấn của Mst_ParamPromotion_GetX (Master.Loyalty.cs:12427-12598):
     ///   Bước 1 (Draft + Count): lọc FlagActive theo IN (tách dấu phẩy, trim, không phân biệt hoa/thường),
+    ///           lọc them PrProgramCode (cho GetByPrProgramCode),
     ///           order by LogLUDTimeUTC desc, đếm tổng dòng draft làm ItemCount.
     ///   Bước 2 (Paging + Select cuối): cắt theo [recordStart, recordStart + recordCount),
     ///           LEFT JOIN Mst_PromotionProgram qua PrProgramCode để lấy PrProgramName từ Mst_PromotionProgram,
     ///           order by LogLUDTimeUTC desc (hòa trùng: sắp phụ theo PrProgramCode asc, ParamPrType asc).
     /// GAP: drAbilityOfUser (:12468) lấy nhưng dòng gọi cache bị comment (:12480) -> không port (coi như thấy toàn bộ).
     /// </summary>
-    private async Task<(int itemCount, List<object> rows)> GetXAsync(string? flagActiveCsv, long recordStart, long recordCount)
+    private async Task<(int itemCount, List<object> rows)> GetXAsync(string? flagActiveCsv, long recordStart, long recordCount, string? prProgramCode = null)
     {
         // -----------------------------------------------------------------------------------------
         // BƯỚC 1: DRAFT + COUNT (Master.Loyalty.cs:12484-12497)
@@ -140,6 +170,13 @@ public class Mst_ParamPromotionControllerPort : ControllerBase
             // ⇒ so sánh Like KHÔNG wildcard, hạ chữ 2 phía (PortQuery.Equal).
             var patterns = flagValues.Select(v => PortQuery.Equal(v)).ToList();
             q = q.Where(x => patterns.Contains((x.FlagActive ?? "").ToLower()));
+        }
+
+        // Lọc theo PrProgramCode (gate :299-315) - dung toan tu = (PortQuery.Equal)
+        if (!string.IsNullOrWhiteSpace(prProgramCode))
+        {
+            var pCode = PortQuery.Equal(prProgramCode);
+            q = q.Where(x => EF.Functions.Like(x.PrProgramCode.ToLower(), pCode, PortQuery.Esc));
         }
 
         // Sắp xếp mpp.LogLUDTimeUTC desc (Master.Loyalty.cs:12493).
