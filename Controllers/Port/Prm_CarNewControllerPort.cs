@@ -36,6 +36,11 @@ public class Prm_CarNewControllerPort : ControllerBase
         public int Ft_PageSize { get; set; } = 10;
     }
 
+    public class Prm_CarNewGetByCodeSysReq
+    {
+        public string? PRMCNCodeSys { get; set; }
+    }
+
     [HttpPost("search")]
     public async Task<IActionResult> Search([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Prm_CarNewSearchReq? req)
     {
@@ -137,5 +142,87 @@ public class Prm_CarNewControllerPort : ControllerBase
         var pageInfo = new PageInfo<Prm_CarNew>(pagedList, itemCount, pageCount, pageIndex, pageSize);
 
         return Ok(new { Success = true, Data = pageInfo });
+    }
+
+    [HttpPost("getbyprmcncodesys")]
+    public async Task<IActionResult> GetByPRMCNCodeSys([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Prm_CarNewGetByCodeSysReq? req)
+    {
+        string? prmCodeSys = req?.PRMCNCodeSys;
+        if (string.IsNullOrEmpty(prmCodeSys))
+        {
+            // gate Prm_CarNewController.cs:170: PRMCNCodeSys rỗng => không truy vấn, vẫn SetSuccess với Data = { Prm_CarNew = null, Lst_Prm_CarNewDtl = null, Lst_Prm_CarNewSpec = null }
+            return Ok(new { Success = true, Data = new { Prm_CarNew = (object?)null, Lst_Prm_CarNewDtl = (object?)null, Lst_Prm_CarNewSpec = (object?)null } });
+        }
+
+        var pat = PortQuery.Equal(prmCodeSys);
+        var objPrm_CarNew = await _db.Set<Prm_CarNew>()
+            .FirstOrDefaultAsync(x => EF.Functions.Like((x.PRMCNCodeSys ?? "").ToLower(), pat, PortQuery.Esc));
+
+        object? formattedPrmCarNew = null;
+        if (objPrm_CarNew != null)
+        {
+            string appDTime = objPrm_CarNew.ApprDTimeUTC.HasValue ? objPrm_CarNew.ApprDTimeUTC.Value.AddHours(7).ToString("yyyy-MM-dd HH:mm:ss") : "";
+            string createDTime = objPrm_CarNew.CreateDTimeUTC.AddHours(7).ToString("yyyy-MM-dd HH:mm:ss");
+
+            string effDateEnd = objPrm_CarNew.EffDateEnd;
+            if (effDateEnd == "2100-01-01")
+            {
+                effDateEnd = "";
+            }
+
+            // FlagShow do biz tính (source_excerpt: case when FINISH và EffDateStart <= @dateSys <= EffDateEnd then '1' else '0'; @dateSys = UtcNow+7)
+            var dateSys = DateTime.UtcNow.AddHours(7).ToString("yyyy-MM-dd");
+            var flagShow = (objPrm_CarNew.PRMCNStatus == "FINISH" && string.Compare(objPrm_CarNew.EffDateStart, dateSys) <= 0 && string.Compare(dateSys, objPrm_CarNew.EffDateEnd) <= 0) ? "1" : "0";
+            formattedPrmCarNew = new
+            {
+                objPrm_CarNew.PRMCNCodeSys,
+                objPrm_CarNew.NetworkID,
+                objPrm_CarNew.OrgID,
+                objPrm_CarNew.DLCPCode,
+                objPrm_CarNew.PRMCNCode,
+                objPrm_CarNew.PRMCNName,
+                EffDateStart = objPrm_CarNew.EffDateStart,
+                EffDateEnd = effDateEnd,
+                objPrm_CarNew.FlagAllModel,
+                objPrm_CarNew.PointValAllModel,
+                CreateDTimeUTC = createDTime,
+                objPrm_CarNew.CreateBy,
+                LUDTimeUTC = objPrm_CarNew.LUDTimeUTC,
+                objPrm_CarNew.LUBy,
+                ApprDTimeUTC = appDTime,
+                objPrm_CarNew.ApprBy,
+                FinishDTimeUTC = objPrm_CarNew.FinishDTimeUTC,
+                objPrm_CarNew.FinishBy,
+                CancelDTimeUTC = objPrm_CarNew.CancelDTimeUTC,
+                objPrm_CarNew.CancelBy,
+                objPrm_CarNew.PRMCNStatus,
+                objPrm_CarNew.Remark,
+                objPrm_CarNew.LogLUDTimeUTC,
+                objPrm_CarNew.LogLUBy,
+                MyIdxSeq = objPrm_CarNew.MyIdxSeq,
+                FlagShow = flagShow
+            };
+        }
+
+        var lstDtl = await _db.Set<Prm_CarNewDtl>()
+            .Where(x => EF.Functions.Like((x.PRMCNCodeSys ?? "").ToLower(), pat, PortQuery.Esc))
+            .OrderBy(x => x.Idx)
+            .ToListAsync();
+
+        var lstSpec = await _db.Set<Prm_CarNewSpec>()
+            .Where(x => EF.Functions.Like((x.PRMCNCodeSys ?? "").ToLower(), pat, PortQuery.Esc))
+            .OrderBy(x => x.Idx)
+            .ToListAsync();
+
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Prm_CarNew = formattedPrmCarNew,
+                Lst_Prm_CarNewDtl = lstDtl.Count > 0 ? lstDtl : null,
+                Lst_Prm_CarNewSpec = lstSpec.Count > 0 ? lstSpec : null
+            }
+        });
     }
 }
