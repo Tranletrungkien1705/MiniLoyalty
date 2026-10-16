@@ -1,0 +1,583 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
+using Microsoft.EntityFrameworkCore;
+using MiniLoyalty.Data;
+using MiniLoyalty.Models;
+using MiniLoyalty.Models.Port;
+
+namespace MiniLoyalty.Controllers.Port;
+
+// ============================================================================================
+// PORT 1:1 — Crd_MemberController/Search (#039).
+//
+// Nguồn tầng Gate:
+//   Crd_MemberController.cs:30-140    Search -> Crd_MemberService.WA_Crd_Member_GetRegister
+//   Crd_MemberController.cs:1494-1558 strWhereClause_Crd_Member (dựng mệnh đề lọc hội viên)
+//   Crd_MemberController.cs:1560-1586 strWhereClause_Crd_MemberFlagShow (dựng mệnh đề lọc cm_FlagShow)
+// Nguồn tầng API:
+//   CrdMemberController.cs:97-166     WA_Crd_Member_GetRegister -> _biz.WAS_Crd_Member_GetRegister
+// Nguồn tầng Biz:
+//   Card.cs:19760-19858               WAS_Crd_Member_GetRegister
+//   Card.cs:19860-20012               Crd_Member_GetRegister
+//   Card.cs:20303-20600               Crd_Member_GetRegisterX_New20231019 (bản LIVE đang được gọi)
+//
+// GIỮ ĐÚNG NGUỒN:
+//   * Endpoint POST: /api/crd_member/search
+//   * Tham số nhận vào: OrgID, RegistrationDateFrom, RegistrationDateTo, MemberActiveDateFrom,
+//     MemberActiveDateTo, DLCodeRegis, PhoneNo, MemberNo, RegisStatus, CarNo, MemberName,
+//     VIN, cm_FlagShow, SourceRegisType, int Ft_PageIndex = 0, int Ft_PageSize = 10.
+//     KHÔNG có KeyWord trong chữ ký gate (:30-31).
+//   * OrgID có trong tham số gate nhưng strWhereClause_Crd_Member KHÔNG lọc OrgID (:1494-1558).
+//   * Toán tử lọc: Toàn bộ trường chuỗi (kể cả MemberName) dùng toán tử "=", KHÔNG dùng LIKE,
+//     KHÔNG có toán tử IN, KHÔNG tách dấu phẩy.
+//   * cm_FlagShow: "1" -> MemberStatus = 'APPROVE', "0" -> MemberStatus = 'CANCEL',
+//     "-1" -> MemberStatus = 'PENDING', giá trị khác bỏ qua (:1566-1581).
+//   * Nối bảng: Crd_Member inner join Crd_Card cc theo cc.CardSourceCode = 'NEW' (Card.cs:20528-20530).
+//   * Sắp xếp: cmb.MemberNo asc trong draft và t.MyIdxSeq asc ở select cuối (Card.cs:20369, 20546).
+//   * cm_FlagShow ở kết quả chi tiết: case MemberStatus 'PENDING' -> '-1', 'APPROVE' -> '1', 'CANCEL' -> '0' (:20505-20511).
+//   * MemberActiveDate ở kết quả chi tiết lấy từ cc.CardActiveDate (:20487).
+//   * Phân trang: Chuẩn Bài học A.12 và A.7 (Ft_PageSize = 0 -> DataList [], PageCount = 0, ItemCount giữ nguyên).
+//   * DTO: Crd_MemberSearchReq và Crd_MemberSearchItem đặt cùng file theo Bài học A.14, A.24.
+// ============================================================================================
+
+/// <summary>
+/// Tham số tìm kiếm hội viên — port 1:1 từ tầng Gate Crd_MemberController.Search (Crd_MemberController.cs:30-31).
+/// </summary>
+public class Crd_MemberSearchReq
+{
+    public string? OrgID { get; set; }                    // Crd_MemberController.cs:30 (nhận nhưng không lọc trong strWhereClause)
+    public string? RegistrationDateFrom { get; set; }     // :30
+    public string? RegistrationDateTo { get; set; }       // :30
+    public string? MemberActiveDateFrom { get; set; }     // :30
+    public string? MemberActiveDateTo { get; set; }       // :30
+    public string? DLCodeRegis { get; set; }              // :30
+    public string? PhoneNo { get; set; }                  // :30
+    public string? MemberNo { get; set; }                 // :30
+    public string? RegisStatus { get; set; }              // :31
+    public string? CarNo { get; set; }                    // :31
+    public string? MemberName { get; set; }               // :31 (lọc toán tử =, không LIKE)
+    public string? VIN { get; set; }                      // :31
+    public string? cm_FlagShow { get; set; }              // :31 ("1" -> APPROVE, "0" -> CANCEL, "-1" -> PENDING)
+    public string? SourceRegisType { get; set; }          // :31
+    public string? MemberStatus { get; set; }             // strWhereClause_Crd_Member :1544
+    public string? DLCPCode { get; set; }                 // strWhereClause_Crd_Member :1548
+    public int Ft_PageIndex { get; set; } = 0;            // :31
+    public int Ft_PageSize { get; set; } = 10;            // :31
+}
+
+/// <summary>
+/// Model từng dòng dữ liệu hội viên trả về ở DataList — port 1:1 từ model Crd_Member.cs (1-122) và select cuối (Card.cs:20400-20549).
+/// </summary>
+public class Crd_MemberSearchItem
+{
+    public long? MyIdxSeq { get; set; }                     // Thứ tự dòng (Card.cs:20403)
+    public string? MemberNo { get; set; }                   // Mã hội viên — Crd_Member.cs:11 (PK)
+    public string? NetworkID { get; set; }                  // NetworkID — :12
+    public string? OrgID { get; set; }                      // OrgID — :13
+    public string? DLCodeRegis { get; set; }                // Đại lý đăng ký hội viên — :14
+    public string? DLCodeExceptionally { get; set; }        // Đại lý đặc cách — :15
+    public DateTime? RegistrationDate { get; set; }         // Ngày đăng ký hội viên — :16
+    public string? CustomerCode { get; set; }               // Mã khách hàng — :17
+    public string? ProvinceCode { get; set; }               // Mã Tỉnh/TP — :18
+    public string? DistrictCode { get; set; }               // Mã Quận/huyện — :19
+    public string? UserCode_Member { get; set; }            // :20
+    public string? MemberName { get; set; }                 // Tên hội viên/Tên khách hàng — :21
+    public string? MemberGender { get; set; }               // Giới tính — :22
+    public string? IDCardNo { get; set; }                   // CMT/CCCD — :23
+    public string? PhoneNo { get; set; }                    // Số điện thoại — :24
+    public DateTime? DateOfBirth { get; set; }              // Ngày sinh — :25
+    public string? MemAddress { get; set; }                 // Địa chỉ — :26
+    public string? CarNo { get; set; }                      // Biển số xe — :27
+    public string? VIN { get; set; }                        // Số khung — :28
+    public string? ModelCode { get; set; }                  // Mã model — :29
+    public string? ModelName { get; set; }                  // Tên model — :30
+    public string? TradeMarkCode { get; set; }              // Hiệu xe — :31
+    public DateTime? EffDateStart { get; set; }             // Ngày hiệu lực từ — :32
+    public DateTime? EffDateEnd { get; set; }               // Ngày hiệu lực đến — :33
+    public double? PointTotal { get; set; }                 // Điểm giao dịch trong kỳ — :34
+    public double? PointBlock { get; set; }                 // :35
+    public double? PointAvail { get; set; }                 // :36
+    public double? AmountTotal { get; set; }                // Tiền giao dịch trong kỳ — :37
+    public double? AmountBlock { get; set; }                // :38
+    public double? AmountAvail { get; set; }                // Doanh thu xét hạng trong kỳ — :39
+    public double? QtyVisitTotal { get; set; }              // Số lần ghé thăm trong kỳ — :40
+    public double? QtyVisitBlock { get; set; }              // :41
+    public double? QtyVisitAvail { get; set; }              // Lượt dịch vụ — :42
+    public double? PointBegin { get; set; }                 // Điểm đầu kỳ — :43
+    public double? PointEnd { get; set; }                   // Điểm cuối kỳ - Điểm tích lũy tiêu dùng — :44
+    public double? AmountBegin { get; set; }                // Giá trị tiền đầu kỳ — :45
+    public double? AmountEnd { get; set; }                  // Giá trị tiền cuối kỳ — :46
+    public double? QtyVisitBegin { get; set; }              // Số lần ghé thăm đầu kỳ — :47
+    public double? QtyVisitEnd { get; set; }                // Số lần ghé thăm cuối kỳ — :48
+    public double? PointCardRank { get; set; }              // Điểm xét hạng trong kỳ — :49
+    public string? CardTypeUse { get; set; }                // Hạng thẻ sử dụng — :50
+    public string? CardTypeInit { get; set; }               // Hạng thẻ thực — :51
+    public DateTime? MemberActiveDate { get; set; }         // Ngày kích hoạt hội viên (lấy từ cc.CardActiveDate) — :52, Card.cs:20487
+    public string? FlagExceptionally { get; set; }          // Cờ đặc cách — :53
+    public string? MemberNoIntro { get; set; }              // Mã hội viên giới thiệu — :54
+    public string? CarNoIntro { get; set; }                 // Biển số hội viên giới thiệu — :55
+    public double? PointIntro { get; set; }                 // Tặng điểm giới thiệu mua xe — :56
+    public double? PointBuyCar { get; set; }                // Tặng điểm mua xe mới — :57
+    public double? PointBuyCreta { get; set; }              // HTV tặng điểm khuyến mại bán hàng — :58
+    public double? PointVoucherNewCar { get; set; }         // HTV tặng điểm Voucher xe mới — :59
+    public double? PointVoucher { get; set; }               // Tổng điểm Voucher còn lại (hạng sử dụng) — :60
+    public double? PointActualVoucher { get; set; }         // Tổng điểm Voucher còn lại (hạng thực) — :61
+    public double? PointActualVCNewCar { get; set; }        // Giá trị voucher tặng mua xe mới (hạng thực) — :62
+    public string? DealNo { get; set; }                     // Số giao dịch bán lẻ — :63
+    public string? TVBHName { get; set; }                   // Tên TVBH — :64
+    public DateTime? CreateDTimeUTC { get; set; }           // Thời điểm tạo đăng ký hội viên/hội viên — :65
+    public string? CreateBy { get; set; }                   // :66
+    public DateTime? LUDTimeUTC { get; set; }               // :67
+    public string? LUBy { get; set; }                       // :68
+    public DateTime? InactiveDTimeUTC { get; set; }         // Thời điểm Inactive hội viên — :69
+    public string? InactiveBy { get; set; }                 // :70
+    public DateTime? RegisAppr1DTimeUTC { get; set; }       // Thời điểm duyệt 1 đăng ký hội viên — :71
+    public string? RegisAppr1By { get; set; }               // :72
+    public DateTime? RegisAppr2DTimeUTC { get; set; }       // Thời điểm duyệt 2 đăng ký hội viên — :73
+    public string? RegisAppr2By { get; set; }               // :74
+    public string? RegisFinishDTimeUTC { get; set; }        // Thời điểm kết thúc đăng ký hội viên (chuyển LocalTime +7) — :75, Gate :88-92
+    public string? RegisFinishBy { get; set; }              // :76
+    public DateTime? RegisCancelDTimeUTC { get; set; }      // Thời điểm huỷ đăng ký hội viên — :77
+    public string? RegisCancelBy { get; set; }              // :78
+    public DateTime? ApproveDTimeUTC { get; set; }          // DDL:155
+    public string? ApproveBy { get; set; }                  // DDL:156
+    public DateTime? CancelDTimeUTC { get; set; }           // DDL:157
+    public string? CancelBy { get; set; }                   // DDL:158
+    public string? MemberStatus { get; set; }               // Trạng thái hội viên: PENDING/APPROVE/CANCEL — :79-82
+    public string? RegisStatus { get; set; }                // Trạng thái đăng ký: P/A1/A2/F/C — :83-88
+    public string? Remark { get; set; }                     // Ghi chú — :89
+    public DateTime? InvoiceDate { get; set; }              // Ngày hóa đơn — :120
+    public DateTime? LogLUDTimeUTC { get; set; }            // :90
+    public string? LogLUBy { get; set; }                    // :91
+
+    // Các cột mở rộng từ phép join:
+    public string? cc_CardNo { get; set; }                  // Mã kỳ xét hạng — :92, Card.cs:20482
+    public string? mcs_CardSourceName { get; set; }         // Tên loại xét kỳ thẻ (GAP: Mst_CardSource chưa có entity) — :93
+    public string? mpv_ProvinceCode { get; set; }           // Mã tỉnh/TP — Card.cs:20501
+    public string? mpv_ProvinceName { get; set; }           // Tên tỉnh/TP — :94, Card.cs:20502
+    public string? mdt_DistrictCode { get; set; }           // Mã quận/huyện — Card.cs:20503
+    public string? mdt_DistrictName { get; set; }           // Tên quận/huyện — :95, Card.cs:20504
+    public string? cm_FlagShow { get; set; }                // Trạng thái hội viên tính toán (-1, 1, 0) — :96-99, Card.cs:20505-20511
+    public string? mdcp_DLCPCode { get; set; }              // Mã đại lý đăng ký hội viên — :100, Card.cs:20512
+    public string? mdcp_DLCPName { get; set; }              // Tên đại lý đăng ký hội viên — :101, Card.cs:20513
+    public string? mdcpe_DLCPCodeExcep { get; set; }        // Mã đại lý đăng ký hội viên đặc cách — :102, Card.cs:20514
+    public string? mdcpe_DLCPNameExcep { get; set; }        // Tên đại lý đăng ký hội viên đặc cách — :103, Card.cs:20515
+    public string? MemberFilePath { get; set; }             // Đường dẫn file upload — :106, Card.cs:20516
+    public string? MemberFileName { get; set; }             // Tên file — :107, Card.cs:20517
+    public string? MemberFileSpec { get; set; }             // Nội dung base 64 — :109
+    public string? FlagFileUpload { get; set; }             // Cờ upload — :111
+    public string? AttFileId { get; set; }                  // Cờ upload — :113
+    public string? SourceRegisType { get; set; }            // Nguồn mở thẻ ON/OFF — :114, Card.cs:20518
+    public string? ReqMemberRegisterCodeSys { get; set; }   // Số yêu cầu mở thẻ online hệ thống — :115, Card.cs:20519
+    public string? ReqMemberRegisterCodeOS { get; set; }    // Số yêu cầu mở thẻ online Hyundaime (GAP: Req_MemberRegister) — :116, Card.cs:20520
+    public string? PurchaseType { get; set; }               // Loại thẻ (BUYNEW/BUYADD/BUYUSED/EXCHANGE) — :117, Card.cs:20522
+    public string? PurchaseTypeName { get; set; }           // Tên loại thẻ — :118, Card.cs:20523
+    public DateTime? WarrantyExpiryDate { get; set; }       // Ngày hết hạn bảo hành — :119, Card.cs:20524
+
+    public string? CardSourceCode { get; set; }             // Loại thẻ Crd_Card — :164
+    public string? CardStatus { get; set; }                 // Trạng thái thẻ Crd_Card — :165
+    public string? FlagExceptionCard { get; set; }          // Cờ đặc cách thẻ — :166
+    public double? AmountCardRank { get; set; }             // :167
+}
+
+/// <summary>
+/// Cặp (CrdMember, CrdCard) biểu diễn kết quả inner join Crd_Member và Crd_Card (cc.CardSourceCode = 'NEW').
+/// </summary>
+public record CrdMemberCardPair(CrdMember Member, CrdCard Card);
+
+[ApiController]
+[Route("api/crd_member")]
+public class Crd_MemberControllerPort : ControllerBase
+{
+    private readonly AppDbContext _db;
+
+    public Crd_MemberControllerPort(AppDbContext db)
+    {
+        _db = db;
+    }
+
+    /// <summary>
+    /// Tìm kiếm hội viên phân trang — port 1:1 từ Crd_MemberController.Search (Crd_MemberController.cs:30-140).
+    /// </summary>
+    [HttpPost("search")]
+    public async Task<IActionResult> Search([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_MemberSearchReq? req)
+    {
+        req ??= new Crd_MemberSearchReq();
+
+        // 1. Khởi tạo truy vấn:
+        // Crd_Member inner join Crd_Card cc on cmb.MemberNo = cc.MemberNo and cc.CardSourceCode = 'NEW'
+        // (Card.cs:20526-20530)
+        var query = from cm in _db.Set<CrdMember>().AsNoTracking()
+                    join cc in _db.Set<CrdCard>().AsNoTracking() on cm.MemberNo equals cc.MemberNo
+                    where cc.CardSourceCode == "NEW"
+                    select new { cm, cc };
+
+        // 2. Áp dụng các điều kiện lọc từ strWhereClause_Crd_Member (Crd_MemberController.cs:1494-1558):
+
+        // MemberNo: Crd_Member.MemberNo = (:1500-1503)
+        if (!string.IsNullOrWhiteSpace(req.MemberNo))
+        {
+            var pat = PortQuery.Equal(req.MemberNo);
+            query = query.Where(x => EF.Functions.Like((x.cm.MemberNo ?? "").ToLower(), pat, PortQuery.Esc));
+        }
+
+        // CarNo: Crd_Member.CarNo = (:1504-1507)
+        if (!string.IsNullOrWhiteSpace(req.CarNo))
+        {
+            var pat = PortQuery.Equal(req.CarNo);
+            query = query.Where(x => EF.Functions.Like((x.cm.CarNo ?? "").ToLower(), pat, PortQuery.Esc));
+        }
+
+        // RegistrationDateFrom: Crd_Member.RegistrationDate >= (:1508-1511)
+        if (!string.IsNullOrWhiteSpace(req.RegistrationDateFrom) && DateTime.TryParse(req.RegistrationDateFrom, out var regFrom))
+        {
+            query = query.Where(x => x.cm.RegistrationDate >= regFrom.Date);
+        }
+
+        // RegistrationDateTo: Crd_Member.RegistrationDate <= (:1512-1515)
+        if (!string.IsNullOrWhiteSpace(req.RegistrationDateTo) && DateTime.TryParse(req.RegistrationDateTo, out var regTo))
+        {
+            var endOfDay = regTo.TimeOfDay == TimeSpan.Zero && !req.RegistrationDateTo.Contains(":")
+                ? regTo.Date.AddDays(1).AddSeconds(-1)
+                : regTo;
+            query = query.Where(x => x.cm.RegistrationDate <= endOfDay);
+        }
+
+        // MemberActiveDateFrom: Crd_Member.MemberActiveDate >= (:1516-1519)
+        if (!string.IsNullOrWhiteSpace(req.MemberActiveDateFrom) && DateTime.TryParse(req.MemberActiveDateFrom, out var actFrom))
+        {
+            query = query.Where(x => (x.cm.MemberActiveDate ?? x.cc.CardActiveDate) >= actFrom.Date);
+        }
+
+        // MemberActiveDateTo: Crd_Member.MemberActiveDate <= (:1520-1523)
+        if (!string.IsNullOrWhiteSpace(req.MemberActiveDateTo) && DateTime.TryParse(req.MemberActiveDateTo, out var actTo))
+        {
+            var endOfDay = actTo.TimeOfDay == TimeSpan.Zero && !req.MemberActiveDateTo.Contains(":")
+                ? actTo.Date.AddDays(1).AddSeconds(-1)
+                : actTo;
+            query = query.Where(x => (x.cm.MemberActiveDate ?? x.cc.CardActiveDate) <= endOfDay);
+        }
+
+        // DLCodeRegis: Crd_Member.DLCodeRegis = (:1524-1527)
+        if (!string.IsNullOrWhiteSpace(req.DLCodeRegis))
+        {
+            var pat = PortQuery.Equal(req.DLCodeRegis);
+            query = query.Where(x => EF.Functions.Like((x.cm.DLCodeRegis ?? "").ToLower(), pat, PortQuery.Esc));
+        }
+
+        // PhoneNo: Crd_Member.PhoneNo = (:1528-1531)
+        if (!string.IsNullOrWhiteSpace(req.PhoneNo))
+        {
+            var pat = PortQuery.Equal(req.PhoneNo);
+            query = query.Where(x => EF.Functions.Like((x.cm.PhoneNo ?? "").ToLower(), pat, PortQuery.Esc));
+        }
+
+        // RegisStatus: Crd_Member.RegisStatus = (:1532-1535)
+        if (!string.IsNullOrWhiteSpace(req.RegisStatus))
+        {
+            var pat = PortQuery.Equal(req.RegisStatus);
+            query = query.Where(x => EF.Functions.Like((x.cm.RegisStatus ?? "").ToLower(), pat, PortQuery.Esc));
+        }
+
+        // MemberName: Crd_Member.MemberName = (:1536-1539) — LƯU Ý: toán tử "=", KHÔNG phải LIKE
+        if (!string.IsNullOrWhiteSpace(req.MemberName))
+        {
+            var pat = PortQuery.Equal(req.MemberName);
+            query = query.Where(x => EF.Functions.Like((x.cm.MemberName ?? "").ToLower(), pat, PortQuery.Esc));
+        }
+
+        // VIN: Crd_Member.VIN = (:1540-1543)
+        if (!string.IsNullOrWhiteSpace(req.VIN))
+        {
+            var pat = PortQuery.Equal(req.VIN);
+            query = query.Where(x => EF.Functions.Like((x.cm.VIN ?? "").ToLower(), pat, PortQuery.Esc));
+        }
+
+        // MemberStatus: Crd_Member.MemberStatus = (:1544-1547)
+        if (!string.IsNullOrWhiteSpace(req.MemberStatus))
+        {
+            var pat = PortQuery.Equal(req.MemberStatus);
+            query = query.Where(x => EF.Functions.Like((x.cm.MemberStatus ?? "").ToLower(), pat, PortQuery.Esc));
+        }
+
+        // DLCPCode: Map_QueryDealer_Member.DLCPCode = (:1548-1551)
+        if (!string.IsNullOrWhiteSpace(req.DLCPCode))
+        {
+            var patDLCP = PortQuery.Equal(req.DLCPCode);
+            query = query.Where(x => _db.Set<Map_QueryDealer_Member>().Any(m => m.MemberNo == x.cm.MemberNo && EF.Functions.Like((m.DLCPCode ?? "").ToLower(), patDLCP, PortQuery.Esc)));
+        }
+
+        // SourceRegisType: Crd_Member.SourceRegisType = (:1552-1555)
+        if (!string.IsNullOrWhiteSpace(req.SourceRegisType))
+        {
+            var pat = PortQuery.Equal(req.SourceRegisType);
+            query = query.Where(x => EF.Functions.Like((x.cm.SourceRegisType ?? "").ToLower(), pat, PortQuery.Esc));
+        }
+
+        // cm_FlagShow: Crd_Member.MemberStatus tương ứng (Crd_MemberController.cs:1560-1586):
+        // "1" -> APPROVE, "0" -> CANCEL, "-1" -> PENDING
+        if (!string.IsNullOrWhiteSpace(req.cm_FlagShow))
+        {
+            if (req.cm_FlagShow == "1")
+            {
+                var pat = PortQuery.Equal("APPROVE");
+                query = query.Where(x => EF.Functions.Like((x.cm.MemberStatus ?? "").ToLower(), pat, PortQuery.Esc));
+            }
+            else if (req.cm_FlagShow == "0")
+            {
+                var pat = PortQuery.Equal("CANCEL");
+                query = query.Where(x => EF.Functions.Like((x.cm.MemberStatus ?? "").ToLower(), pat, PortQuery.Esc));
+            }
+            else if (req.cm_FlagShow == "-1")
+            {
+                var pat = PortQuery.Equal("PENDING");
+                query = query.Where(x => EF.Functions.Like((x.cm.MemberStatus ?? "").ToLower(), pat, PortQuery.Esc));
+            }
+        }
+
+        // 3. Đếm tổng số bản ghi (MyCount — Card.cs:20373)
+        var itemCount = await query.CountAsync();
+
+        // 4. Xử lý phân trang theo Bài học A.12 và A.7:
+        var pageSize = req.Ft_PageSize;
+        var pageIndex = req.Ft_PageIndex;
+        var ps = pageSize <= 0 ? 10 : pageSize;
+        var pageCount = pageSize <= 0 ? 0 : (itemCount % ps == 0 ? itemCount / ps : itemCount / ps + 1);
+
+        // Bài học A.7: Ft_PageSize = 0 -> DataList rỗng, PageCount = 0, ItemCount giữ nguyên
+        if (pageSize <= 0 || pageIndex < 0 || itemCount == 0)
+        {
+            var emptyResult = new PageInfo<Crd_MemberSearchItem>(
+                new List<Crd_MemberSearchItem>(),
+                itemCount,
+                pageSize == 0 ? 0 : pageCount,
+                pageIndex,
+                pageSize
+            );
+            return Ok(new { Success = true, Data = emptyResult });
+        }
+
+        // Phân trang và sắp xếp theo cmb.MemberNo asc (Card.cs:20369 và 20546)
+        long recordStart = (long)pageIndex * pageSize;
+        var pagedPairs = await query
+            .OrderBy(x => x.cm.MemberNo)
+            .Skip((int)Math.Min(recordStart, int.MaxValue))
+            .Take((int)Math.Min(pageSize, int.MaxValue))
+            .Select(x => new CrdMemberCardPair(x.cm, x.cc))
+            .ToListAsync();
+
+        if (pagedPairs.Count == 0)
+        {
+            var emptyResult = new PageInfo<Crd_MemberSearchItem>(
+                new List<Crd_MemberSearchItem>(),
+                itemCount,
+                pageCount,
+                pageIndex,
+                pageSize
+            );
+            return Ok(new { Success = true, Data = emptyResult });
+        }
+
+        // 5. Nạp danh mục và ánh xạ chi tiết theo câu select (Card.cs:20400-20549)
+        var dataList = await BuildMemberItemsAsync(pagedPairs, recordStart);
+
+        var result = new PageInfo<Crd_MemberSearchItem>(
+            dataList,
+            itemCount,
+            pageCount,
+            pageIndex,
+            pageSize
+        );
+
+        return Ok(new { Success = true, Data = result });
+    }
+
+    /// <summary>
+    /// Ánh xạ danh sách (CrdMember, CrdCard) sang model Crd_MemberSearchItem kèm lookup các bảng danh mục
+    /// theo câu truy vấn Select chi tiết (Card.cs:20400-20549).
+    /// </summary>
+    private async Task<List<Crd_MemberSearchItem>> BuildMemberItemsAsync(
+        List<CrdMemberCardPair> pagedPairs,
+        long recordStart)
+    {
+        var provinceCodes = pagedPairs.Select(p => p.Member.ProvinceCode).Where(c => !string.IsNullOrEmpty(c)).Distinct().ToList();
+        var dlCodes = pagedPairs.Select(p => p.Member.DLCodeRegis).Where(c => !string.IsNullOrEmpty(c)).Distinct().ToList();
+        var dlExcepCodes = pagedPairs.Select(p => p.Member.DLCodeExceptionally).Where(c => !string.IsNullOrEmpty(c)).Distinct().ToList();
+        var allDealerCodes = dlCodes.Concat(dlExcepCodes).Distinct().ToList();
+        var purchaseTypes = pagedPairs.Select(p => p.Member.PurchaseType).Where(c => !string.IsNullOrEmpty(c)).Distinct().ToList();
+
+        // 1. Mst_Province (Card.cs:20533-20534)
+        var provinces = await _db.Set<Mst_Province>().AsNoTracking()
+            .Where(x => provinceCodes.Contains(x.ProvinceCode))
+            .ToListAsync();
+        var provinceMap = provinces
+            .GroupBy(x => x.ProvinceCode)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        // 2. Mst_District (Card.cs:20535-20537)
+        var districts = await _db.Set<Mst_District>().AsNoTracking()
+            .Where(x => provinceCodes.Contains(x.ProvinceCode))
+            .ToListAsync();
+        var districtMap = districts
+            .GroupBy(x => $"{x.ProvinceCode}_{x.DistrictCode}")
+            .ToDictionary(g => g.Key, g => g.First());
+
+        // 3. Mst_DealerCP (Card.cs:20538-20541)
+        var dealers = await _db.Set<Mst_DealerCP>().AsNoTracking()
+            .Where(x => allDealerCodes.Contains(x.DLCPCode))
+            .ToListAsync();
+        var dealerMap = dealers
+            .GroupBy(x => x.DLCPCode)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        // 4. Mst_PurchaseType (Card.cs:20544-20545)
+        var purchaseTypesList = await _db.Set<Mst_PurchaseType>().AsNoTracking()
+            .Where(x => purchaseTypes.Contains(x.PurchaseType))
+            .ToListAsync();
+        var purchaseTypeMap = purchaseTypesList
+            .GroupBy(x => x.PurchaseType)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        var dataList = new List<Crd_MemberSearchItem>();
+        for (int i = 0; i < pagedPairs.Count; i++)
+        {
+            var pair = pagedPairs[i];
+            var cm = pair.Member;
+            var cc = pair.Card;
+
+            provinceMap.TryGetValue(cm.ProvinceCode ?? "", out var mpv);
+            districtMap.TryGetValue($"{cm.ProvinceCode}_{cm.DistrictCode}", out var mdt);
+            dealerMap.TryGetValue(cm.DLCodeRegis ?? "", out var mdcp);
+            dealerMap.TryGetValue(cm.DLCodeExceptionally ?? "", out var mdcpe);
+            purchaseTypeMap.TryGetValue(cm.PurchaseType ?? "", out var mpt);
+
+            // Format RegisFinishDTimeUTC sang LocalTime theo utcOffset = 7 nếu có (Crd_MemberController.cs:88-92)
+            string? regisFinishDTimeUTC = null;
+            if (cm.RegisFinishDTimeUTC.HasValue)
+            {
+                regisFinishDTimeUTC = cm.RegisFinishDTimeUTC.Value.AddHours(7).ToString("yyyy-MM-dd HH:mm:ss");
+            }
+
+            // cm_FlagShow: (case when cmb.MemberStatus = 'PENDING' then '-1' when cmb.MemberStatus = 'APPROVE' then '1' when cmb.MemberStatus = 'CANCEL' then '0' end) (Card.cs:20505-20511)
+            string? cm_FlagShow = cm.MemberStatus == "PENDING" ? "-1"
+                                : (cm.MemberStatus == "APPROVE" ? "1"
+                                : (cm.MemberStatus == "CANCEL" ? "0" : null));
+
+            var item = new Crd_MemberSearchItem
+            {
+                MyIdxSeq = recordStart + i,
+                MemberNo = cm.MemberNo,
+                NetworkID = cm.NetworkID,
+                OrgID = cm.OrgID,
+                DLCodeRegis = cm.DLCodeRegis,
+                DLCodeExceptionally = cm.DLCodeExceptionally,
+                RegistrationDate = cm.RegistrationDate,
+                CustomerCode = cm.CustomerCode,
+                ProvinceCode = cm.ProvinceCode,
+                DistrictCode = cm.DistrictCode,
+                UserCode_Member = cm.UserCode_Member,
+                MemberName = cm.MemberName,
+                MemberGender = cm.MemberGender,
+                IDCardNo = cm.IDCardNo,
+                PhoneNo = cm.PhoneNo,
+                DateOfBirth = cm.DateOfBirth,
+                MemAddress = cm.MemAddress,
+                CarNo = cm.CarNo,
+                VIN = cm.VIN,
+                ModelCode = cm.ModelCode,
+                ModelName = cm.ModelName,
+                TradeMarkCode = cm.TradeMarkCode,
+                EffDateStart = cc.EffDateStart,
+                EffDateEnd = cc.EffDateEnd,
+                PointTotal = cm.PointTotal,
+                PointBlock = cm.PointBlock,
+                PointAvail = cm.PointAvail,
+                AmountTotal = cm.AmountTotal,
+                AmountBlock = cm.AmountBlock,
+                AmountAvail = cm.AmountAvail,
+                QtyVisitTotal = cm.QtyVisitTotal,
+                QtyVisitBlock = cm.QtyVisitBlock,
+                QtyVisitAvail = cm.QtyVisitAvail,
+                PointBegin = cm.PointBegin,
+                PointEnd = cm.PointEnd,
+                AmountBegin = cm.AmountBegin,
+                AmountEnd = cm.AmountEnd,
+                QtyVisitBegin = cm.QtyVisitBegin,
+                QtyVisitEnd = cm.QtyVisitEnd,
+                PointCardRank = cm.PointCardRank,
+                CardTypeUse = cc.CardTypeUse,
+                CardTypeInit = cc.CardTypeInit,
+                MemberActiveDate = cc.CardActiveDate, // Nguồn: cc.CardActiveDate MemberActiveDate
+                FlagExceptionally = cm.FlagExceptionally,
+                MemberNoIntro = cm.MemberNoIntro,
+                CarNoIntro = cm.CarNoIntro,
+                PointIntro = cm.PointIntro,
+                PointBuyCar = cm.PointBuyCar,
+                PointBuyCreta = cm.PointBuyCreta,
+                PointVoucherNewCar = cm.PointVoucherNewCar,
+                PointVoucher = cm.PointVoucher,
+                PointActualVoucher = cm.PointActualVoucher,
+                PointActualVCNewCar = cm.PointActualVCNewCar,
+                DealNo = cm.DealNo,
+                TVBHName = cm.TVBHName,
+                CreateDTimeUTC = cm.CreateDTimeUTC,
+                CreateBy = cm.CreateBy,
+                LUDTimeUTC = cm.LUDTimeUTC,
+                LUBy = cm.LUBy,
+                InactiveDTimeUTC = cm.InactiveDTimeUTC,
+                InactiveBy = cm.InactiveBy,
+                RegisAppr1DTimeUTC = cm.RegisAppr1DTimeUTC,
+                RegisAppr1By = cm.RegisAppr1By,
+                RegisAppr2DTimeUTC = cm.RegisAppr2DTimeUTC,
+                RegisAppr2By = cm.RegisAppr2By,
+                RegisFinishDTimeUTC = regisFinishDTimeUTC,
+                RegisFinishBy = cm.RegisFinishBy,
+                RegisCancelDTimeUTC = cm.RegisCancelDTimeUTC,
+                RegisCancelBy = cm.RegisCancelBy,
+                ApproveDTimeUTC = cm.ApproveDTimeUTC,
+                ApproveBy = cm.ApproveBy,
+                CancelDTimeUTC = cm.CancelDTimeUTC,
+                CancelBy = cm.CancelBy,
+                MemberStatus = cm.MemberStatus,
+                RegisStatus = cm.RegisStatus,
+                Remark = cm.Remark,
+                InvoiceDate = cm.InvoiceDate,
+                LogLUDTimeUTC = cm.LogLUDTimeUTC,
+                LogLUBy = cm.LogLUBy,
+                cc_CardNo = cc.CardNo,
+                mcs_CardSourceName = null, // GAP: Mst_CardSource chưa có entity
+                mpv_ProvinceCode = mpv?.ProvinceCode ?? cm.ProvinceCode,
+                mpv_ProvinceName = mpv?.ProvinceName,
+                mdt_DistrictCode = mdt?.DistrictCode ?? cm.DistrictCode,
+                mdt_DistrictName = mdt?.DistrictName,
+                cm_FlagShow = cm_FlagShow,
+                mdcp_DLCPCode = mdcp?.DLCPCode ?? cm.DLCodeRegis,
+                mdcp_DLCPName = mdcp?.DLCPName,
+                mdcpe_DLCPCodeExcep = mdcpe?.DLCPCode ?? cm.DLCodeExceptionally,
+                mdcpe_DLCPNameExcep = mdcpe?.DLCPName,
+                MemberFilePath = cm.MemberFilePath,
+                MemberFileName = cm.MemberFileName,
+                MemberFileSpec = null,
+                FlagFileUpload = null,
+                AttFileId = null,
+                SourceRegisType = cm.SourceRegisType,
+                ReqMemberRegisterCodeSys = cm.ReqMemberRegisterCodeSys,
+                ReqMemberRegisterCodeOS = null, // GAP: Req_MemberRegister chưa có entity
+                PurchaseType = cm.PurchaseType,
+                PurchaseTypeName = mpt?.PurchaseTypeName,
+                WarrantyExpiryDate = cm.WarrantyExpiryDate,
+                CardSourceCode = cc.CardSourceCode,
+                CardStatus = cc.CardStatus,
+                FlagExceptionCard = cm.FlagExceptionCard,
+                AmountCardRank = cm.AmountCardRank
+            };
+            dataList.Add(item);
+        }
+
+        return dataList;
+    }
+}
