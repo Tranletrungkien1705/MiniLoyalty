@@ -85,6 +85,27 @@ public class Mst_QualificationControllerPort : ControllerBase
         return Ok(new { Success = true, Data = new PageInfo<object>(rows, itemCount, pageCount, pageIndex, pageSize) });
     }
 
+    // ============================================================================================
+    // GetAllActive — nguồn Mst_QualificationController.cs:107-167 (#224).
+    // Mệnh đề lọc: strWhereClause_Mst_Qualification_Active (Mst_QualificationController.cs:188-199).
+    // Gate:
+    //   - Không nhận body: gọi trực tiếp [HttpPost("getallactive")].
+    //   - Gọi strWhereClause_Mst_Qualification_Active với { FlagActive = "1" } (:127-130).
+    //   - FlagActive: toán tử '=' (:195) — CÓ TÁC DỤNG, lọc FlagActive = '1'.
+    //   - OrgID không được truyền vào mệnh đề lọc (:188-199) -> không lọc.
+    //   - Ft_RecordStart = "0", Ft_RecordCount = "123456000" (:142-143).
+    //   - Trả Data = lst_Mst_Qualification (danh sách trần, null nếu rỗng — :126, :149-154).
+    // ============================================================================================
+    [HttpPost("getallactive")]
+    public async Task<IActionResult> GetAllActive()
+    {
+        // Gate gọi GetXAsync với FlagActive = "1", RecordStart = 0, RecordCount = 123456000 (:127-143).
+        var (_, rows) = await GetXAsync(keyWord: null, flagActive: "1", recordStart: 0, recordCount: 123456000);
+
+        // Data là danh sách trần lst_Mst_Qualification; rỗng thì null (gate :126, :149-154).
+        return Ok(new { Success = true, Data = rows.Count > 0 ? rows : null });
+    }
+
     /// <summary>
     /// Lọc + đếm + chia trang theo QualificationCode asc — dùng cho Search (bài học A.3).
     /// Trả (itemCount, rows): itemCount = tổng số dòng sau lọc (MyCount, SQL :36625); rows = trang đã cắt kèm MyIdxSeq 0-based (:36615).
