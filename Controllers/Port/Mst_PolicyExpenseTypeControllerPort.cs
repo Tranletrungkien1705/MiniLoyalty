@@ -10,11 +10,12 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục chính sách loại chi phí (Mst_PolicyExpenseType) của dự án nguồn 2022.7.Loyalty (#190).
+// PORT 1:1 — màn danh mục chính sách loại chi phí (Mst_PolicyExpenseType) của dự án nguồn 2022.7.Loyalty (#190, #191).
 //
 // Nguồn controller (tầng gate):
 //   Mst_PolicyExpenseTypeController.cs:23-103  Search -> WA_Mst_PolicyExpenseType_Get (#190)
-//   Mst_PolicyExpenseTypeController.cs:281-298 strWhereClause_Mst_PolicyExpenseType (mệnh đề lọc Search)
+//   Mst_PolicyExpenseTypeController.cs:104-213 GetAllActive -> WA_Mst_PolicyExpenseType_Get (#191)
+//   Mst_PolicyExpenseTypeController.cs:281-298 strWhereClause_Mst_PolicyExpenseType (mệnh đề lọc Search / GetAllActive)
 // Nguồn API:
 //   MstPolicyExpenseTypeController.cs:96-164   WA_Mst_PolicyExpenseType_Get
 // Nguồn biz:
@@ -105,6 +106,25 @@ public class Mst_PolicyExpenseTypeControllerPort : ControllerBase
         {
             Success = true,
             Data = new PageInfo<object>(rows, itemCount, pageCount, pageIndex, pageSize)
+        });
+    }
+
+    /// <summary>
+    /// Port 1:1 <c>Mst_PolicyExpenseTypeController.GetAllActive</c> (nguồn gate Mst_PolicyExpenseTypeController.cs:104-213).
+    /// - Gọi hàm lọc strWhereClause_Mst_PolicyExpenseType với FlagActive = "1" (:130-134, :281-298).
+    ///   Lọc FlagActive theo toán tử IN (:289-294); KeyWord và OrgID KHÔNG lọc trong where clause (:281-298).
+    /// - Ft_RecordStart = "0", Ft_RecordCount = "123456000" (BaseController.cs:30-31, :146-147).
+    /// - Rt_Cols_Mst_PolicyExpenseType = "*" (:150).
+    /// - Kết quả trả về: mảng trần List&lt;object&gt;, khi rỗng hoặc null trả về Data = null (:127, :153-155, :190-200).
+    /// </summary>
+    [HttpPost("getallactive")]
+    public async Task<IActionResult> GetAllActive()
+    {
+        var (_, rows) = await GetXAsync("1", 0, 123456000);
+        return Ok(new
+        {
+            Success = true,
+            Data = rows.Count > 0 ? rows : null
         });
     }
 
