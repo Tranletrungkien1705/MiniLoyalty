@@ -4,7 +4,7 @@ Nguồn mẫu số: `D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.Web
 
 **Mẫu số (N)**: 337
 
-**Tiến độ hiện tại**: 107/337 (31.75%)
+**Tiến độ hiện tại**: 108/337 (32.05%)
 
 Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã có` (đã port từ trước, có bằng chứng) · `Bỏ` (scaffold/không nghiệp vụ, ghi lý do) · `Cần xem tay`.
 
@@ -137,7 +137,7 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 125 | Mst_DepartmentController/Create | Đã làm | 9b5c7cb |
 | 126 | Mst_DepartmentController/Update | Đã làm | 7d67b30 |
 | 127 | Mst_DepartmentController/Delete | Đã làm | d565dda |
-| 128 | Mst_DepartmentController/DeleteMultiple | Chưa làm | - |
+| 128 | Mst_DepartmentController/DeleteMultiple | Đã làm | 9de58bd |
 | 129 | Mst_DepartmentController/Import | Chưa làm | - |
 | 130 | Mst_DepartmentController/Export | Chưa làm | - |
 | 131 | Mst_DepartmentController/ExportTemplate | Chưa làm | - |
