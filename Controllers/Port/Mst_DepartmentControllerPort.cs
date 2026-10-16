@@ -12,7 +12,7 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục phòng ban (Mst_Department) của dự án nguồn 2022.7.Loyalty (#122, #123, #124, #125, #126, #127).
+// PORT 1:1 — màn danh mục phòng ban (Mst_Department) của dự án nguồn 2022.7.Loyalty (#122, #123, #124, #125, #126, #127, #128).
 //
 // Nguồn controller (tầng gate):
 //   Mst_DepartmentController.cs:30-109   Search -> WA_Mst_Department_Get (#122)
@@ -21,13 +21,14 @@ namespace MiniLoyalty.Controllers.Port;
 //   Mst_DepartmentController.cs:286-370  Create -> WA_Mst_Department_Create (#125)
 //   Mst_DepartmentController.cs:374-443  Update -> WA_Mst_Department_Update (#126)
 //   Mst_DepartmentController.cs:446-515  Delete -> WA_Mst_Department_Delete (#127)
+//   Mst_DepartmentController.cs:516-580  DeleteMultiple -> WA_Mst_Department_Delete (#128)
 //   Mst_DepartmentController.cs:877-905  strWhereClause_Mst_Department (mệnh đề lọc Search, GetAllActive)
 //   Mst_DepartmentController.cs:907-926  strWhereClause_Mst_Department_By_DepartmentCode (mệnh đề lọc GetByDepartmentCode)
 // Nguồn API:
 //   MstDepartmentController.cs:20-89     WA_Mst_Department_Get
 //   MstDepartmentController.cs:91-160    WA_Mst_Department_Create (#125)
 //   MstDepartmentController.cs:162-231   WA_Mst_Department_Update (#126)
-//   MstDepartmentController.cs:233-302   WA_Mst_Department_Delete (#127)
+//   MstDepartmentController.cs:233-302   WA_Mst_Department_Delete (#127, #128)
 // Nguồn biz:
 //   Master.cs:29450-29548                WAS_Mst_Department_Get
 //   Master.cs:29549-29701                Mst_Department_Get
@@ -38,9 +39,9 @@ namespace MiniLoyalty.Controllers.Port;
 //   Master.cs:29936-30021                WAS_Mst_Department_Update (#126)
 //   Master.cs:30022-30180                Mst_Department_Update (#126)
 //   Master.cs:30727-30864                Mst_Department_UpdateX (#126)
-//   Master.cs:30181-30258                WAS_Mst_Department_Delete (#127)
-//   Master.cs:30259-30395                Mst_Department_Delete (#127)
-//   Master.cs:30865-30968                Mst_Department_DeleteX (#127)
+//   Master.cs:30181-30258                WAS_Mst_Department_Delete (#127, #128)
+//   Master.cs:30259-30395                Mst_Department_Delete (#127, #128)
+//   Master.cs:30865-30968                Mst_Department_DeleteX (#127, #128)
 //   Master.cs:29413-29448                Mst_Department_UpdBU (#125, cập nhật BUCode, BUPattern, Level toàn bảng)
 //   Master.cs:7813-7890                  Mst_NNT_CheckDB (#125)
 //   Master.cs:29275-29338                Mst_Department_CheckDB (#125, #126, #127)
@@ -117,6 +118,13 @@ namespace MiniLoyalty.Controllers.Port;
 //       - KHÔNG kiểm tra phòng ban con: các phòng ban con vẫn giữ DepartmentCodeParent trỏ tới mã đã xoá (hành vi nguồn).
 //       - KHÔNG gọi UpdBU: nguồn không gọi Mst_Department_UpdBU khi xoá dòng (Master.cs:30865-30968).
 //       - Xoá dòng Mst_Department. Thành công Data = null (:490-491).
+//   * DeleteMultiple (#128): [HttpPost("deletemultiple")], body mảng [{ DepartmentCode }] (gate Mst_DepartmentController.cs:516-580).
+//     - Body rỗng hoàn toàn / null -> ServiceException("strJson null") (:526-533) -> 400 ErridnLoyalty.Mst_Department_Delete.
+//     - Mảng rỗng [] -> Success = true, Data = null (:566-567).
+//     - Lặp tuần tự (:547-564), mỗi phần tử gọi WA_Mst_Department_Delete trong 1 transaction riêng (DeleteXAsync).
+//     - KHÔNG kiểm tra DepartmentCode rỗng và KHÔNG kiểm OrgID ở gate (khác Delete đơn #127): mã rỗng -> CheckDB -> ErridnLoyalty.Mst_Department_CheckDB_DepartmentNotFound.
+//     - Lỗi ở phần tử thứ k dừng ngay, các phần tử TRƯỚC k ĐÃ XÓA ("xóa một phần" là hành vi nguồn).
+//     - Thành công: Data = null.
 //   * Cột tính md_DepartmentNameParent: left join Mst_Department f on t.DepartmentCodeParent = f.DepartmentCode (:30512-30513),
 //     lấy tên phòng ban cấp trên f.DepartmentName (null nếu không có cấp trên).
 //   * Cột tính ss_QtyStaff: nguồn left join count StaffCode từ Staff_MapDepartment group by DepartmentCode (:30490-30499, :30506).
@@ -125,8 +133,8 @@ namespace MiniLoyalty.Controllers.Port;
 //   * DDL: không có DDL trong repo nguồn — PK = DepartmentCode (khoá draft), kiểu cột cần xác nhận.
 //
 // Bỏ qua có chủ đích (loại Đ):
-//   - CheckGatewayAuthentication: gate :39, :123, :228, :306, :394, :455, API :40-46, :112-117, :147-152, :183-188, :254-259
-//   - CheckAuthorize: gate :40, :124, :229, :307, :395, :456 (hệ thống đích chưa có hệ phân quyền)
+//   - CheckGatewayAuthentication: gate :39, :123, :228, :306, :394, :455, :536, API :40-46, :112-117, :147-152, :183-188, :254-259
+//   - CheckAuthorize: gate :40, :124, :229, :307, :395, :456, :537 (hệ thống đích chưa có hệ phân quyền)
 //   - Ghi RequestLog/ReturnLog: Master.cs:29593-29600, 29691-29698, 29830-29837, 29925-29932, 30072-30079, 30170-30177, 30295-30302, 30385-30392
 //   - Sys_User_CheckAuthorize / Sys_Access_CheckDenyV30: Master.cs:29606-29620, 29630-29634, 29849-29870, 30091-30112, 30314-30335
 // ============================================================================================
@@ -659,6 +667,69 @@ public class Mst_DepartmentControllerPort : ControllerBase
         }
 
         // 4. Thành công: gate Mst_DepartmentController.cs:490-491 SetSuccess + Data = null
+        return Ok(new
+        {
+            Success = true,
+            Data = (object?)null
+        });
+    }
+
+    /// <summary>
+    /// Port 1:1 DeleteMultiple action từ gate Mst_DepartmentController.cs:516-580 (#128).
+    /// Chuỗi gọi: gate :516-580 -> lặp qua danh sách Lst_Mst_Department, mỗi phần tử gọi
+    /// WA_Mst_Department_Delete (:547-564) -> biz WAS_Mst_Department_Delete -> Mst_Department_Delete -> Mst_Department_DeleteX.
+    ///
+    /// Request JSON: mảng [{ DepartmentCode }].
+    /// 1. Kiểm tra body rỗng / null: Gate Mst_DepartmentController.cs:526-533
+    ///    if (!string.IsNullOrEmpty(strJson)) { ... } else { throw new ServiceException("strJson null"); }
+    ///    Khi body null hoặc rỗng -> trả về 400 ErridnLoyalty.Mst_Department_Delete với Check.strJson = null.
+    /// 2. Danh sách rỗng `[]`: vòng lặp foreach không chạy, trả về Ok(Success = true, Data = null).
+    /// 3. Lặp tuần tự qua từng phần tử trong danh sách (:547-564):
+    ///    Mỗi lần lặp là một lời gọi độc lập tới chuỗi nghiệp vụ Delete, sử dụng TRANSACTION RIÊNG
+    ///    (Master.cs:30292 _cf.db.BeginTransaction() và :30358 CommitSafety trong DeleteXAsync).
+    ///    - KHÔNG có bước kiểm tra DepartmentCode rỗng và KHÔNG kiểm OrgID ở tầng gate như Delete đơn (:465, :467);
+    ///      OrgID request nguồn lấy từ org của user (orgUserUI.OrgId), không lấy từ phần tử.
+    ///      Khi DepartmentCode rỗng, lỗi phát sinh ở tầng nghiệp vụ Mst_Department_CheckDB
+    ///      -> trả về 400 ErridnLoyalty.Mst_Department_CheckDB_DepartmentNotFound.
+    ///    - Hành vi "xóa một phần" (nguồn Mst_DepartmentController.cs:547-573):
+    ///      Nếu phần tử thứ k gặp lỗi, exception được ném ra và thoát khỏi vòng lặp ngay lập tức
+    ///      nhảy vào khối catch (ex) (:569-573).
+    ///      Do mỗi phần tử chạy trên một transaction riêng đã được commit, các phần tử TRƯỚC k
+    ///      ĐÃ BỊ XÓA VÀ KHÔNG BỊ ROLLBACK; các phần tử SAU k hoàn toàn không được xử lý.
+    ///      "xóa một phần" là hành vi nguồn.
+    /// 4. Thành công: gate :566-567 trả objJsonResultEntry.Data = null -> Ok(new { Success = true, Data = (object?)null }).
+    ///
+    /// Bỏ qua có chủ đích (loại Đ):
+    /// - CheckGatewayAuthentication: gate Mst_DepartmentController.cs:536
+    /// - CheckAuthorize: gate Mst_DepartmentController.cs:537 (hệ thống đích chưa có hệ phân quyền)
+    /// - Sys_User_CheckAuthentication, Sys_Access_CheckDenyV30
+    /// - Ghi RequestLog/ReturnLog: Master.cs:30295-30302, 30385-30392
+    /// </summary>
+    [HttpPost("deletemultiple")]
+    public async Task<IActionResult> DeleteMultiple([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] List<MstDepartmentDeleteReq>? req)
+    {
+        // 1. Kiểm tra body rỗng / null: Gate Mst_DepartmentController.cs:526-533
+        // if (!string.IsNullOrEmpty(strJson)) { ... } else { throw new ServiceException("strJson null"); }
+        if (req == null)
+        {
+            return PortResult.Fail("Mst_Department_Delete", "Check.strJson", null);
+        }
+
+        // 2. Lặp tuần tự qua từng phần tử (gate Mst_DepartmentController.cs:547-564).
+        // Mỗi phần tử chạy trong 1 transaction riêng biệt (hàm DeleteXAsync).
+        // Nếu phần tử thứ k gặp lỗi -> return ngay lỗi đó (hành vi nguồn :547-573:
+        // "xóa một phần" là hành vi nguồn: các phần tử trước k đã commit thành công
+        // vào DB và KHÔNG bị rollback; các phần tử sau k không được xử lý).
+        foreach (var item in req)
+        {
+            var err = await DeleteXAsync(item?.DepartmentCode);
+            if (err != null)
+            {
+                return err;
+            }
+        }
+
+        // 3. Thành công: gate Mst_DepartmentController.cs:566-567
         return Ok(new
         {
             Success = true,
