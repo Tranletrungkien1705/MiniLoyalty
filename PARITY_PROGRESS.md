@@ -4,7 +4,7 @@ Nguồn mẫu số: `D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.Web
 
 **Mẫu số (N)**: 337
 
-**Tiến độ hiện tại**: 217/337 (64.39%)
+**Tiến độ hiện tại**: 218/337 (64.69%)
 
 Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã có` (đã port từ trước, có bằng chứng) · `Bỏ` (scaffold/không nghiệp vụ, ghi lý do) · `Cần xem tay`.
 
@@ -258,7 +258,7 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 246 | Mst_WardController/GetAllActive | Đã làm | 3aa4d9d |
 | 247 | Mst_WardController/GetWardDetail | Đã làm | 4419e9d |
 | 248 | Prm_CarNewController/Search | Đã làm | 2c96a7c |
-| 249 | Prm_CarNewController/GetByPRMCNCodeSys | Chưa làm | - |
+| 249 | Prm_CarNewController/GetByPRMCNCodeSys | Đã làm | 737103f |
 | 250 | Prm_CarNewController/Save | Chưa làm | - |
 | 251 | Prm_CarNewController/Approve | Chưa làm | - |
 | 252 | Prm_CarNewController/Finish | Chưa làm | - |
