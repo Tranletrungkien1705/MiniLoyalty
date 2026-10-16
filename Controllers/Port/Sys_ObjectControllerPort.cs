@@ -11,12 +11,13 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn Sys_ObjectController.GetAllMenuActive (#317), GetAllMenuButtonActive (#318), GetFunctionActive (#319) & GetFunctionByObjectCode (#320)
+// PORT 1:1 — màn Sys_ObjectController.GetAllMenuActive (#317), GetAllMenuButtonActive (#318), GetFunctionActive (#319), GetFunctionByObjectCode (#320) & GetAllFunctionBy_ObjectCode (#321)
 // Nguồn:
 //   Sys_ObjectController.cs:29-98 (GetAllMenuActive)
 //   Sys_ObjectController.cs:101-172 (GetAllMenuButtonActive)
 //   Sys_ObjectController.cs:175-243 (GetFunctionActive)
 //   Sys_ObjectController.cs:246-302 (GetFunctionByObjectCode)
+//   Sys_ObjectController.cs:305-406 (GetAllFunctionBy_ObjectCode)
 //   SysObjectController.cs:20-91 (WA_Sys_Object_Get)
 //   System.cs:15325-15424 (WAS_Sys_Object_Get)
 //   System.cs:14892-15098 (Sys_Object_Get)
@@ -142,6 +143,76 @@ public class Sys_ObjectControllerPort : ControllerBase
     }
 
     /// <summary>
+    /// Port 1:1 <c>Sys_ObjectController.GetAllFunctionBy_ObjectCode</c> (#321, gate :305-406).
+    /// Lấy danh sách hàm trong hệ thống với ObjectType = "FUNC" và FlagActive = "1" (Sys_ObjectController.cs:331-332),
+    /// đồng thời đọc cấu hình <c>SysObjectSetting.config</c> để lấy danh sách FunctionCodes gán cho <c>ObjectCode</c> truyền vào.
+    /// Gán trường <c>FlagSelected</c> = "1" nếu ObjectCode nằm trong danh sách FunctionCodes của cấu hình, ngược lại "0" (so sánh không phân biệt hoa/thường).
+    /// Trả về đối tượng <c>JsonResultEntry&lt;object&gt;</c> tiêu chuẩn với <c>Success = true</c> và <c>Data</c> chứa các thuộc tính:
+    /// ObjectCode, ObjectName, ServiceCode, ObjectType, FlagExecModal, FlagActive, FlagSelected.
+    /// </summary>
+    [HttpPost("getallfunctionby_objectcode")]
+    public async Task<IActionResult> GetAllFunctionBy_ObjectCode([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] Sys_Object_GetAllFunctionBy_ObjectCodeReq? req)
+    {
+        var objectCode = req?.ObjectCode;
+        var objJsonResultEntry = new {
+            Success = true,
+            Data = (object?)null
+        };
+
+        // Nguồn Sys_ObjectController.cs:329-333: ObjectType = "FUNC", FlagActive = Client_Flag.Active ("1")
+        var q = _db.Set<Sys_Object>().AsNoTracking()
+            .Where(x => x.ObjectType == "FUNC" && x.FlagActive == "1")
+            .OrderBy(x => x.ObjectCode);
+
+        var listSys_Object = await q.ToListAsync();
+
+        // Nguồn Sys_ObjectController.cs:362-378: Đọc danh sách FunctionCodes từ SysObjectSetting.config
+        var listObjectCode = new List<string>();
+        var setting = GetSysObjectSetting();
+        if (setting != null && setting.List != null)
+        {
+            foreach (var o in setting.List)
+            {
+                if (o.ObjectCode != null && o.ObjectCode.Equals(objectCode, StringComparison.InvariantCultureIgnoreCase))
+                {
+                    if (o.FunctionCodes != null && o.FunctionCodes.Count > 0)
+                    {
+                        foreach (var it in o.FunctionCodes)
+                        {
+                            listObjectCode.Add(it.Trim());
+                        }
+                    }
+                }
+            }
+        }
+
+        // Nguồn Sys_ObjectController.cs:380-391: Gán FlagSelected = "1" nếu có trong listObjectCode, ngược lại "0"
+        if (listSys_Object != null && listSys_Object.Count > 0)
+        {
+            var dataList = listSys_Object.Select(item => new {
+                ObjectCode = item.ObjectCode,
+                ObjectName = item.ObjectName,
+                ServiceCode = item.ServiceCode,
+                ObjectType = item.ObjectType,
+                FlagExecModal = item.FlagExecModal,
+                FlagActive = item.FlagActive,
+                FlagSelected = listObjectCode.Where(it => it.Equals(item.ObjectCode)).FirstOrDefault() != null ? "1" : "0"   // nguồn :385-ish: it.Equals(item.ObjectCode) PHÂN BIỆT hoa/thường (khác so sánh ObjectCode của setting),
+            }).ToList();
+
+            // Gán Data cho JsonResultEntry
+            return Ok(new {
+                Success = true,
+                Data = dataList
+            });
+        }
+
+        return Ok(new {
+            Success = true,
+            Data = (object?)null
+        });
+    }
+
+    /// <summary>
     /// BaseController.cs:654-669 GetSysObjectSetting: đọc <c>~/App_Data/SysObjectSetting.config</c> (DataContract XML: SysObjectSetting/List/SysObjectFunction{ObjectCode, FunctionCodes/string});
     /// không có tệp -> null. Tệp mẫu của nguồn được đặt tại App_Data/SysObjectSetting.config của dự án.
     /// </summary>
@@ -169,6 +240,11 @@ public class Sys_Object_GetAllMenuButtonActiveReq
 }
 
 public class Sys_Object_GetFunctionByObjectCodeReq
+{
+    public string? ObjectCode { get; set; }
+}
+
+public class Sys_Object_GetAllFunctionBy_ObjectCodeReq
 {
     public string? ObjectCode { get; set; }
 }

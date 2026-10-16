@@ -7,7 +7,7 @@ using MiniLoyalty.Data;
 namespace MiniLoyalty.Models.Port;
 
 // ===========================================================================================
-// PORT 1:1 từ dự án nguồn 2022.7.Loyalty — bảng Sys_Object (#317, #319).
+// PORT 1:1 từ dự án nguồn 2022.7.Loyalty — bảng Sys_Object (#317, #319, #321).
 // Nguồn tra cứu:
 //   - Model cột: 12.Dev.Common/idn.Loyalty.Common/Models/Sys_Object.cs:9-26
 // ===========================================================================================
@@ -80,11 +80,14 @@ public class Sys_ObjectFunctionSeeder : IPortSeeder
 
     public async Task SeedAsync(AppDbContext db)
     {
-        // Thêm bản ghi hàm (FUNC) phục vụ test GetFunctionActive (#319)
+        // Thêm bản ghi hàm (FUNC) phục vụ test GetFunctionActive (#319) và GetAllFunctionBy_ObjectCode (#321)
         // Yêu cầu: ít nhất 2 bản ghi ObjectType = "FUNC", FlagActive = "1" và 1 bản ghi ObjectType = "FUNC", FlagActive = "0"
         if (!await db.Set<Sys_Object>().AnyAsync(x => x.ObjectCode == "FUNC_B"))
         {
             db.Set<Sys_Object>().AddRange(
+                new Sys_Object { ObjectCode = "Sys_User_Get", ObjectName = "Xem người dùng", ObjectType = "FUNC", FlagActive = "1", ServiceCode = "SRV01", LogLUBy = "seed" },
+                new Sys_Object { ObjectCode = "Sys_User_Create", ObjectName = "Tạo người dùng", ObjectType = "FUNC", FlagActive = "1", ServiceCode = "SRV01", LogLUBy = "seed" },
+                new Sys_Object { ObjectCode = "Sys_User_Other", ObjectName = "Chức năng khác (không gán vào menu)", ObjectType = "FUNC", FlagActive = "1", ServiceCode = "SRV01", LogLUBy = "seed" },
                 new Sys_Object { ObjectCode = "FUNC_B", ObjectName = "Function B Active", ObjectType = "FUNC", FlagActive = "1", ServiceCode = "SRV01", LogLUBy = "seed" },
                 new Sys_Object { ObjectCode = "FUNC_A", ObjectName = "Function A Active", ObjectType = "FUNC", FlagActive = "1", ServiceCode = "SRV01", LogLUBy = "seed" },
                 new Sys_Object { ObjectCode = "FUNC_C", ObjectName = "Function C Inactive", ObjectType = "FUNC", FlagActive = "0", ServiceCode = "SRV01", LogLUBy = "seed" }
