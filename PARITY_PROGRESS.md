@@ -4,7 +4,7 @@ Nguồn mẫu số: `D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.Web
 
 **Mẫu số (N)**: 337
 
-**Tiến độ hiện tại**: 157/337 (46.59%)
+**Tiến độ hiện tại**: 158/337 (46.88%)
 
 Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã có` (đã port từ trước, có bằng chứng) · `Bỏ` (scaffold/không nghiệp vụ, ghi lý do) · `Cần xem tay`.
 
@@ -208,7 +208,7 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 196 | Mst_PolicyMoneyToPointServiceController/Save | Đã làm | 0364844 |
 | 197 | Mst_PositionController/Search | Đã làm | 8471c51 |
 | 198 | Mst_PositionController/GetByPositionCode | Đã làm | d901bd4 |
-| 199 | Mst_PositionController/GetAllActive | Chưa làm | - |
+| 199 | Mst_PositionController/GetAllActive | Đã làm | 322506e |
 | 200 | Mst_PositionController/Create | Chưa làm | - |
 | 201 | Mst_PositionController/Update | Chưa làm | - |
 | 202 | Mst_PositionController/Delete | Chưa làm | - |
