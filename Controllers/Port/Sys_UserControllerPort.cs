@@ -1745,6 +1745,79 @@ public class Sys_UserControllerPort : ControllerBase
     }
 
     /// <summary>
+    /// Port 1:1 Sys_UserController.ExportTemplate (#336, gate Sys_UserController.cs:1321-1353).
+    /// Tạo file Excel template rỗng để import — KHÔNG đọc DB.
+    /// Danh sách rỗng: new List&lt;Sys_User&gt;() (gate :1329).
+    /// Từ điển cột: GetImportDicColumsTemplate() (gate :1331, định nghĩa :1371-1389) — 4 cột ACTIVE.
+    /// Sheet: "Sys_User" (gate :1334).
+    /// Trả về: Success = true, Data = { Url = "..." } (gate :1336-1339).
+    /// Không có guard lỗi đầu vào, không nhận body (gate :1321: không tham số).
+    /// </summary>
+    [HttpPost("exporttemplate")]
+    public IActionResult ExportTemplate()
+    {
+        // 1. Danh sách rỗng — template không có dòng dữ liệu (gate Sys_UserController.cs:1329)
+        var list = new System.Collections.Generic.List<Sys_User>();
+
+        // 2. Từ điển 4 cột template: GetImportDicColumsTemplate() (gate Sys_UserController.cs:1331, :1371-1389)
+        var dicColNames = GetImportDicColumsTemplate();
+
+        // 3. Xác định thư mục webRoot
+        var webRoot = _env?.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = _env != null
+                ? Path.Combine(_env.ContentRootPath, "wwwroot")
+                : Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+        }
+
+        try
+        {
+            // 4. Sinh đường dẫn file Excel: GenExcelExportFilePath (gate Sys_UserController.cs:1333)
+            var (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Sys_User");
+
+            // 5. Xuất danh sách rỗng ra Excel với sheet "Sys_User" (gate Sys_UserController.cs:1334)
+            //    ExcelExport.ExportToExcelFromList(list, dicColNames, filePath, "Sys_User")
+            PortExcel.ExportToExcelFromList(list, dicColNames, physicalPath, "Sys_User");
+
+            // 6. Trả về Url (gate Sys_UserController.cs:1336-1339: Data = new { Url = GetRequestBaseAddress() + url })
+            return Ok(new
+            {
+                Success = true,
+                Data = new
+                {
+                    Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            return PortResult.Fail("Sys_User_ExportTemplate", "Exception", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Từ điển 4 cột ACTIVE dùng cho template import: gate Sys_UserController.cs:1371-1389 (GetImportDicColumsTemplate).
+    /// Dòng comment "//" trong nguồn :1378-1387 là comment-out, KHÔNG tính.
+    /// Thứ tự (từ trái sang phải):
+    /// 1. UserCode       → "Tài khoản (*)"
+    /// 2. UserName       → "Tên người dùng (*)"
+    /// 3. UserPassword   → "Mật khẩu (*)"
+    /// 4. mdcpo_DLCPCode → "Mã đại lý (*)"
+    /// </summary>
+    private static System.Collections.Generic.Dictionary<string, string> GetImportDicColumsTemplate()
+    {
+        // gate Sys_UserController.cs:1371-1389 — chỉ 4 cột active (dòng // là comment-out)
+        return new System.Collections.Generic.Dictionary<string, string>
+        {
+            { "UserCode",       "Tài khoản (*)" },      // :1372
+            { "UserName",       "Tên người dùng (*)" }, // :1373
+            { "UserPassword",   "Mật khẩu (*)" },       // :1374
+            { "mdcpo_DLCPCode", "Mã đại lý (*)" },      // :1389 (active cuối)
+        };
+    }
+
+    /// <summary>
     /// Từ điển 7 cột xuất Excel: gate Sys_UserController.cs:1291, 1357-1369 (GetImportDicColums).
     /// Giữ đúng thứ tự và nhãn cột từ nguồn:
     /// 1. UserCode -> "Mã người dùng (*)"
