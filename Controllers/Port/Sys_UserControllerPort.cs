@@ -256,10 +256,28 @@ public class Sys_UserCreateReq
 }
 
 /// <summary>
-/// Controller Port 1:1 cho Sys_UserController — hạng mục #323 (Search), #324 (GetByUserCode), #325 (GetByMST), #327 (GetForCurrentUser), #328 (GetAllActive), #329 (Create), #330 (CreateCP).
-/// Nguồn Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Sys_UserController.cs:498-561, 565-683, 685-837
-/// Nguồn API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\SysUserController.cs:199-270, 421-492
-/// Nguồn Biz LIVE: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\System.cs:8365-8478, 7987-8363 (Sys_User_Get_New20191104), 11222-11323 (WAS_Sys_User_Create), 9218-9391, 10160-10828 (Sys_User_CreateForNetworkX_New20200110)
+/// DTO request cho action Update (Gate Sys_UserController.cs:841-912, #331).
+/// </summary>
+public class Sys_UserUpdateReq
+{
+    public string? UserCode { get; set; }
+    public string? UserName { get; set; }
+    public string? PhoneNo { get; set; }
+    public string? EMail { get; set; }
+    public string? Position { get; set; }
+    public string? Avatar { get; set; }
+    public string? FlagDLAdmin { get; set; }
+    public string? FlagSysAdmin { get; set; }
+    public string? FlagNNTAdmin { get; set; }
+    public string? FlagActive { get; set; }
+    public string? WAUserCode { get; set; }
+}
+
+/// <summary>
+/// Controller Port 1:1 cho Sys_UserController — hạng mục #323 (Search), #324 (GetByUserCode), #325 (GetByMST), #327 (GetForCurrentUser), #328 (GetAllActive), #329 (Create), #330 (CreateCP), #331 (Update).
+/// Nguồn Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Sys_UserController.cs:498-561, 565-683, 685-837, 841-912
+/// Nguồn API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\SysUserController.cs:199-270, 421-492, 569-640
+/// Nguồn Biz LIVE: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\System.cs:8365-8478, 7987-8363 (Sys_User_Get_New20191104), 11222-11323 (WAS_Sys_User_Create), 9218-9391, 10160-10828 (Sys_User_CreateForNetworkX_New20200110), 12524-12617 (WAS_Sys_User_Update), 12243-12523 (Sys_User_Update_New20191226)
 /// Route: api/sys_user
 /// </summary>
 [ApiController]
@@ -1150,6 +1168,183 @@ public class Sys_UserControllerPort : ControllerBase
         {
             await tx.RollbackAsync();
             return PortResult.Fail("Sys_User_Create", "Exception", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Port 1:1 Update action từ gate Sys_UserController.cs:841-912 (#331).
+    /// Chuỗi gọi: gate Sys_UserController.Update -> WA_Sys_User_Update (SysUserController.cs:569-640)
+    ///            -> WAS_Sys_User_Update (System.cs:12524-12617) -> Sys_User_Update_New20191226 (System.cs:12243-12523).
+    ///
+    /// Quy trình nghiệp vụ:
+    ///   0. Body rỗng / null: gate Sys_UserController.cs:854-857 throw ServiceException("strJson null") -> 400 ErridnLoyalty.Sys_User_Update (Check.strJson).
+    ///   1. Mở transaction: System.cs:12307 _cf.db.BeginTransaction(). Lỗi -> rollback + trả PortResult.Fail("Sys_User_Update", "Exception", ex.Message).
+    ///   2. Chuỗi Ft_Cols_Upd do gate gửi lên: gate Sys_UserController.cs:870-879:
+    ///      strFt_Cols_Upd gồm 5 trường: Sys_User.UserName, Sys_User.PhoneNo, Sys_User.FlagSysAdmin, Sys_User.FlagNNTAdmin, Sys_User.FlagActive,
+    ///      Biz System.cs:12355: strFt_Cols_Upd = StdParam(objFt_Cols_Upd) (ToUpper).
+    ///      Kiểm tra các cột cập nhật (System.cs:12374-12383):
+    ///      - bUpd_UserName = strFt_Cols_Upd.Contains("SYS_USER.USERNAME")
+    ///      - bUpd_PhoneNo = strFt_Cols_Upd.Contains("SYS_USER.PHONENO")
+    ///      - bUpd_EMail = strFt_Cols_Upd.Contains("SYS_USER.EMAIL")
+    ///      - bUpd_Position = strFt_Cols_Upd.Contains("SYS_USER.POSITION")
+    ///      - bUpd_Avatar = strFt_Cols_Upd.Contains("SYS_USER.AVATAR")
+    ///      - bUpd_FlagDLAdmin = strFt_Cols_Upd.Contains("SYS_USER.FLAGDLADMIN")
+    ///      - bUpd_FlagNNTAdmin = strFt_Cols_Upd.Contains("SYS_USER.FLAGNNTADMIN")
+    ///      - bUpd_FlagSysAdmin = strFt_Cols_Upd.Contains("SYS_USER.FLAGSYSADMIN")
+    ///      - bUpd_FlagActive = strFt_Cols_Upd.Contains("SYS_USER.FLAGACTIVE")
+    ///   3. Chuẩn hoá dữ liệu input (System.cs:12358-12370):
+    ///      - strUserCode = StdParam(objUserCode)
+    ///      - strUserName = string.Format("{0}", objUserName).Trim()
+    ///      - strPhoneNo = string.Format("{0}", objPhoneNo).Trim()
+    ///      - strEMail = string.Format("{0}", objEMail).Trim()
+    ///      - strPosition = string.Format("{0}", objPosition)
+    ///      - strAvatar = string.Format("{0}", objAvatar)
+    ///      - strFlagDLAdmin = StdFlag(objFlagDLAdmin)
+    ///      - strFlagNNTAdmin = StdFlag(objFlagNNTAdmin)
+    ///      - strFlagSysAdmin = StdFlag(objFlagSysAdmin)
+    ///      - strFlagActive = StdFlag(objFlagActive)
+    ///   4. Thứ tự kiểm tra điều kiện (guards theo System.cs:12389-12407):
+    ///      - Sys_User_CheckDB(strUserCode, TConst.Flag.Yes, "", out dtDB_Sys_User) (System.cs:12389-12395, 3809-3868):
+    ///        Kiểm tra tồn tại UserCode trong DB. Nếu không tìm thấy -> ném ErridnLoyalty.Sys_User_CheckDB_UserCodeNotFound (Check.UserCodeNotFound).
+    ///      - Nếu bUpd_UserName và strUserName.Length < 1 (System.cs:12397-12407):
+    ///        -> ném ErridnLoyalty.Sys_User_Update_InvalidUserName (Check.strUserName).
+    ///   5. Lưu DB (System.cs:12431-12454):
+    ///      - Lưu các cột có trong Ft_Cols_Upd
+    ///      - Cập nhật LogLUDTimeUTC = DateTime.UtcNow, LogLUBy = strWAUserCode / "port"
+    ///   6. Commit transaction (System.cs:12486 TDALUtils.DBUtils.CommitSafety), trả Ok(new { Success = true, Data = (object?)null }) (gate :898-899).
+    /// </summary>
+    [HttpPost("update")]
+    public async Task<IActionResult> Update([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Sys_UserUpdateReq? req)
+    {
+        // 0. Body rỗng / null: gate Sys_UserController.cs:854-857 throw ServiceException("strJson null") -> mã mặc định Sys_User_Update
+        if (req == null)
+        {
+            return PortResult.Fail("Sys_User_Update", "Check.strJson", null);
+        }
+
+        // 1. Mở transaction: System.cs:12307 _cf.db.BeginTransaction()
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // 2. Chuỗi Ft_Cols_Upd do gate gửi lên: gate Sys_UserController.cs:870-879
+            var strFt_Cols_Upd = "";
+            var tblSysUser = "Sys_User.";
+            strFt_Cols_Upd += string.Format("{0}{1},", tblSysUser, "UserName");
+            //strFt_Cols_Upd += string.Format("{0}{1},", tblSysUser, "EMail");
+            //strFt_Cols_Upd += string.Format("{0}{1},", tblSysUser, "Position");
+            strFt_Cols_Upd += string.Format("{0}{1},", tblSysUser, "PhoneNo");
+            //strFt_Cols_Upd += string.Format("{0}{1},", tblSysUser, "DepartmentCode");
+            strFt_Cols_Upd += string.Format("{0}{1},", tblSysUser, "FlagSysAdmin");
+            strFt_Cols_Upd += string.Format("{0}{1},", tblSysUser, "FlagNNTAdmin");
+            strFt_Cols_Upd += string.Format("{0}{1},", tblSysUser, "FlagActive");
+
+            // Chuẩn hoá Ft_Cols_Upd theo biz System.cs:12355: strFt_Cols_Upd = StdParam(objFt_Cols_Upd)
+            strFt_Cols_Upd = StdParam(strFt_Cols_Upd) ?? "";
+
+            // So khớp các cột được phép cập nhật (System.cs:12374-12383):
+            bool bUpd_UserName = strFt_Cols_Upd.Contains("Sys_User.UserName".ToUpperInvariant());
+            bool bUpd_PhoneNo = strFt_Cols_Upd.Contains("Sys_User.PhoneNo".ToUpperInvariant());
+            bool bUpd_EMail = strFt_Cols_Upd.Contains("Sys_User.EMail".ToUpperInvariant());
+            bool bUpd_Position = strFt_Cols_Upd.Contains("Sys_User.Position".ToUpperInvariant());
+            bool bUpd_Avatar = strFt_Cols_Upd.Contains("Sys_User.Avatar".ToUpperInvariant());
+            bool bUpd_FlagDLAdmin = strFt_Cols_Upd.Contains("Sys_User.FlagDLAdmin".ToUpperInvariant());
+            bool bUpd_FlagNNTAdmin = strFt_Cols_Upd.Contains("Sys_User.FlagNNTAdmin".ToUpperInvariant());
+            bool bUpd_FlagSysAdmin = strFt_Cols_Upd.Contains("Sys_User.FlagSysAdmin".ToUpperInvariant());
+            bool bUpd_FlagActive = strFt_Cols_Upd.Contains("Sys_User.FlagActive".ToUpperInvariant());
+
+            // 3. Chuẩn hoá dữ liệu input (System.cs:12358-12370):
+            var strUserCode = StdParam(req.UserCode);
+            var strUserName = string.Format("{0}", req.UserName).Trim();
+            var strPhoneNo = string.Format("{0}", req.PhoneNo).Trim();
+            var strEMail = string.Format("{0}", req.EMail).Trim();
+            var strPosition = string.Format("{0}", req.Position);
+            var strAvatar = string.Format("{0}", req.Avatar);
+            var strFlagDLAdmin = StdFlag(req.FlagDLAdmin);
+            var strFlagNNTAdmin = StdFlag(req.FlagNNTAdmin);
+            var strFlagSysAdmin = StdFlag(req.FlagSysAdmin);
+            var strFlagActive = StdFlag(req.FlagActive);
+
+            // 4. Thứ tự kiểm tra điều kiện (guards theo System.cs:12389-12407):
+            // (a) Sys_User_CheckDB: kiểm tra tồn tại UserCode (System.cs:12389-12395, 3809-3868)
+            Sys_User? matchedUser = null;
+            if (!string.IsNullOrEmpty(strUserCode))
+            {
+                var uCodePattern = PortQuery.Equal(strUserCode);
+                matchedUser = await _db.Set<Sys_User>()
+                    .FirstOrDefaultAsync(x => EF.Functions.Like((x.UserCode ?? "").ToLower(), uCodePattern, PortQuery.Esc));
+            }
+
+            if (matchedUser == null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Sys_User_CheckDB_UserCodeNotFound", "Check.UserCodeNotFound", strUserCode);
+            }
+
+            // (b) Nếu bUpd_UserName và strUserName.Length < 1: ném Sys_User_Update_InvalidUserName (System.cs:12397-12407)
+            if (bUpd_UserName && strUserName.Length < 1)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Sys_User_Update_InvalidUserName", "Check.strUserName", strUserName);
+            }
+
+            // 5. Lưu DB (System.cs:12431-12454):
+            if (bUpd_UserName)
+            {
+                matchedUser.UserName = strUserName;
+            }
+            if (bUpd_PhoneNo)
+            {
+                matchedUser.PhoneNo = strPhoneNo;
+            }
+            if (bUpd_EMail)
+            {
+                matchedUser.EMail = strEMail;
+            }
+            if (bUpd_Position)
+            {
+                matchedUser.Position = strPosition;
+            }
+            if (bUpd_Avatar)
+            {
+                matchedUser.Avatar = strAvatar;
+            }
+            if (bUpd_FlagDLAdmin)
+            {
+                matchedUser.FlagDLAdmin = strFlagDLAdmin;
+            }
+            if (bUpd_FlagNNTAdmin)
+            {
+                matchedUser.FlagNNTAdmin = strFlagNNTAdmin;
+            }
+            if (bUpd_FlagSysAdmin)
+            {
+                matchedUser.FlagSysAdmin = strFlagSysAdmin;
+            }
+            if (bUpd_FlagActive)
+            {
+                matchedUser.FlagActive = strFlagActive;
+            }
+
+            // Cập nhật LogLUDTimeUTC (UtcNow) + LogLUBy (strWAUserCode / "port") (System.cs:12445-12446)
+            var waUserCode = Request.Headers["WAUserCode"].FirstOrDefault() ?? "port";
+            matchedUser.LogLUDTimeUTC = DateTime.UtcNow;
+            matchedUser.LogLUBy = waUserCode;
+
+            await _db.SaveChangesAsync();
+
+            // 6. Commit transaction (System.cs:12486 TDALUtils.DBUtils.CommitSafety)
+            await tx.CommitAsync();
+
+            return Ok(new
+            {
+                Success = true,
+                Data = (object?)null
+            });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return PortResult.Fail("Sys_User_Update", "Exception", ex.Message);
         }
     }
 
