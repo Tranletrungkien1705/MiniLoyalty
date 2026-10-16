@@ -4,7 +4,7 @@ Nguồn mẫu số: `D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.Web
 
 **Mẫu số (N)**: 337
 
-**Tiến độ hiện tại**: 117/337 (34.72%)
+**Tiến độ hiện tại**: 118/337 (35.01%)
 
 Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã có` (đã port từ trước, có bằng chứng) · `Bỏ` (scaffold/không nghiệp vụ, ghi lý do) · `Cần xem tay`.
 
@@ -166,7 +166,7 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 154 | Mst_GenderController/Search | Chưa làm | - |
 | 155 | Mst_GenderController/GetAllActive | Chưa làm | - |
 | 156 | Mst_GovIDTypeController/Search | Đã làm | 0cab8a8 |
-| 157 | Mst_GovIDTypeController/GetByGovIDType | Chưa làm | - |
+| 157 | Mst_GovIDTypeController/GetByGovIDType | Đã làm | e05732a |
 | 158 | Mst_GovIDTypeController/GetAllActive | Chưa làm | - |
 | 159 | Mst_GovIDTypeController/Create | Chưa làm | - |
 | 160 | Mst_GovIDTypeController/Update | Chưa làm | - |
