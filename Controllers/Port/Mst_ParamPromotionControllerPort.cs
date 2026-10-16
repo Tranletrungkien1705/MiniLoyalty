@@ -13,6 +13,7 @@ namespace MiniLoyalty.Controllers.Port;
 // ============================================================================================
 // PORT 1:1 từ dự án nguồn 2022.7.Loyalty — Mst_ParamPromotionController:
 //   - Search (#183)
+//   - GetAllActive (#184)
 //
 // Nguồn tra cứu (chỉ đọc):
 //   - Gate controller: 13.ClientGate/V10/idn.Loyalty.WebAPI/Controllers/Mst_ParamPromotionController.cs
@@ -23,6 +24,10 @@ namespace MiniLoyalty.Controllers.Port;
 //       PageCount chỉ tính khi Lst_Mst_ParamPromotion KHÔNG rỗng (:78-86, pageSize == 0 thì tạm dùng 10).
 //     * strWhereClause_Mst_ParamPromotion: :281-298 — CHỈ xử lý FlagActive (tách dấu phẩy -> IN).
 //       KeyWord KHÔNG lọc (không có nhánh if xử lý KeyWord trong hàm lọc).
+//     * GetAllActive: :104-213 — KHÔNG tham số; gọi strWhereClause_Mst_ParamPromotion với FlagActive="1" (:130-134)
+//       -> lọc FlagActive bằng toán tử IN (tách dấu phẩy). Ft_RecordStart="0", Ft_RecordCount="123456000"
+//       (BaseController.cs:30-31). Data = listMst_ParamPromotion là MẢNG TRẦN; rỗng thì Data = null
+//       (:127, :153-155, :191-199). Khối Ext/tree đã bị comment -> KHÔNG port.
 //   - Service: WA_Mst_ParamPromotion_Get (11.BackEnd/V10/idn.Loyalty.Biz.Web/Controllers/MstParamPromotionController.cs:97-167)
 //   - Biz LIVE:
 //     * WAS_Mst_ParamPromotion_Get: Master.Loyalty.cs:12170-12272
@@ -92,6 +97,19 @@ public class Mst_ParamPromotionControllerPort : ControllerBase
         var pageCount = rows.Count == 0 ? 0 : (itemCount % ps == 0 ? itemCount / ps : itemCount / ps + 1);
 
         return Ok(new { Success = true, Data = new PageInfo<object>(rows, itemCount, pageCount, pageIndex, pageSize) });
+    }
+
+    /// <summary>
+    /// Port 1:1 action GetAllActive của Mst_ParamPromotionController (gate :104-213).
+    /// KHÔNG tham số; lọc FlagActive="1" qua strWhereClause_Mst_ParamPromotion (:130-134),
+    /// Ft_RecordStart="0", Ft_RecordCount="123456000" (BaseController.cs:30-31).
+    /// Data là MẢNG TRẦN; rỗng thì Data = null (:127, :153-155, :191-199).
+    /// </summary>
+    [HttpPost("getallactive")]
+    public async Task<IActionResult> GetAllActive()
+    {
+        var (_, rows) = await GetXAsync("1", 0, 123456000);
+        return Ok(new { Success = true, Data = rows.Count > 0 ? rows : null });
     }
 
     /// <summary>
