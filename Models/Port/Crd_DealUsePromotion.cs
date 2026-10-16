@@ -364,3 +364,286 @@ public class Crd_DealUsePromotionSearchSeeder : IPortSeeder
         await db.SaveChangesAsync();
     }
 }
+
+/// <summary>
+/// Seeder dữ liệu mẫu cho Crd_DealUsePromotionController/GetForMemberNo (#024).
+/// Thứ tự Order => 74 (chưa dùng trong dải 10-99). Idempotent.
+/// </summary>
+public class Crd_DealUsePromotionGetForMemberNoSeeder : IPortSeeder
+{
+    public int Order => 74;
+
+    public async Task SeedAsync(AppDbContext db)
+    {
+        const string net = "1001";
+        const string org = "1001";
+        const string user = "seed";
+
+        var d2024_01_01 = DateTime.Parse("2024-01-01T00:00:00Z", null, System.Globalization.DateTimeStyles.RoundtripKind);
+        var d2025_01_01 = DateTime.Parse("2025-01-01T00:00:00Z", null, System.Globalization.DateTimeStyles.RoundtripKind);
+        var d2026_01_01 = DateTime.Parse("2026-01-01T00:00:00Z", null, System.Globalization.DateTimeStyles.RoundtripKind);
+        var d2026_01_02 = DateTime.Parse("2026-01-02T00:00:00Z", null, System.Globalization.DateTimeStyles.RoundtripKind);
+        var d2026_01_03 = DateTime.Parse("2026-01-03T00:00:00Z", null, System.Globalization.DateTimeStyles.RoundtripKind);
+        var d2026_05_10 = DateTime.Parse("2026-05-10T10:00:00Z", null, System.Globalization.DateTimeStyles.RoundtripKind);
+        var d2026_05_15 = DateTime.Parse("2026-05-15T10:00:00Z", null, System.Globalization.DateTimeStyles.RoundtripKind);
+        var d2026_06_15 = DateTime.Parse("2026-06-15T14:00:00Z", null, System.Globalization.DateTimeStyles.RoundtripKind);
+        var d2026_07_01 = DateTime.Parse("2026-07-01T09:00:00Z", null, System.Globalization.DateTimeStyles.RoundtripKind);
+        var d2026_08_20 = DateTime.Parse("2026-08-20T11:00:00Z", null, System.Globalization.DateTimeStyles.RoundtripKind);
+        var d2027_12_31 = DateTime.Parse("2027-12-31T23:59:59Z", null, System.Globalization.DateTimeStyles.RoundtripKind);
+
+        // 1. CrdMember (MEM_GFM_01, MEM_GFM_02, MEM_GFM_03)
+        var members = new[]
+        {
+            new { MemberNo = "MEM_GFM_01", MemberName = "Tran Van GFM1", PhoneNo = "0911000001", IDCardNo = "001090000001", VIN = "VIN_GFM_001", CardTypeUse = "GOLD", DLCodeRegis = "DL_GFM_01" },
+            new { MemberNo = "MEM_GFM_02", MemberName = "Le Thi GFM2", PhoneNo = "0911000002", IDCardNo = "001090000002", VIN = "VIN_GFM_002", CardTypeUse = "SILVER", DLCodeRegis = "DL_GFM_02" },
+            new { MemberNo = "MEM_GFM_03", MemberName = "Pham Van GFM3", PhoneNo = "0911000003", IDCardNo = "001090000003", VIN = "VIN_GFM_003", CardTypeUse = "PLATINUM", DLCodeRegis = "DL_GFM_03" },
+        };
+
+        foreach (var m in members)
+        {
+            if (!await db.Set<CrdMember>().AnyAsync(x => x.MemberNo == m.MemberNo))
+            {
+                db.Set<CrdMember>().Add(new CrdMember
+                {
+                    MemberNo = m.MemberNo,
+                    MemberName = m.MemberName,
+                    PhoneNo = m.PhoneNo,
+                    IDCardNo = m.IDCardNo,
+                    VIN = m.VIN,
+                    CardTypeUse = m.CardTypeUse,
+                    CardTypeInit = m.CardTypeUse,
+                    DLCodeRegis = m.DLCodeRegis,
+                    MemberStatus = LoyaltyConst.MemberStatus.Approve,
+                    RegisStatus = LoyaltyConst.RegisStatus.Finish,
+                    NetworkID = net,
+                    OrgID = org,
+                    CreateDTimeUTC = d2026_01_01,
+                    CreateBy = user,
+                    LUDTimeUTC = d2026_01_01,
+                    LUBy = user,
+                    LogLUDTimeUTC = d2026_01_01,
+                    LogLUBy = user
+                });
+            }
+        }
+
+        // 2. CrdCard (CARD_GFM_01, CARD_GFM_02, CARD_GFM_03)
+        var cards = new[]
+        {
+            new { CardNo = "CARD_GFM_01", MemberNo = "MEM_GFM_01", CardTypeUse = "GOLD", CreateDTimeUTC = d2026_01_01 },
+            new { CardNo = "CARD_GFM_02", MemberNo = "MEM_GFM_02", CardTypeUse = "SILVER", CreateDTimeUTC = d2026_01_02 },
+            new { CardNo = "CARD_GFM_03", MemberNo = "MEM_GFM_03", CardTypeUse = "PLATINUM", CreateDTimeUTC = d2026_01_03 },
+        };
+
+        foreach (var c in cards)
+        {
+            if (!await db.Set<CrdCard>().AnyAsync(x => x.CardNo == c.CardNo))
+            {
+                db.Set<CrdCard>().Add(new CrdCard
+                {
+                    CardNo = c.CardNo,
+                    MemberNo = c.MemberNo,
+                    CardStatus = LoyaltyConst.CardStatus.Approve,
+                    CardTypeUse = c.CardTypeUse,
+                    CardTypeInit = c.CardTypeUse,
+                    CardSourceCode = LoyaltyConst.CardSourceCode.New,
+                    NetworkID = net,
+                    EffDateStart = d2025_01_01,
+                    EffDateEnd = d2027_12_31,
+                    CreateDTimeUTC = c.CreateDTimeUTC,
+                    CreateBy = user,
+                    LUDTimeUTC = c.CreateDTimeUTC,
+                    LUBy = user,
+                    LogLUDTimeUTC = c.CreateDTimeUTC,
+                    LogLUBy = user
+                });
+            }
+        }
+
+        // 3. Mst_DealerCP (DL_GFM_01, DL_GFM_02)
+        var dealers = new[]
+        {
+            new { DLCPCode = "DL_GFM_01", DLCPName = "Dai ly GFM 01" },
+            new { DLCPCode = "DL_GFM_02", DLCPName = "Dai ly GFM 02" },
+        };
+
+        foreach (var dl in dealers)
+        {
+            if (!await db.Set<Mst_DealerCP>().AnyAsync(x => x.DLCPCode == dl.DLCPCode))
+            {
+                db.Set<Mst_DealerCP>().Add(new Mst_DealerCP
+                {
+                    DLCPCode = dl.DLCPCode,
+                    DLCPName = dl.DLCPName,
+                    FlagActive = "1",
+                    NetworkID = net,
+                    LogLUDTimeUTC = d2026_01_01,
+                    LogLUBy = user
+                });
+            }
+        }
+
+        // 4. Mst_PromotionProgram
+        var programs = new[]
+        {
+            new { PrProgramCode = "PRM_GFM_ALL", PrProgramName = "Chuong trinh tat ca dai ly", FlagAllDL = "1", EffDateStart = d2025_01_01, EffDateEnd = d2027_12_31 },
+            new { PrProgramCode = "PRM_GFM_SPEC", PrProgramName = "Chuong trinh chi dinh dai ly", FlagAllDL = "0", EffDateStart = d2025_01_01, EffDateEnd = d2027_12_31 },
+            new { PrProgramCode = "PRM_GFM_EXPIRED", PrProgramName = "Chuong trinh het han", FlagAllDL = "1", EffDateStart = d2024_01_01, EffDateEnd = d2025_01_01 },
+            new { PrProgramCode = "PRM_GFM_USEDUP", PrProgramName = "Chuong trinh da dung het", FlagAllDL = "1", EffDateStart = d2025_01_01, EffDateEnd = d2027_12_31 },
+        };
+
+        foreach (var p in programs)
+        {
+            if (!await db.Set<Mst_PromotionProgram>().AnyAsync(x => x.PrProgramCode == p.PrProgramCode))
+            {
+                db.Set<Mst_PromotionProgram>().Add(new Mst_PromotionProgram
+                {
+                    PrProgramCode = p.PrProgramCode,
+                    PrProgramName = p.PrProgramName,
+                    NetworkID = net,
+                    OrgID = org,
+                    FlagAllDL = p.FlagAllDL,
+                    FlagActive = "1",
+                    EffDateStart = p.EffDateStart,
+                    EffDateEnd = p.EffDateEnd,
+                    LogLUDTimeUTC = d2026_01_01,
+                    LogLUBy = user
+                });
+            }
+        }
+
+        // Mst_PromotionProgramDtl
+        var programDtls = new[]
+        {
+            new { PrProgramCode = "PRM_GFM_ALL", CardType = "GOLD", Qty = 10.0, Unit = "Luot", Remark = "Uu dai rua xe" },
+            new { PrProgramCode = "PRM_GFM_ALL", CardType = "SILVER", Qty = 5.0, Unit = "Luot", Remark = "Uu dai rua xe" },
+            new { PrProgramCode = "PRM_GFM_SPEC", CardType = "GOLD", Qty = 8.0, Unit = "Goi", Remark = "Uu dai bao duong" },
+            new { PrProgramCode = "PRM_GFM_EXPIRED", CardType = "GOLD", Qty = 10.0, Unit = "Luot", Remark = "Uu dai het han" },
+            new { PrProgramCode = "PRM_GFM_USEDUP", CardType = "GOLD", Qty = 3.0, Unit = "Luot", Remark = "Uu dai da dung het" },
+        };
+
+        foreach (var pd in programDtls)
+        {
+            if (!await db.Set<Mst_PromotionProgramDtl>().AnyAsync(x => x.PrProgramCode == pd.PrProgramCode && x.CardType == pd.CardType))
+            {
+                db.Set<Mst_PromotionProgramDtl>().Add(new Mst_PromotionProgramDtl
+                {
+                    PrProgramCode = pd.PrProgramCode,
+                    CardType = pd.CardType,
+                    Qty = pd.Qty,
+                    Unit = pd.Unit,
+                    Remark = pd.Remark,
+                    FlagActive = "1",
+                    NetworkID = net,
+                    OrgID = org,
+                    LogLUDTimeUTC = d2026_01_01,
+                    LogLUBy = user
+                });
+            }
+        }
+
+        // Mst_PromotionProgramSpec
+        if (!await db.Set<Mst_PromotionProgramSpec>().AnyAsync(x => x.PrProgramCode == "PRM_GFM_SPEC" && x.DLCode == "DL_GFM_01"))
+        {
+            db.Set<Mst_PromotionProgramSpec>().Add(new Mst_PromotionProgramSpec
+            {
+                PrProgramCode = "PRM_GFM_SPEC",
+                DLCode = "DL_GFM_01",
+                FlagActive = "1",
+                NetworkID = net,
+                OrgID = org,
+                LogLUDTimeUTC = d2026_01_01,
+                LogLUBy = user
+            });
+        }
+
+        // 5. Crd_DealUsePromotion & Crd_DealUsePromotionDtl
+        var deals = new[]
+        {
+            new { DealUsePrmNo = "DEAL_GFM_01", CardNo = "CARD_GFM_01", CardType = "GOLD", DLCPCode = "DL_GFM_01", DealSerRONo = "RO_GFM_01", UsePrmDTime = d2026_05_10, PrProgramCode = "PRM_GFM_ALL", QtyPr = 10.0, QtyPrChTotal = 2.0 },
+            new { DealUsePrmNo = "DEAL_GFM_02", CardNo = "CARD_GFM_01", CardType = "GOLD", DLCPCode = "DL_GFM_01", DealSerRONo = "RO_GFM_02", UsePrmDTime = d2026_05_15, PrProgramCode = "PRM_GFM_USEDUP", QtyPr = 3.0, QtyPrChTotal = 3.0 },
+        };
+
+        foreach (var dl in deals)
+        {
+            if (!await db.Set<Crd_DealUsePromotion>().AnyAsync(x => x.DealUsePrmNo == dl.DealUsePrmNo))
+            {
+                db.Set<Crd_DealUsePromotion>().Add(new Crd_DealUsePromotion
+                {
+                    DealUsePrmNo = dl.DealUsePrmNo,
+                    CardNo = dl.CardNo,
+                    CardType = dl.CardType,
+                    DLCPCode = dl.DLCPCode,
+                    DealSerRONo = dl.DealSerRONo,
+                    ProjectCode = "PRJ",
+                    NetworkID = net,
+                    OrgID = org,
+                    UsePrmDTime = dl.UsePrmDTime,
+                    LogLUDTimeUTC = dl.UsePrmDTime,
+                    LogLUBy = user
+                });
+            }
+
+            if (!await db.Set<Crd_DealUsePromotionDtl>().AnyAsync(x => x.DealUsePrmNo == dl.DealUsePrmNo && x.PrProgramCode == dl.PrProgramCode))
+            {
+                db.Set<Crd_DealUsePromotionDtl>().Add(new Crd_DealUsePromotionDtl
+                {
+                    DealUsePrmNo = dl.DealUsePrmNo,
+                    PrProgramCode = dl.PrProgramCode,
+                    QtyPr = dl.QtyPr,
+                    QtyPrUsed = 0.0,
+                    QtyPrChTotal = dl.QtyPrChTotal,
+                    NetworkID = net,
+                    OrgID = org,
+                    LogLUDTimeUTC = dl.UsePrmDTime,
+                    LogLUBy = user
+                });
+            }
+        }
+
+        // 6. CrdCardTransaction (TX_GFM_001, TX_GFM_002, TX_GFM_003, TX_GFM_004)
+        var transactions = new[]
+        {
+            new { RefNo = "TX_GFM_001", MemberNo = "MEM_GFM_01", CardNo = "CARD_GFM_01", CardTypeUse = "GOLD", DealPointType = LoyaltyConst.DealPointType.PrProgram, PrProgramCode = (string?)"PRM_GFM_ALL", UsePrmDTime = (DateTime?)d2026_05_10, CreateDTimeUTC = d2026_05_10, QtyPrChTotal = (double?)1.0, PointChTotal = (double?)null, DLCode = "DL_GFM_01", FuncAction = "Use", RefType = "PROMOTION" },
+            new { RefNo = "TX_GFM_002", MemberNo = "MEM_GFM_01", CardNo = "CARD_GFM_01", CardTypeUse = "GOLD", DealPointType = LoyaltyConst.DealPointType.PrProgram, PrProgramCode = (string?)"PRM_GFM_SPEC", UsePrmDTime = (DateTime?)d2026_06_15, CreateDTimeUTC = d2026_06_15, QtyPrChTotal = (double?)1.0, PointChTotal = (double?)null, DLCode = "DL_GFM_01", FuncAction = "Use", RefType = "PROMOTION" },
+            new { RefNo = "TX_GFM_003", MemberNo = "MEM_GFM_01", CardNo = "CARD_GFM_01", CardTypeUse = "GOLD", DealPointType = LoyaltyConst.DealPointType.PointUse, PrProgramCode = (string?)null, UsePrmDTime = (DateTime?)d2026_07_01, CreateDTimeUTC = d2026_07_01, QtyPrChTotal = (double?)null, PointChTotal = (double?)100.0, DLCode = "DL_GFM_01", FuncAction = "AddPoint", RefType = "POINT" },
+            new { RefNo = "TX_GFM_004", MemberNo = "MEM_GFM_02", CardNo = "CARD_GFM_02", CardTypeUse = "SILVER", DealPointType = LoyaltyConst.DealPointType.PrProgram, PrProgramCode = (string?)"PRM_GFM_ALL", UsePrmDTime = (DateTime?)d2026_08_20, CreateDTimeUTC = d2026_08_20, QtyPrChTotal = (double?)1.0, PointChTotal = (double?)null, DLCode = "DL_GFM_02", FuncAction = "Use", RefType = "PROMOTION" },
+        };
+
+        foreach (var tx in transactions)
+        {
+            if (!await db.Set<CrdCardTransaction>().AnyAsync(x => x.RefNo == tx.RefNo))
+            {
+                db.Set<CrdCardTransaction>().Add(new CrdCardTransaction
+                {
+                    RefNo = tx.RefNo,
+                    MemberNo = tx.MemberNo,
+                    CardNo = tx.CardNo,
+                    CardTypeUse = tx.CardTypeUse,
+                    CardTypeInit = tx.CardTypeUse,
+                    DealPointType = tx.DealPointType,
+                    PrProgramCode = tx.PrProgramCode,
+                    UsePrmDTime = tx.UsePrmDTime,
+                    CreateDTimeUTC = tx.CreateDTimeUTC,
+                    QtyPrChTotal = tx.QtyPrChTotal,
+                    PointChTotal = tx.PointChTotal,
+                    ProjectCode = "PRJ",
+                    NetworkID = net,
+                    OrgID = org,
+                    DLCode = tx.DLCode,
+                    CardSourceCode = LoyaltyConst.CardSourceCode.New,
+                    EffDateStart = d2025_01_01,
+                    EffDateEnd = d2027_12_31,
+                    FunctionName = "Crd_DealUsePromotion",
+                    FunctionActionType = tx.FuncAction,
+                    RefType = tx.RefType,
+                    CreateBy = user,
+                    LogLUDTimeUTC = tx.CreateDTimeUTC,
+                    LogLUBy = user
+                });
+            }
+        }
+
+        await db.SaveChangesAsync();
+    }
+}
