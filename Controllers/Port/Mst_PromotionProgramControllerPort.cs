@@ -614,7 +614,8 @@ public class Mst_PromotionProgramControllerPort : ControllerBase
         catch (Exception ex)
         {
             await tx.RollbackAsync();
-            return PortResult.Fail("Mst_PromotionProgram_Save", "Exception", ex.Message);
+            // Rollback roi nem lai: PortExceptionFilter (Data/PortFilters.cs) tra 400 PortResult.Fail voi ma loi theo DUNG ten action (ham dung chung nhieu action nen khong hard-code ten).
+            throw;
         }
     }
 
@@ -868,7 +869,8 @@ public class Mst_PromotionProgramControllerPort : ControllerBase
         catch (Exception ex)
         {
             await tx.RollbackAsync();
-            return PortResult.Fail("Mst_PromotionProgram_Save", "Exception", ex.Message);
+            // Rollback roi nem lai: PortExceptionFilter (Data/PortFilters.cs) tra 400 PortResult.Fail voi ma loi theo DUNG ten action (ham dung chung nhieu action nen khong hard-code ten).
+            throw;
         }
     }
 

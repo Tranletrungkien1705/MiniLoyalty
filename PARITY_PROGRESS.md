@@ -4,7 +4,7 @@ Nguồn mẫu số: `D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.Web
 
 **Mẫu số (N)**: 337
 
-**Tiến độ hiện tại**: 116/337 (34.42%)
+**Tiến độ hiện tại**: 129/337 (38.28%)
 
 Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã có` (đã port từ trước, có bằng chứng) · `Bỏ` (scaffold/không nghiệp vụ, ghi lý do) · `Cần xem tay`.
 
@@ -140,7 +140,7 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 128 | Mst_DepartmentController/DeleteMultiple | Đã làm | 9de58bd |
 | 129 | Mst_DepartmentController/Import | Đã làm | e3c84ce |
 | 130 | Mst_DepartmentController/Export | Đã làm | 2d13be5 |
-| 131 | Mst_DepartmentController/ExportTemplate | Chưa làm | - |
+| 131 | Mst_DepartmentController/ExportTemplate | Đã làm | a2d6f65 |
 | 132 | Mst_DisciplineController/Search | Đã làm | 408c2b7 |
 | 133 | Mst_DisciplineController/GetByDisciplineCode | Đã làm | 70bd1db |
 | 134 | Mst_DisciplineController/GetAllActive | Đã làm | 7a9dcb4 |
@@ -163,23 +163,23 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 151 | Mst_ExpenseTypeController/GetAllActive | Đã làm | aecf24a |
 | 152 | Mst_FamilyStatusController/Search | Đã làm | b759701 |
 | 153 | Mst_FamilyStatusController/GetAllActive | Đã làm | b22f364 |
-| 154 | Mst_GenderController/Search | Chưa làm | - |
-| 155 | Mst_GenderController/GetAllActive | Chưa làm | - |
+| 154 | Mst_GenderController/Search | Đã làm | b8d304e |
+| 155 | Mst_GenderController/GetAllActive | Đã làm | eec3343 |
 | 156 | Mst_GovIDTypeController/Search | Đã làm | 0cab8a8 |
-| 157 | Mst_GovIDTypeController/GetByGovIDType | Chưa làm | - |
-| 158 | Mst_GovIDTypeController/GetAllActive | Chưa làm | - |
+| 157 | Mst_GovIDTypeController/GetByGovIDType | Đã làm | e05732a |
+| 158 | Mst_GovIDTypeController/GetAllActive | Đã làm | fbe0e15 |
 | 159 | Mst_GovIDTypeController/Create | Chưa làm | - |
 | 160 | Mst_GovIDTypeController/Update | Chưa làm | - |
 | 161 | Mst_GovIDTypeController/Delete | Chưa làm | - |
-| 162 | Mst_GradeController/Search | Chưa làm | - |
-| 163 | Mst_GradeController/GetAllActive | Chưa làm | - |
-| 164 | Mst_LeaveDayController/Search | Chưa làm | - |
-| 165 | Mst_LeaveDayController/GetAllActive | Chưa làm | - |
-| 166 | Mst_LeaveTypeController/Search | Chưa làm | - |
-| 167 | Mst_LeaveTypeController/GetAllActive | Chưa làm | - |
-| 168 | Mst_MajorController/Search | Chưa làm | - |
+| 162 | Mst_GradeController/Search | Đã làm | 3b851aa |
+| 163 | Mst_GradeController/GetAllActive | Đã làm | 6c2dc39 |
+| 164 | Mst_LeaveDayController/Search | Đã làm | c6b0984 |
+| 165 | Mst_LeaveDayController/GetAllActive | Đã làm | 03b59f5 |
+| 166 | Mst_LeaveTypeController/Search | Đã làm | b28baba |
+| 167 | Mst_LeaveTypeController/GetAllActive | Đã làm | 39bc3de |
+| 168 | Mst_MajorController/Search | Đã làm | c2e0d17 |
 | 169 | Mst_MajorController/GetAllActive | Chưa làm | - |
-| 170 | Mst_MajorGroupController/Search | Chưa làm | - |
+| 170 | Mst_MajorGroupController/Search | Đã làm | 2421a22 |
 | 171 | Mst_MajorGroupController/GetAllActive | Chưa làm | - |
 | 172 | Mst_NNTController/Search | Chưa làm | - |
 | 173 | Mst_NNTController/GetAllActive | Chưa làm | - |

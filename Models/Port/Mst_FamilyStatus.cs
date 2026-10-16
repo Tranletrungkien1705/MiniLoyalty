@@ -52,11 +52,11 @@ public class Mst_FamilyStatusConfig : IEntityTypeConfiguration<Mst_FamilyStatus>
 /// Dữ liệu mẫu cho bảng Mst_FamilyStatus. Idempotent: đã có dữ liệu thì bỏ qua.
 /// Dữ liệu demo (comment "du lieu demo"):
 /// FS01 'Độc thân' '1' (Desc 'Chưa kết hôn') · FS02 'Đã kết hôn' '1' (Desc 'Có vợ/chồng') · FS03 'Ly hôn' '0' (Desc null).
-/// Thứ tự Order => 32 (danh mục Mst_* dùng 10–99).
+/// Thứ tự Order => 39 (danh mục Mst_* dùng 10–99).
 /// </summary>
 public class Mst_FamilyStatusSeeder : IPortSeeder
 {
-    public int Order => 32;   // danh mục Mst_* dùng 10–99
+    public int Order => 39;   // danh mục Mst_* dùng 10–99
 
     public async Task SeedAsync(AppDbContext db)
     {

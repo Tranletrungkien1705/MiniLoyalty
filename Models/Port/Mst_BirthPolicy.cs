@@ -299,7 +299,7 @@ public class Mst_ParamPromotionTypeConfig : IEntityTypeConfiguration<Mst_ParamPr
 /// </summary>
 public class Mst_ParamPromotionTypeSeeder : IPortSeeder
 {
-    public int Order => 12; // Danh mục Mst_* dùng 10–99
+    public int Order => 21; // Danh mục Mst_* dùng 10–99
 
     public async Task SeedAsync(AppDbContext db)
     {

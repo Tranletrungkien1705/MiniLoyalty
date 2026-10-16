@@ -16,9 +16,15 @@ public static class PortResult
     /// </summary>
     public static BadRequestObjectResult Fail(string errorCode, params object?[] paramCouples)
     {
+        // Công tắc production: PORT_SANITIZE_ERRORS=1 → không trả nguyên ex.Message (tên DBMS/bảng/đường dẫn máy) ra client.
+        // Mặc định TẮT để khớp nguồn (gate AddException trả nguyên thông điệp); chi tiết vẫn có trong log máy chủ (PortExceptionFilter).
+        var sanitize = Environment.GetEnvironmentVariable("PORT_SANITIZE_ERRORS") == "1";
         var p = new Dictionary<string, object?>();
         for (var i = 0; i + 1 < paramCouples.Length; i += 2)
-            p[Convert.ToString(paramCouples[i]) ?? $"p{i}"] = paramCouples[i + 1];
+        {
+            var key = Convert.ToString(paramCouples[i]) ?? $"p{i}";
+            p[key] = sanitize && key == "Exception" ? "Lỗi xử lý dữ liệu (chi tiết đã ghi nhật ký máy chủ)." : paramCouples[i + 1];
+        }
         return new BadRequestObjectResult(new { Success = false, ErrorCode = "ErridnLoyalty." + errorCode, Params = p });
     }
 }
