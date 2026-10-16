@@ -91,6 +91,23 @@ public class Crd_CardRankApproveRankDownItem
     public string? CardTypeInitExpect { get; set; }
 }
 
+/// <summary>
+/// Port 1:1 tham số request của Gate ApproveRankKeep (Crd_CardRankController.cs:251) (#010).
+/// </summary>
+public class Crd_CardRankApproveRankKeepReq
+{
+    public string? strJson { get; set; }
+    public List<Crd_CardRankApproveRankKeepItem>? Lst_Crd_Card { get; set; }
+}
+
+public class Crd_CardRankApproveRankKeepItem
+{
+    public string? CardNo { get; set; }
+    public string? CardTypeUseExpect { get; set; }
+    public string? CardTypeInitExpect { get; set; }
+    public string? RankActionType { get; set; }
+}
+
 [ApiController]
 [Route("api/crd_cardrank")]
 public class Crd_CardRankControllerPort : ControllerBase
@@ -736,45 +753,14 @@ public class Crd_CardRankControllerPort : ControllerBase
                         "Check.strCardTypeUseExpect", cardTypeUseExpect ?? "");
                 }
 
-                // Sinh mã thẻ mới theo đúng thuật toán GenCardNo nguồn (Card.cs:27641-27744)
-                var dlCode = member.DLCodeRegis ?? "";
-                string strGen6ParamPrefixOfCard = "";
-                if (dlCode.Length == 5)
-                {
-                    strGen6ParamPrefixOfCard = $"{dlCode}0";
-                }
-                else if (dlCode.Length == 7)
-                {
-                    strGen6ParamPrefixOfCard = dlCode.Replace(".", "");
-                }
-
-                if (strGen6ParamPrefixOfCard.Length != 6)
+                // Sinh mã thẻ mới theo GenCardNo nguồn (Card.cs:27641-27744) — dùng hàm chung của Crd_CardControllerPort
+                var memberCardNos = await _db.CrdCards.AsNoTracking().Where(c => c.MemberNo == member.MemberNo).Select(c => c.CardNo).ToListAsync();
+                var (newCardNo, genErr) = Crd_CardControllerPort.GenCardNo(member.MemberNo, member.DLCodeRegis, memberCardNos);
+                if (genErr != null)
                 {
                     await tx.RollbackAsync();
-                    return PortResult.Fail("GenCardNo_InvalidGen6ParamPrefixOfCard",
-                        "Check.DLCode", dlCode,
-                        "Check.strGen6ParamPrefixOfCard", strGen6ParamPrefixOfCard,
-                        "Check.ErrConditionRaise", "strGen6ParamPrefixOfCard.Length != 6");
+                    return genErr;
                 }
-
-                // Lấy số thứ tự phát hành thẻ kế tiếp của hội viên (Card.cs:27650-27693)
-                var memberCards = await _db.CrdCards
-                    .Where(c => c.MemberNo == member.MemberNo)
-                    .Select(c => c.CardNo)
-                    .ToListAsync();
-
-                long nSeqCardNo = 0;
-                foreach (var no in memberCards)
-                {
-                    if (!string.IsNullOrEmpty(no) && no.Length >= 2 && int.TryParse(no[^2..], out var parsedSeq))
-                    {
-                        if (parsedSeq >= nSeqCardNo)
-                        {
-                            nSeqCardNo = parsedSeq + 1;
-                        }
-                    }
-                }
-                var newCardNo = $"{strGen6ParamPrefixOfCard}{member.MemberNo}{(nSeqCardNo % 100):D2}";
 
                 // Sinh mã đợt xét hạng CardRankNo qua PortSeq.Build theo chuẩn Seq_Common_Get (Seq.cs:138, CardRank.cs:1768-1790)
                 var rankCount = cardRankSeqs[i];
@@ -967,6 +953,344 @@ public class Crd_CardRankControllerPort : ControllerBase
         {
             await tx.RollbackAsync();
             return PortResult.Fail("Crd_CardRank_ApproveRankDown", "Exception", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Port 1:1 Crd_CardRankController.ApproveRankKeep (gate Crd_CardRankController.cs:251-313 -> API CrdCardRankController.cs:312-382 -> Biz CardRank.cs:9655-9755, 8772-9120, 1341-1740) (#010).
+    /// </summary>
+    [HttpPost("approverankkeep")]
+    public async Task<IActionResult> ApproveRankKeep([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_CardRankApproveRankKeepReq? req)
+    {
+        // 0. Kiểm tra strJson đầu vào: Gate Crd_CardRankController.cs:260-267
+        // if (!string.IsNullOrEmpty(strJson)) { ... } else { throw new mbiz.core.Exceptions.ServiceException("strJson null"); }
+        if (!ModelState.IsValid || req == null)
+        {
+            return PortResult.Fail("Crd_CardRank_ApproveRankKeep", "Check.strJson", null);
+        }
+
+        List<Crd_CardRankApproveRankKeepItem>? cardList = null;
+
+        if (!string.IsNullOrEmpty(req.strJson))
+        {
+            try
+            {
+                var parsed = System.Text.Json.JsonSerializer.Deserialize<Crd_CardRankApproveRankKeepReq>(
+                    req.strJson,
+                    new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                cardList = parsed?.Lst_Crd_Card;
+                if (cardList == null)
+                {
+                    return PortResult.Fail("Crd_CardRank_ApproveRankKeep", "Check.strJson", null);
+                }
+            }
+            catch (Exception)
+            {
+                return PortResult.Fail("Crd_CardRank_ApproveRankKeep", "Check.strJson", null);
+            }
+        }
+        else if (req.Lst_Crd_Card != null)
+        {
+            cardList = req.Lst_Crd_Card;
+        }
+        else
+        {
+            // strJson bị null hoặc rỗng -> trả lỗi ServiceException theo Gate Crd_CardRankController.cs:266
+            return PortResult.Fail("Crd_CardRank_ApproveRankKeep", "Check.strJson", null);
+        }
+
+        if (cardList.Count == 0)
+        {
+            // Khi danh sách rỗng, vòng lặp nguồn chạy 0 lần và trả về Success = true, Data = null (Gate Crd_CardRankController.cs:299-300)
+            return Ok(new
+            {
+                Success = true,
+                Data = (object?)null
+            });
+        }
+
+        // Sequence CardRankNo lấy TRƯỚC khi mở transaction chính (Seq.cs:28-41: transaction riêng, commit độc lập)
+        var cardRankSeqs = new List<long>();
+        for (var k = 0; k < cardList.Count; k++) cardRankSeqs.Add(await PortSeq.NextAsync<Seq_CardRankNo>(_db));
+
+        // 1. Mở transaction chính cho cả lô duyệt duy trì hạng thẻ (CardRank.cs:8802 _cf.db.BeginTransaction())
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            var dtimeSys = DateTime.UtcNow;
+            var policies = await _db.Set<Mst_RankPolicy>().ToListAsync();
+
+            // Lấy chính sách hoạt động từ Mst_RankPolicy (CardRank.cs:956-968, 1537)
+            var activePolicy = policies.FirstOrDefault(p => p.FlagActive == "1");
+
+            for (int i = 0; i < cardList.Count; i++)
+            {
+                var item = cardList[i];
+                var cardNo = item.CardNo?.Trim().ToUpperInvariant();
+                if (string.IsNullOrEmpty(cardNo)) continue;
+
+                // Kiểm tra thẻ trong DB: Crd_Card_CheckDB (CardRank.cs:9012-9018, Card.cs:21229-21276)
+                var card = await _db.CrdCards.FirstOrDefaultAsync(c =>
+                    EF.Functions.Like((c.CardNo ?? "").ToLower(), PortQuery.Equal(cardNo), PortQuery.Esc));
+                if (card == null)
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Crd_Card_CheckDB_CardNotFound", "Check.strCardNo", cardNo);
+                }
+
+                // Kiểm tra trạng thái thẻ: Crd_Card_CheckDB với strCardStatusListToCheck = APPROVE (CardRank.cs:9016, Card.cs:21294-21305)
+                if (!string.Equals(card.CardStatus, "APPROVE", StringComparison.OrdinalIgnoreCase))
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Crd_Card_CheckDB_CardStatusNotMatched", "Check.strCardNo", card.CardNo);
+                }
+
+                // Kiểm tra hội viên trong DB: Crd_Member_CheckDB (CardRank.cs:9021-9028, Member.cs:3379-3420)
+                var member = await _db.CrdMembers.FirstOrDefaultAsync(m => m.MemberNo == card.MemberNo);
+                if (member == null)
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Crd_Member_CheckDB_MemberNotFound", "Check.strMemberNo", card.MemberNo);
+                }
+
+                // Kiểm tra ngày hết hạn kỳ xét hạng: CardRank.cs:9041-9055
+                if (card.EffDateEnd.HasValue)
+                {
+                    var strEffDateEnd = card.EffDateEnd.Value.ToString("yyyy-MM-dd");
+                    if (string.CompareOrdinal(dtimeSys.ToString("yyyy-MM-dd"), strEffDateEnd) < 0)
+                    {
+                        await tx.RollbackAsync();
+                        return PortResult.Fail("Crd_Card_RankKeep_Input_InvalidIEffDateEndBeforeSysDate",
+                            "Check.strCardNo", card.CardNo,
+                            "Check.dtimeSys", dtimeSys.ToString("yyyy-MM-dd"),
+                            "Check.strEffDateEnd", strEffDateEnd);
+                    }
+                }
+
+                // Xác định hạng dự kiến duy trì theo nguồn:
+                // 1) Lấy từ input client gửi nếu có (CardRank.cs:8996-8997, 9037-9038)
+                // 2) Nếu không có trong input, lấy từ cột CardTypeUseExpect/CardTypeInitExpect lưu sẵn trên thẻ trong DB
+                // 3) Nếu vẫn chưa có, lấy CardTypeUse hiện tại của thẻ
+                var cardTypeUseExpect = !string.IsNullOrWhiteSpace(item.CardTypeUseExpect)
+                    ? item.CardTypeUseExpect.Trim().ToUpperInvariant()
+                    : (!string.IsNullOrWhiteSpace(card.CardTypeUseExpect) ? card.CardTypeUseExpect.Trim().ToUpperInvariant() : card.CardTypeUse);
+
+                var cardTypeInitExpect = !string.IsNullOrWhiteSpace(item.CardTypeInitExpect)
+                    ? item.CardTypeInitExpect.Trim().ToUpperInvariant()
+                    : (!string.IsNullOrWhiteSpace(card.CardTypeInitExpect) ? card.CardTypeInitExpect.Trim().ToUpperInvariant() : cardTypeUseExpect);
+
+                // Kiểm tra CardTypeUse == CardTypeUseExpect (CardRank.cs:1346-1360)
+                // Đối với duy trì hạng (KEEP), hạng dự kiến giữ phải trùng với hạng hiện tại
+                if (!string.Equals(card.CardTypeUse, cardTypeUseExpect, StringComparison.OrdinalIgnoreCase))
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Crd_CardRankPolicy_Perform_InvalidRankCardTypeUse",
+                        "Check.strCardNo", card.CardNo,
+                        "Check.strFunctionActionType", "KEEP",
+                        "Check.strCardTypeUse", card.CardTypeUse,
+                        "Check.strCardTypeUseExpect", cardTypeUseExpect ?? "");
+                }
+
+                // Sinh mã thẻ mới theo GenCardNo nguồn (Card.cs:27641-27744) — dùng hàm chung của Crd_CardControllerPort
+                var memberCardNos = await _db.CrdCards.AsNoTracking().Where(c => c.MemberNo == member.MemberNo).Select(c => c.CardNo).ToListAsync();
+                var (newCardNo, genErr) = Crd_CardControllerPort.GenCardNo(member.MemberNo, member.DLCodeRegis, memberCardNos);
+                if (genErr != null)
+                {
+                    await tx.RollbackAsync();
+                    return genErr;
+                }
+
+                // Sinh mã đợt xét hạng CardRankNo qua PortSeq.Build theo chuẩn Seq_Common_Get (Seq.cs:138, CardRank.cs:1364-1389)
+                var rankCount = cardRankSeqs[i];
+                var cardRankNo = PortSeq.Build("{0}CARDRANKNO.{3}.{1:00000}{2}", "", rankCount, 100000, "", dtimeSys);
+
+                // Chính sách xếp hạng cho thẻ mới (CardRank.cs:1537)
+                var rankPolicyCode = card.RankPolicyCode ?? activePolicy?.RankPolicyCode;
+
+                // Cờ đặc cách FlagExceptionally theo nguồn (CardRank.cs:1505-1512)
+                string flagExceptionally = "0";
+                string? dlCodeExceptionally = null;
+                if (!string.Equals(cardTypeUseExpect, cardTypeInitExpect, StringComparison.OrdinalIgnoreCase))
+                {
+                    flagExceptionally = "1";
+                    dlCodeExceptionally = member.DLCodeExceptionally;
+                }
+
+                // Tính hiệu lực thẻ theo Crd_Card_ApproveX (Card.cs:23532-23538: 12 tháng)
+                var effDateStart = dtimeSys.Date;
+                var startMonth = new DateTime(effDateStart.Year, effDateStart.Month, 1);
+                var effDateEnd = startMonth.AddMonths(13).AddDays(-1);
+
+                // 1. Crd_Card_CancelX: Hủy thẻ cũ (CardRank.cs:1454-1472, Card.cs:22736-22758)
+                card.CardStatus = "CANCEL";
+                card.CancelDTimeUTC = dtimeSys;
+                card.CancelBy = "port";
+                card.Remark = "";
+                card.LUDTimeUTC = dtimeSys;
+                card.LUBy = "port";
+                card.LogLUDTimeUTC = dtimeSys;
+                card.LogLUBy = "port";
+
+                // 2. Crd_Card_AddX + Crd_Card_ApproveX: Tạo thẻ mới đã duyệt với CardSourceCode = KEEP (CardRank.cs:1474-1547, 1648, Card.cs:21627-21668, 23532-23578)
+                var newCard = new CrdCard
+                {
+                    CardNo = newCardNo,
+                    CardNoPrev = card.CardNo,
+                    MemberNo = card.MemberNo,
+                    NetworkID = card.NetworkID ?? (_config["Biz_NetworkID"] ?? "1001"),
+                    CardSourceCode = "KEEP",
+                    RankPolicyCode = rankPolicyCode,
+                    DLCodeExceptionally = dlCodeExceptionally,
+                    PointBonus = 0,
+                    PointPurchaseAddCar = 0,
+                    EffDateStart = effDateStart,
+                    EffDateEnd = effDateEnd,
+                    PointTotal = 0,
+                    PointBlock = 0,
+                    PointAvail = 0,
+                    AmountTotal = 0,
+                    AmountBlock = 0,
+                    AmountAvail = 0,
+                    QtyVisitTotal = 0,
+                    QtyVisitBlock = 0,
+                    QtyVisitAvail = 0,
+                    PointCardRank = 0,
+                    TotalAmountPeriod = 0,
+                    CardTypeUse = cardTypeUseExpect,
+                    CardTypeInit = cardTypeInitExpect,
+                    CardTypeUsePrev = card.CardTypeUse,
+                    CardTypeInitPrev = card.CardTypeInit,
+                    CardActiveDate = effDateStart,
+                    FlagExceptionally = flagExceptionally,
+                    CardStatus = "APPROVE",
+                    Remark = "",
+                    CreateDTimeUTC = dtimeSys,
+                    CreateBy = "port",
+                    LUDTimeUTC = dtimeSys,
+                    LUBy = "port",
+                    ApproveDTimeUTC = dtimeSys,
+                    ApproveBy = "port",
+                    CancelDTimeUTC = null,
+                    CancelBy = null,
+                    LogLUDTimeUTC = dtimeSys,
+                    LogLUBy = "port"
+                };
+                _db.CrdCards.Add(newCard);
+
+                // 3. Crd_Member_UpdateForRankX: Cập nhật hội viên (CardRank.cs:1550-1638)
+                var ptBegin = (member.PointBegin ?? 0) + (member.PointAvail ?? 0);
+                var amtBegin = (member.AmountBegin ?? 0) + (member.AmountAvail ?? 0);
+                var qtyBegin = (member.QtyVisitBegin ?? 0) + (member.QtyVisitAvail ?? 0);
+
+                member.PointBegin = ptBegin;
+                member.PointEnd = ptBegin;
+                member.PointTotal = 0;
+                member.PointBlock = 0;
+                member.PointAvail = 0;
+
+                member.AmountBegin = amtBegin;
+                member.AmountEnd = amtBegin;
+                member.AmountTotal = 0;
+                member.AmountBlock = 0;
+                member.AmountAvail = 0;
+
+                member.QtyVisitBegin = qtyBegin;
+                member.QtyVisitEnd = qtyBegin;
+                member.QtyVisitTotal = 0;
+                member.QtyVisitBlock = 0;
+                member.QtyVisitAvail = 0;
+
+                member.CardTypeUse = cardTypeUseExpect;
+                member.CardTypeInit = cardTypeInitExpect;
+                member.PointCardRank = 0;
+                member.DLCodeExceptionally = null;
+                member.FlagExceptionally = "0";
+                member.LUDTimeUTC = dtimeSys;
+                member.LUBy = "port";
+                member.LogLUDTimeUTC = dtimeSys;
+                member.LogLUBy = "port";
+
+                // 4. Crd_CardRank_AddX: Ghi nhận lịch sử xét hạng (CardRank.cs:1700-1738)
+                var rankRec = new Crd_CardRank
+                {
+                    CardRankNo = cardRankNo,
+                    NetworkID = card.NetworkID ?? (_config["Biz_NetworkID"] ?? "1001"),
+                    OrgID = member.OrgID ?? "1001",
+                    RankPolicyCode = rankPolicyCode,
+                    CardSourceCode = "KEEP",
+                    DealPointType = "LOYALTY",
+                    FunctionName = "Crd_Card_RankKeep",
+                    FunctionActionType = "NONE",
+                    FunctionRemark = "0",
+                    RefType = "ADD",
+                    RefCode00 = null,
+                    RefCode01 = null,
+                    RefCode02 = null,
+                    RefCode03 = null,
+                    RefCode04 = null,
+                    RefCode05 = null,
+                    CreateDTimeUTC = dtimeSys,
+                    CreateBy = "port",
+                    LUDTimeUTC = dtimeSys,
+                    LUBy = "port",
+                    LogLUDTimeUTC = dtimeSys,
+                    LogLUBy = "port"
+                };
+                _db.Set<Crd_CardRank>().Add(rankRec);
+
+                // Crd_CardBefore: Lưu lại ảnh thẻ cũ (CardRank.cs:1422-1434, 1705)
+                var cardBefore = new Crd_CardBefore
+                {
+                    CardRankNo = cardRankNo,
+                    CardNo = card.CardNo,
+                    NetworkID = card.NetworkID ?? (_config["Biz_NetworkID"] ?? "1001"),
+                    MemberNo = card.MemberNo,
+                    CardSourceCode = card.CardSourceCode ?? "NEW",
+                    CardTypeUse = card.CardTypeUse ?? "",
+                    CardTypeInit = card.CardTypeInit ?? "",
+                    PointCardRank = card.PointCardRank,
+                    QtyVisitTotal = card.QtyVisitTotal,
+                    CreateDTimeUTC = dtimeSys,
+                    CreateBy = "port",
+                    LUDTimeUTC = dtimeSys,
+                    LUBy = "port"
+                };
+                _db.Set<Crd_CardBefore>().Add(cardBefore);
+
+                // Crd_CardAfter: Lưu lại ảnh thẻ mới sau duyệt duy trì hạng (CardRank.cs:1686-1698, 1707)
+                var cardAfter = new Crd_CardAfter
+                {
+                    CardRankNo = cardRankNo,
+                    CardNo = newCardNo,
+                    NetworkID = newCard.NetworkID,
+                    MemberNo = newCard.MemberNo,
+                    CardSourceCode = "KEEP",
+                    CardTypeUse = cardTypeUseExpect ?? "",
+                    CardTypeInit = cardTypeInitExpect ?? cardTypeUseExpect ?? "",
+                    PointCardRank = 0,
+                    QtyVisitTotal = 0,
+                    CreateDTimeUTC = dtimeSys,
+                    CreateBy = "port",
+                    LUDTimeUTC = dtimeSys,
+                    LUBy = "port"
+                };
+                _db.Set<Crd_CardAfter>().Add(cardAfter);
+            }
+
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+
+            // Kết quả trả về object JsonResultEntry với Data = null khi thành công (Gate Crd_CardRankController.cs:299-300)
+            return Ok(new
+            {
+                Success = true,
+                Data = (object?)null
+            });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return PortResult.Fail("Crd_CardRank_ApproveRankKeep", "Exception", ex.Message);
         }
     }
 }
