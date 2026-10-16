@@ -10,11 +10,13 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — Mst_SkillGroupController/Search (#243).
+// PORT 1:1 — Mst_SkillGroupController/Search (#243), GetAllActive (#244).
 //
 // Nguồn controller (tầng gate):
 //   Mst_SkillGroupController.cs:25-105     Search -> WA_Mst_SkillGroup_Get
+//   Mst_SkillGroupController.cs:107-167    GetAllActive -> WA_Mst_SkillGroup_Get
 //   Mst_SkillGroupController.cs:171-186    strWhereClause_Mst_SkillGroup
+//   Mst_SkillGroupController.cs:188-199    strWhereClause_Mst_SkillGroup_Active
 // Nguồn API:
 //   MstSkillGroupController.cs:17-88       WA_Mst_SkillGroup_Get
 // Nguồn biz:
@@ -61,6 +63,22 @@ public class Mst_SkillGroupControllerPort : ControllerBase
         var pageCount = rows.Count == 0 ? 0 : (itemCount % ps == 0 ? itemCount / ps : itemCount / ps + 1);
 
         return Ok(new { Success = true, Data = new PageInfo<object>(rows, itemCount, pageCount, pageIndex, pageSize) });
+    }
+
+    /// <summary>
+    /// Port 1:1 Mst_SkillGroupController.GetAllActive (#244).
+    /// Nguồn gate: Mst_SkillGroupController.cs:107-167.
+    /// Lọc FlagActive = "1" qua strWhereClause_Mst_SkillGroup_Active (:188-199, toán tử '=' :195).
+    /// Không lọc KeyWord hay OrgID (:127-130).
+    /// Ft_RecordStart, Ft_RecordCount lấy từ property của base class tương đương lấy tất cả (0 và 123456000) (:142-143).
+    /// Gọi lại GetXAsync(null, "1", 0, 123456000) (biz MasterData.cs:43584-43739).
+    /// Data trả về mảng trần danh sách Mst_SkillGroup, nếu rỗng trả về null (:126, :151-154).
+    /// </summary>
+    [HttpPost("getallactive")]
+    public async Task<IActionResult> GetAllActive()
+    {
+        var (_, rows) = await GetXAsync(null, "1", 0, 123456000);
+        return Ok(new { Success = true, Data = rows.Count > 0 ? rows : null });
     }
 
     private async Task<(int itemCount, List<object> rows)> GetXAsync(string? keyWord, string? flagActive, long recordStart, long recordCount)
