@@ -16,7 +16,8 @@ namespace MiniLoyalty.Controllers.Port;
 //   - Search (#205)
 //   - GetAllActive (#206)
 //   - GetByPrProgramCode (#207)
-//   - Save (#208) — action GHI upsert xóa-ghi lại trong 1 transaction
+//   - Save (#208) — action GHI upsert xóa-ghi lại trong 1 transaction (ép FlagActive = '1')
+//   - Update (#209) — action GHI cập nhật (dùng chung SaveCoreAsync, FlagActive theo client, nếu FlagActive='0' ghi đè EffDateEnd bằng DateTime.Now)
 //
 // Nguồn tra cứu (chỉ đọc):
 //   - Gate controller: 13.ClientGate/V10/idn.Loyalty.WebAPI/Controllers/Mst_PromotionProgramController.cs
@@ -25,6 +26,9 @@ namespace MiniLoyalty.Controllers.Port;
 //     * GetByPrProgramCode: :224-307 (lọc PrProgramCode =, không lọc FlagActive, Ft_RecordStart="0", Ft_RecordCount="1", xin cả 3 bảng)
 //     * Save: :311-402 (body rỗng -> "strJson null" -> Mst_PromotionProgram_Save. Khối Get Seq :345-366 BỊ COMMENT -> PrProgramCode do client gửi.
 //       Gate ép FlagActive = '1' tại :384. Header null -> NullReference -> Mst_PromotionProgram_Save. Thành công Data = null).
+//     * Update: :406-502 (y hệt Save, gọi cùng WA_Mst_PromotionProgram_Save -> SaveX. Khác Save ở 2 điểm:
+//       1. KHÔNG ép FlagActive = '1' mà dùng FlagActive client gửi (StdFlag: chỉ '1' là 1, thiếu/khác -> '0').
+//       2. :480-484 nếu StdFlag(FlagActive) == "0" (kể cả khi không gửi) -> EffDateEnd = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") - giờ máy chủ, không UTC).
 //     * strWhereClause_Mst_PromotionProgram: :718-730 (chỉ lọc KeyWord -> PrProgramCode like '%kw%', OrgID KHÔNG dùng)
 //     * strWhereClause_Mst_PromotionProgram_By_PrProgramCode: :732-743 (lọc PrProgramCode =)
 //   - Service: WA_Mst_PromotionProgram_Get (11.BackEnd/V10/idn.Loyalty.Biz.Web/Controllers/MstPromotionProgramController.cs:22-90)
@@ -44,14 +48,18 @@ namespace MiniLoyalty.Controllers.Port;
 //       FK PrProgramCode -> Mst_PromotionProgram (:512-519) — chỉ ghi comment.
 //       FK DLCode -> Mst_DealerCP.DLCPCode (:522-528) — chỉ ghi comment.
 //
-// ĐẶC TẢ NGHIỆP VỤ & QUY TẮC PORT SAVE (#208):
-//   1. Không sinh seq: Khối Get Seq (gate :345-366) BỊ COMMENT ở nguồn -> PrProgramCode do client gửi lên.
+// ĐẶC TẢ NGHIỆP VỤ & QUY TẮC PORT SAVE (#208) & UPDATE (#209):
+//   1. Không sinh seq: Khối Get Seq (gate :345-366, :441-461) BỊ COMMENT ở nguồn -> PrProgramCode do client gửi lên.
 //      Chuẩn hoá bằng StdParam (Trim().ToUpperInvariant(), rỗng -> null). Thiếu hoặc rỗng -> Mst_PromotionProgram_Save.
-//   2. Gate ép FlagActive '1' (gate :384). Header null gây NullReferenceException -> Mst_PromotionProgram_Save.
-//      CheckDB (:13245-13276) so sánh PrProgramCode với "1" là mã vô nghĩa / dead code, bỏ qua.
-//      PrProgramName rỗng -> Mst_PromotionProgram_SaveX_InvalidPrProgramName (:13285-13295).
-//      Nhánh kiểm EffDateStart (:13300-13330) chỉ chạy khi xóa (bIsDelete = true) -> không chạy ở Save.
-//      EffDateStart / EffDateEnd null hoặc sai định dạng date -> Mst_PromotionProgram_Save.
+//   2. Phân biệt Save và Update:
+//      - Save (#208): Gate ép FlagActive = '1' (gate :384). Giữ nguyên EffDateEnd do client gửi.
+//      - Update (#209): Không ép FlagActive = '1', dùng FlagActive client gửi (StdFlag: chỉ '1' là 1, thiếu/khác -> '0').
+//        Nếu StdFlag(FlagActive) == "0" (kể cả khi không gửi) -> EffDateEnd bị ghi đè bằng DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") (giờ máy chủ, không UTC).
+//      - Cả Save và Update: Header null gây NullReferenceException tại gate -> Mst_PromotionProgram_Save.
+//      - CheckDB (:13245-13276) so sánh PrProgramCode với "1" là mã vô nghĩa / dead code, bỏ qua.
+//      - PrProgramName rỗng -> Mst_PromotionProgram_SaveX_InvalidPrProgramName (:13285-13295).
+//      - Nhánh kiểm EffDateStart (:13300-13330) chỉ chạy khi xóa (bIsDelete = true) -> không chạy ở Save/Update.
+//      - EffDateStart / EffDateEnd null hoặc sai định dạng date -> Mst_PromotionProgram_Save.
 //   3. Dtl: Qty, Remark, Unit giữ nguyên chế độ ""; CardType chuẩn hoá bằng StdParam; FlagActive StdFlag (thiếu -> '0').
 //      DDL Mst_PromotionProgramDtl khai FK CardType sai bảng (REFERENCES Mst_CardTypeDtl) — GAP, không kiểm tra CardType tồn tại.
 //      Trùng CardType trong danh sách Dtl -> vi phạm PK composite -> Mst_PromotionProgram_Save.
@@ -59,7 +67,8 @@ namespace MiniLoyalty.Controllers.Port;
 //      FK DLCode -> Mst_DealerCP: giả lập kiểm tra tồn tại DLCode trong Mst_DealerCP. Không có -> Mst_PromotionProgram_Save.
 //      Trùng DLCode trong danh sách Spec -> vi phạm PK composite -> Mst_PromotionProgram_Save.
 //   5. Upsert xóa - ghi lại trong 1 transaction (:13562-13706): Xóa Spec cũ, Dtl cũ, Header cũ của cùng PrProgramCode rồi insert mới.
-//      Lỗi bất kỳ -> rollback + PortResult.Fail("Mst_PromotionProgram_Save", ...). Thành công Data = null (:389).
+//      Nếu mã chưa tồn tại: lệnh DELETE xóa 0 dòng, lệnh INSERT thêm mới bản ghi (tạo mới giống Save).
+//      Lỗi bất kỳ -> rollback + PortResult.Fail("Mst_PromotionProgram_Save", ...). Thành công Data = null (:389, :489).
 //   6. GAP: OrgID/NetworkID/LogLUBy từ session user UI (đích: NetworkID lấy từ IConfiguration["Biz_NetworkID"] ?? "1001",
 //      OrgID lấy từ IConfiguration["Biz_OrgID"], LogLUBy = "port"); FK CardType Dtl; phân quyền ability/gate; RequestLog/ReturnLog.
 // ============================================================================================
@@ -243,55 +252,58 @@ public class Mst_PromotionProgramControllerPort : ControllerBase
     /// -> BIZ Mst_PromotionProgram_Save (Master.Loyalty.cs:13736-13891)
     /// -> BIZ Mst_PromotionProgram_SaveX (Master.Loyalty.cs:13179-13734).
     ///
-    /// ĐẶC TẢ NGHIỆP VỤ & QUY TẮC PORT:
-    /// 1. Không seq: Khối Get Seq (gate :345-366) BỊ COMMENT ở nguồn -> PrProgramCode do client gửi lên.
-    ///    Chuẩn hoá bằng StdParam (Trim().ToUpperInvariant(), rỗng -> null). Thiếu hoặc rỗng -> Mst_PromotionProgram_Save.
-    /// 2. Header:
-    ///    - Gate ép FlagActive = '1' (Mst_PromotionProgramController.cs:384). Nếu header null -> NullReferenceException -> Mst_PromotionProgram_Save.
-    ///    - PrProgramName chuẩn hoá bằng StdStr (Trim(), rỗng -> null). Nếu rỗng -> Mst_PromotionProgram_SaveX_InvalidPrProgramName (:13285-13295).
-    ///    - EffDateStart, EffDateEnd: MyDateTime NOT NULL. Parse thất bại hoặc thiếu -> Mst_PromotionProgram_Save (:13232-13233, insert :13602-13603).
-    ///    - FlagAllDL: StdFlag (đúng '1' -> '1', khác/thiếu -> '0').
-    ///    - Remark: StdStr.
-    ///    - CheckDB (:13245-13276): Đoạn kiểm dtDB_Mst_PromotionProgram so sánh PrProgramCode với "1" là mã vô nghĩa / dead code, bỏ qua.
-    ///    - Nhánh kiểm EffDateStart (:13300-13330) chỉ chạy khi xóa (bIsDelete = true) -> KHÔNG chạy ở Save.
-    /// 3. Dtl (Master.Loyalty.cs:13407-13431):
-    ///    - Lst null -> danh sách rỗng (:13928-13933).
-    ///    - CardType: StdParam.
-    ///    - Qty, Remark, Unit: giữ nguyên chế độ "" (Remark KHÔNG trim).
-    ///    - FlagActive: StdFlag (đúng '1' -> '1', khác/thiếu -> '0').
-    ///    - GAP CardType FK: DDL Mst_PromotionProgramDtl khai FK CardType sai bảng (REFERENCES Mst_CardTypeDtl thay vì Mst_CardType)
-    ///      -> nguồn không kiểm tra CardType tồn tại trong danh mục thẻ, bỏ qua FK check.
-    ///    - Trùng CardType trong Dtl -> vi phạm PK composite (PrProgramCode, CardType) -> Mst_PromotionProgram_Save.
-    /// 4. Spec (Master.Loyalty.cs:13493-13518):
-    ///    - Lst null -> danh sách rỗng (:13934-13939).
-    ///    - DLCode: StdParam.
-    ///    - Remark: giữ nguyên chế độ "" (Remark KHÔNG trim).
-    ///    - Spec PENDING: FlagActive gán cứng TConst.PRMCRStatus.Pending = "PENDING" (:13516, Const.Main.BE.cs:653).
-    ///    - FK DLCode -> Mst_DealerCP (DDL FK_MstDealerCp_Mst_ProPrSpec): Giả lập kiểm tra tồn tại DLCode trong Mst_DealerCP.
-    ///      Không tồn tại -> Mst_PromotionProgram_Save.
-    ///    - Trùng DLCode trong Spec -> vi phạm PK composite (DLCode, PrProgramCode) -> Mst_PromotionProgram_Save.
-    /// 5. Upsert xóa - ghi lại trong 1 transaction (Master.Loyalty.cs:13562-13706):
-    ///    - Xóa Spec cũ, Dtl cũ, Header cũ có cùng PrProgramCode (so khớp không phân biệt hoa/thường: Like + PortQuery.Equal).
-    ///    - Insert Header mới, Dtl mới, Spec mới.
-    ///    - Lỗi bất kỳ -> rollback toàn bộ + PortResult.Fail("Mst_PromotionProgram_Save", ...).
-    ///    - Thành công -> Data = null (gate :389).
-    /// 6. GAP:
-    ///    - GAP OrgID: OrgID và NetworkID nguồn lấy từ session user UI / context; hệ thống đích lấy NetworkID từ IConfiguration["Biz_NetworkID"] ?? "1001",
-    ///      OrgID từ IConfiguration["Biz_OrgID"], LogLUBy = "port".
-    ///    - GAP CardType FK: DDL khai sai bảng.
-    ///    - Phân quyền gate (CheckGatewayAuthentication, CheckAuthorize), ability và RequestLog/ReturnLog.
+    /// Hành vi Save: ép FlagActive = '1' (gate Mst_PromotionProgramController.cs:384).
+    /// Giữ nguyên EffDateEnd do client gửi lên.
+    /// Gọi hàm dùng chung <see cref="SaveCoreAsync(MstPromotionProgramSaveReq?, bool)"/> với forceActive = true.
     /// </summary>
     [HttpPost("save")]
     public async Task<IActionResult> Save(
         [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] MstPromotionProgramSaveReq? req)
     {
-        // 0. Body rỗng / null: gate :320-327 ném ServiceException("strJson null") -> mã mặc định Mst_PromotionProgram_Save.
+        return await SaveCoreAsync(req, forceActive: true);
+    }
+
+    /// <summary>
+    /// Port 1:1 <c>Mst_PromotionProgramController.Update</c> (nguồn gate Mst_PromotionProgramController.cs:406-502, #209).
+    /// Chuỗi gọi: gate Update -> API WA_Mst_PromotionProgram_Save (MstPromotionProgramController.cs:93-163)
+    /// -> BIZ WAS_Mst_PromotionProgram_Save (Master.Loyalty.cs:13893-13995)
+    /// -> BIZ Mst_PromotionProgram_Save (Master.Loyalty.cs:13736-13891)
+    /// -> BIZ Mst_PromotionProgram_SaveX (Master.Loyalty.cs:13179-13734).
+    ///
+    /// KHÁC Save ở 2 điểm:
+    /// 1. KHÔNG ép FlagActive = '1': dùng FlagActive client gửi (SaveX StdFlag: chỉ "1" là 1, thiếu/khác -> "0").
+    /// 2. Gate :480-484: nếu StdFlag(FlagActive) == "0" (KỂ CẢ khi client không gửi FlagActive)
+    ///    thì EffDateEnd = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") (giờ máy chủ, không UTC) — ghi đè EffDateEnd client gửi.
+    ///
+    /// Gọi hàm dùng chung <see cref="SaveCoreAsync(MstPromotionProgramSaveReq?, bool)"/> với forceActive = false.
+    /// </summary>
+    [HttpPost("update")]
+    public async Task<IActionResult> Update(
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] MstPromotionProgramSaveReq? req)
+    {
+        return await SaveCoreAsync(req, forceActive: false);
+    }
+
+    /// <summary>
+    /// Hàm xử lý cốt lõi dùng chung cho Save (#208) và Update (#209).
+    /// Nguồn:
+    ///   - Gate Save: Mst_PromotionProgramController.cs:311-402 (ép FlagActive = '1' tại :384).
+    ///   - Gate Update: Mst_PromotionProgramController.cs:406-502 (:480-484 không ép FlagActive; nếu StdFlag(FlagActive) == "0"
+    ///     thì ghi đè EffDateEnd = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") — giờ máy chủ, không UTC).
+    ///   - Service: WA_Mst_PromotionProgram_Save (MstPromotionProgramController.cs:93-163).
+    ///   - Biz: WAS_Mst_PromotionProgram_Save (Master.Loyalty.cs:13893-13995)
+    ///          -> Mst_PromotionProgram_Save (Master.Loyalty.cs:13736-13891)
+    ///          -> Mst_PromotionProgram_SaveX (Master.Loyalty.cs:13179-13734).
+    /// </summary>
+    private async Task<IActionResult> SaveCoreAsync(MstPromotionProgramSaveReq? req, bool forceActive)
+    {
+        // 0. Body rỗng / null: gate :320-327 (Save) / :415-422 (Update) ném ServiceException("strJson null") -> mã mặc định Mst_PromotionProgram_Save.
         if (req == null)
         {
             return PortResult.Fail("Mst_PromotionProgram_Save", "Check.strJson", null);
         }
 
-        // Header null (ví dụ `{}`): gate :384 truy cập objRQ_Mst_PromotionProgram.Mst_PromotionProgram.FlagActive = '1'
+        // Header null (ví dụ `{}`): gate :384 (Save) / :480 (Update) truy cập objRQ_Mst_PromotionProgram.Mst_PromotionProgram.FlagActive
         // ném NullReferenceException -> mã mặc định Mst_PromotionProgram_Save.
         if (req.Mst_PromotionProgram == null)
         {
@@ -305,8 +317,33 @@ public class Mst_PromotionProgramControllerPort : ControllerBase
         var strPrProgramName = StdStr(header.PrProgramName);
         var strRemark = StdStr(header.Remark);
         var strFlagAllDL = StdFlag(header.FlagAllDL);
-        // Gate ép FlagActive = '1' tại Mst_PromotionProgramController.cs:384, sau đó StdFlag('1') = '1'
-        const string strFlagActive = "1";
+
+        string strFlagActive;
+        string? effDateEndStr;
+
+        if (forceActive)
+        {
+            // Gate Save (Mst_PromotionProgramController.cs:384): ép FlagActive = '1'
+            strFlagActive = "1";
+            effDateEndStr = header.EffDateEnd;
+        }
+        else
+        {
+            // Gate Update (Mst_PromotionProgramController.cs:480-484):
+            // Dùng FlagActive client gửi (StdFlag: chỉ "1" là 1, thiếu/khác -> "0").
+            strFlagActive = StdFlag(header.FlagActive);
+            if (strFlagActive == "0")
+            {
+                // Nguồn gate Mst_PromotionProgramController.cs:480-484: nếu StdFlag(FlagActive) == "0" (kể cả khi không gửi)
+                // thì EffDateEnd = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") (giờ máy chủ, không UTC).
+                // Ghi đè EffDateEnd client gửi.
+                effDateEndStr = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+            }
+            else
+            {
+                effDateEndStr = header.EffDateEnd;
+            }
+        }
 
         // CheckDB (:13245-13276): Đoạn kiểm dtDB_Mst_PromotionProgram so sánh PrProgramCode với "1" là mã vô nghĩa / dead code, bỏ qua.
 
@@ -316,7 +353,7 @@ public class Mst_PromotionProgramControllerPort : ControllerBase
             return PortResult.Fail("Mst_PromotionProgram_SaveX_InvalidPrProgramName", "Check.PrProgramName", strPrProgramName);
         }
 
-        // Nhánh kiểm EffDateStart (:13300-13330) chỉ chạy khi xóa (bIsDelete = true) -> KHÔNG chạy ở Save.
+        // Nhánh kiểm EffDateStart (:13300-13330) chỉ chạy khi xóa (bIsDelete = true) -> KHÔNG chạy ở Save/Update.
 
         // Chuẩn hoá và kiểm tra Dtl (Master.Loyalty.cs:13407-13431):
         var dtlInputList = req.Lst_Mst_PromotionProgramDtl ?? new List<MstPromotionProgramSaveDtlReq>();
@@ -416,7 +453,7 @@ public class Mst_PromotionProgramControllerPort : ControllerBase
         {
             return PortResult.Fail("Mst_PromotionProgram_Save", "Check.EffDateStart", header.EffDateStart);
         }
-        if (!TryParseEffDate(header.EffDateEnd, out var effDateEndUtc))
+        if (!TryParseEffDate(effDateEndStr, out var effDateEndUtc))
         {
             return PortResult.Fail("Mst_PromotionProgram_Save", "Check.EffDateEnd", header.EffDateEnd);
         }
@@ -470,7 +507,7 @@ public class Mst_PromotionProgramControllerPort : ControllerBase
                 EffDateStart = effDateStartUtc,
                 EffDateEnd = effDateEndUtc,
                 FlagAllDL = strFlagAllDL,
-                FlagActive = strFlagActive, // Luôn '1' do gate ép
+                FlagActive = strFlagActive,
                 Remark = strRemark,
                 LogLUDTimeUTC = now,
                 LogLUBy = "port"
