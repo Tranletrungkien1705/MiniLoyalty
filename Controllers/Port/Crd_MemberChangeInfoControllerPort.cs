@@ -243,6 +243,45 @@ public class Crd_MemberChangeInfoControllerPort : ControllerBase
     }
 
     /// <summary>
+    /// Đếm số lượng đề nghị mới (RequestStatus = "PENDING" trong vòng 1 tháng gần đây theo UTC) (#028).
+    /// Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Crd_MemberChangeInfoController.cs:147-211
+    /// API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\CrdMemberChangeInfoController.cs:23-93
+    /// Biz: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\Card.cs:28443-28557 (WAS_), 28282-28441 (Get), 27978-28280 (GetX)
+    /// </summary>
+    [HttpPost("getcountnewrequest")]
+    public async Task<IActionResult> GetCountNewRequest([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] object? body = null)
+    {
+        // 1. Mốc thời gian 1 tháng gần đây theo UTC: format "yyyy-MM-dd HH:mm:ss" (Gate :166)
+        var strFromDTimeUTC = DateTime.UtcNow.AddMonths(-1).ToString("yyyy-MM-dd HH:mm:ss");
+
+        // 2. Truy vấn kết hợp Crd_MemberChangeInfo và Crd_Member (Card.cs:28051-28066)
+        // Bảng draft #tbl_Crd_MemberChangeInfo_Filter_Draft thực hiện INNER JOIN Crd_Member trên MemberNo (Card.cs:28060-28062):
+        // Đề nghị có MemberNo không tồn tại trong Crd_Member sẽ bị loại bỏ.
+        // Lọc RequestStatus == "PENDING" (Gate :169, 1020) và CreateDTimeUTC >= strFromDTimeUTC (Gate :170, 995).
+        // Gate không nhận lọc ngoài từ client (Gate :147, 167-171).
+        var query = from cmci in _db.Set<Crd_MemberChangeInfo>()
+                    join cm in _db.CrdMembers on cmci.MemberNo equals cm.MemberNo
+                    where cmci.RequestStatus != null
+                          && cmci.RequestStatus.ToUpper() == "PENDING"
+                          && cmci.CreateDTimeUTC != null
+                          && string.Compare(cmci.CreateDTimeUTC, strFromDTimeUTC) >= 0
+                    select cmci.RequestNo;
+
+        // 3. Đếm số lượng: nCount = objRT_Crd_MemberChangeInfo.Lst_Crd_MemberChangeInfo.Count (Gate :188-192)
+        var nCount = await query.CountAsync();
+
+        // 4. Kết quả trả về JSON: objJsonResultEntry.Data = new { Count = nCount } (Gate :194-198)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Count = nCount
+            }
+        });
+    }
+
+    /// <summary>
     /// Chuyển đổi chuỗi thời gian UTC sang Local Time (+7 giờ VN) định dạng yyyy-MM-dd HH:mm:ss (Gate :105-125).
     /// </summary>
     private static string? ConvertUtcToLocal(string? utcStr)

@@ -199,6 +199,94 @@ public class Crd_MemberChangeInfoSeeder : IPortSeeder
             );
         }
 
+        // 3. Seed 5 bản ghi REQ05..REQ09 phục vụ GetCountNewRequest (#028)
+        if (!await db.Set<Crd_MemberChangeInfo>().AnyAsync(r => r.RequestNo == "REQ05"))
+        {
+            var now = DateTime.UtcNow;
+            db.Set<Crd_MemberChangeInfo>().AddRange(
+                new Crd_MemberChangeInfo
+                {
+                    RequestNo = "REQ05",
+                    MemberNo = "MB001", // tồn tại trong Crd_Member
+                    NetworkID = "1001",
+                    OrgID = "ORG01",
+                    DLCodeRequest = "VN040",
+                    RequestType = "CHANGE_INFO",
+                    RequestStatus = "PENDING",
+                    ApproveDLCode = "VN040",
+                    CreateDTimeUTC = now.AddDays(-5).ToString("yyyy-MM-dd HH:mm:ss"),
+                    FinishDTimeUTC = null,
+                    LogLUDTimeUTC = now.AddDays(-5).ToString("yyyy-MM-dd HH:mm:ss"),
+                    CreateBy = "seed",
+                    LUBy = "seed"
+                },
+                new Crd_MemberChangeInfo
+                {
+                    RequestNo = "REQ06",
+                    MemberNo = "MB002", // tồn tại trong Crd_Member
+                    NetworkID = "1001",
+                    OrgID = "ORG01",
+                    DLCodeRequest = "VN041",
+                    RequestType = "CHANGE_INFO",
+                    RequestStatus = "PENDING",
+                    ApproveDLCode = "VN041",
+                    CreateDTimeUTC = now.AddDays(-15).ToString("yyyy-MM-dd HH:mm:ss"),
+                    FinishDTimeUTC = null,
+                    LogLUDTimeUTC = now.AddDays(-15).ToString("yyyy-MM-dd HH:mm:ss"),
+                    CreateBy = "seed",
+                    LUBy = "seed"
+                },
+                new Crd_MemberChangeInfo
+                {
+                    RequestNo = "REQ07",
+                    MemberNo = "MB001",
+                    NetworkID = "1001",
+                    OrgID = "ORG01",
+                    DLCodeRequest = "VN040",
+                    RequestType = "CHANGE_INFO",
+                    RequestStatus = "APPROVE",
+                    ApproveDLCode = "VN040",
+                    CreateDTimeUTC = now.AddDays(-2).ToString("yyyy-MM-dd HH:mm:ss"),
+                    FinishDTimeUTC = null,
+                    LogLUDTimeUTC = now.AddDays(-2).ToString("yyyy-MM-dd HH:mm:ss"),
+                    CreateBy = "seed",
+                    LUBy = "seed"
+                },
+                new Crd_MemberChangeInfo
+                {
+                    RequestNo = "REQ08",
+                    MemberNo = "MB999", // MB999 không tồn tại trong Crd_Member -> INNER JOIN loại bỏ
+                    NetworkID = "1001",
+                    OrgID = "ORG01",
+                    DLCodeRequest = "VN040",
+                    RequestType = "CHANGE_INFO",
+                    RequestStatus = "PENDING",
+                    ApproveDLCode = "VN040",
+                    CreateDTimeUTC = now.AddDays(-1).ToString("yyyy-MM-dd HH:mm:ss"),
+                    FinishDTimeUTC = null,
+                    LogLUDTimeUTC = now.AddDays(-1).ToString("yyyy-MM-dd HH:mm:ss"),
+                    CreateBy = "seed",
+                    LUBy = "seed"
+                },
+                new Crd_MemberChangeInfo
+                {
+                    RequestNo = "REQ09",
+                    MemberNo = "MB001",
+                    NetworkID = "1001",
+                    OrgID = "ORG01",
+                    DLCodeRequest = "VN040",
+                    RequestType = "CHANGE_INFO",
+                    RequestStatus = "PENDING",
+                    ApproveDLCode = "VN040",
+                    CreateDTimeUTC = now.AddDays(-45).ToString("yyyy-MM-dd HH:mm:ss"),
+                    FinishDTimeUTC = null,
+                    LogLUDTimeUTC = now.AddDays(-45).ToString("yyyy-MM-dd HH:mm:ss"),
+                    CreateBy = "seed",
+                    LUBy = "seed"
+                }
+            );
+        }
+
         await db.SaveChangesAsync();
     }
 }
