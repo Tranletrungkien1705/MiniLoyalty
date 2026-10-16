@@ -274,10 +274,18 @@ public class Sys_UserUpdateReq
 }
 
 /// <summary>
-/// Controller Port 1:1 cho Sys_UserController — hạng mục #323 (Search), #324 (GetByUserCode), #325 (GetByMST), #327 (GetForCurrentUser), #328 (GetAllActive), #329 (Create), #330 (CreateCP), #331 (Update).
-/// Nguồn Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Sys_UserController.cs:498-561, 565-683, 685-837, 841-912
-/// Nguồn API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\SysUserController.cs:199-270, 421-492, 569-640
-/// Nguồn Biz LIVE: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\System.cs:8365-8478, 7987-8363 (Sys_User_Get_New20191104), 11222-11323 (WAS_Sys_User_Create), 9218-9391, 10160-10828 (Sys_User_CreateForNetworkX_New20200110), 12524-12617 (WAS_Sys_User_Update), 12243-12523 (Sys_User_Update_New20191226)
+/// DTO request cho action Delete (Gate Sys_UserController.cs:916-976, #332).
+/// </summary>
+public class Sys_UserDeleteReq
+{
+    public string? UserCode { get; set; }
+}
+
+/// <summary>
+/// Controller Port 1:1 cho Sys_UserController — hạng mục #323 (Search), #324 (GetByUserCode), #325 (GetByMST), #327 (GetForCurrentUser), #328 (GetAllActive), #329 (Create), #330 (CreateCP), #331 (Update), #332 (Delete).
+/// Nguồn Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Sys_UserController.cs:498-561, 565-683, 685-837, 841-912, 916-976
+/// Nguồn API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\SysUserController.cs:199-270, 421-492, 569-640, 643-714
+/// Nguồn Biz LIVE: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\System.cs:8365-8478, 7987-8363 (Sys_User_Get_New20191104), 11222-11323 (WAS_Sys_User_Create), 9218-9391, 10160-10828 (Sys_User_CreateForNetworkX_New20200110), 12524-12617 (WAS_Sys_User_Update), 12243-12523 (Sys_User_Update_New20191226), 13092-13171 (WAS_Sys_User_Delete), 12619-12732 (Sys_User_Delete)
 /// Route: api/sys_user
 /// </summary>
 [ApiController]
@@ -1345,6 +1353,103 @@ public class Sys_UserControllerPort : ControllerBase
         {
             await tx.RollbackAsync();
             return PortResult.Fail("Sys_User_Update", "Exception", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Port 1:1 Delete action từ gate Sys_UserController.cs:916-976 (#332).
+    /// Chuỗi gọi: gate Sys_UserController.Delete -> WA_Sys_User_Delete (SysUserController.cs:643-714)
+    ///            -> WAS_Sys_User_Delete (System.cs:13092-13171) -> Sys_User_Delete (System.cs:12619-12732).
+    ///
+    /// Quy trình nghiệp vụ:
+    ///   0. Kiểm tra UserCode rỗng: Gate Sys_UserController.cs:935, 962:
+    ///      Nếu UserCode rỗng/khoảng trắng hoặc body null -> ném ServiceException("invalid_usercode", "invalid_usercode") (chữ thường) -> trả về HTTP 400 ErridnLoyalty.invalid_usercode.
+    ///   1. Mở transaction: System.cs:12646 _cf.db.BeginTransaction(). Rẽ nhánh lỗi bắt buộc await tx.RollbackAsync(). Lỗi Exception bắt trả mã Sys_User_Delete.
+    ///   2. Chuẩn hoá: strUserCode = StdParam(req.UserCode) (Trim, ToUpper).
+    ///   3. Kiểm tra DB: Sys_User_CheckDB(strUserCode, TConst.Flag.Yes, "") (System.cs:12669-12675, 3809-3868):
+    ///      Yêu cầu tồn tại trong DB. Nếu không tìm thấy -> ném ErridnLoyalty.Sys_User_CheckDB_UserCodeNotFound (Check.UserCodeNotFound).
+    ///   4. Xóa bảng phụ Sys_UserInGroup_Delete_ByUser(strUserCode) (System.cs:12677-12679, 14110-14125):
+    ///      delete from Sys_UserInGroup where UserCode = @strUserCode.
+    ///   5. Xóa bản ghi Sys_User (System.cs:12687-12693):
+    ///      dtDB_Sys_User.Rows[0].Delete(); _cf.db.SaveData("Sys_User", dtDB_Sys_User).
+    ///   6. Commit transaction (System.cs:12698 TDALUtils.DBUtils.CommitSafety), trả về Success = true, Data = null (Gate :957-958).
+    /// </summary>
+    [HttpPost("delete")]
+    public async Task<IActionResult> Delete([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Sys_UserDeleteReq? req)
+    {
+        // 0. Kiểm tra UserCode rỗng: gate Sys_UserController.cs:935, 962
+        // if (!TUtils.CUtils.IsNullOrEmpty(UserCode)) ... else throw new ServiceException("invalid_usercode", "invalid_usercode")
+        if (req == null || string.IsNullOrEmpty(req.UserCode))
+        {
+            return PortResult.Fail("invalid_usercode", "Check.UserCode", req?.UserCode);
+        }
+
+        var err = await DeleteXAsync(req.UserCode);
+        if (err != null)
+        {
+            return err;
+        }
+
+        // Gate Sys_UserController.cs:957-958: SetSuccess(), Data = null
+        return Ok(new
+        {
+            Success = true,
+            Data = (object?)null
+        });
+    }
+
+    /// <summary>
+    /// Thực hiện nghiệp vụ xóa 1 bản ghi Sys_User trong 1 transaction riêng biệt.
+    /// Nguồn: biz Sys_User_Delete (System.cs:12619-12732).
+    /// </summary>
+    private async Task<IActionResult?> DeleteXAsync(string? rawUserCode)
+    {
+        // 1. Mở transaction (System.cs:12646 _cf.db.BeginTransaction())
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // 2. Chuẩn hoá UserCode theo CUtils.StdParam (System.cs:12664): Trim, ToUpper, rỗng -> null
+            var strUserCode = StdParam(rawUserCode);
+
+            // 3. Sys_User_CheckDB (System.cs:12669-12675, 3809-3868) với FlagExist = Yes
+            // Kiểm tra tồn tại trong DB bằng EF.Functions.Like((x.UserCode ?? "").ToLower(), PortQuery.Equal(strUserCode), PortQuery.Esc)
+            Sys_User? matchedUser = null;
+            if (!string.IsNullOrEmpty(strUserCode))
+            {
+                var userCodePattern = PortQuery.Equal(strUserCode);
+                matchedUser = await _db.Set<Sys_User>()
+                    .FirstOrDefaultAsync(x => EF.Functions.Like((x.UserCode ?? "").ToLower(), userCodePattern, PortQuery.Esc));
+            }
+
+            if (matchedUser == null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Sys_User_CheckDB_UserCodeNotFound", "Check.UserCodeNotFound", strUserCode ?? rawUserCode);
+            }
+
+            // 4. Xóa bảng phụ Sys_UserInGroup_Delete_ByUser(strUserCode) (System.cs:12677-12679, 14110-14125)
+            var userCodeMatchPattern = PortQuery.Equal(strUserCode!);
+            var usersInGroup = await _db.Set<Sys_UserInGroup>()
+                .Where(x => EF.Functions.Like((x.UserCode ?? "").ToLower(), userCodeMatchPattern, PortQuery.Esc))
+                .ToListAsync();
+            if (usersInGroup.Count > 0)
+            {
+                _db.Set<Sys_UserInGroup>().RemoveRange(usersInGroup);
+            }
+
+            // 5. Xóa bản ghi Sys_User (System.cs:12687-12693)
+            _db.Set<Sys_User>().Remove(matchedUser);
+            await _db.SaveChangesAsync();
+
+            // 6. Commit transaction (System.cs:12698)
+            await tx.CommitAsync();
+
+            return null;
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return PortResult.Fail("Sys_User_Delete", "Exception", ex.Message);
         }
     }
 
