@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc.Abstractions;
 using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.AspNetCore.Mvc.Formatters;
+using Microsoft.Extensions.Logging;
 
 namespace MiniLoyalty.Data;
 
@@ -59,6 +60,9 @@ public sealed class PortExceptionFilter : IExceptionFilter
         var cad = (ControllerActionDescriptor)context.ActionDescriptor;
         // Mã lỗi kiểu nguồn: "<Controller bỏ hậu tố Controller/Port>_<Action>", vd Mst_Department_Search.
         var ctrl = cad.ControllerTypeInfo.Name.Replace("ControllerPort", "").Replace("Controller", "");
+        // Luôn ghi nhật ký đầy đủ phía máy chủ (kể cả khi PORT_SANITIZE_ERRORS=1 che thông điệp trả client).
+        (context.HttpContext.RequestServices.GetService(typeof(Microsoft.Extensions.Logging.ILogger<PortExceptionFilter>)) as Microsoft.Extensions.Logging.ILogger)
+            ?.LogError(context.Exception, "Port action {Ctrl}.{Act} lỗi chưa bắt", ctrl, cad.ActionName);
         var res = PortResult.Fail($"{ctrl}_{cad.ActionName}", "Exception", context.Exception.Message);
         PortJson.Apply(res);   // result filter KHÔNG chạy khi exception filter xử lý ngoại lệ → tự áp PascalCase
         context.Result = res;
