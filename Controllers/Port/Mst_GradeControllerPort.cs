@@ -10,11 +10,13 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục trình độ chuyên môn (Mst_Grade) của dự án nguồn 2022.7.Loyalty (#162).
+// PORT 1:1 — màn danh mục trình độ chuyên môn (Mst_Grade) của dự án nguồn 2022.7.Loyalty (#162, #163 GetAllActive).
 //
 // Nguồn controller (tầng gate):
 //   Mst_GradeController.cs:25-105   Search -> WA_Mst_Grade_Get
+//   Mst_GradeController.cs:107-167  GetAllActive -> WA_Mst_Grade_Get (#163 GetAllActive)
 //   Mst_GradeController.cs:171-186  strWhereClause_Mst_Grade (mệnh đề lọc Search)
+//   Mst_GradeController.cs:188-199  strWhereClause_Mst_Grade_Active (mệnh đề lọc GetAllActive, toán tử '=' FlagActive "1")
 // Nguồn API:
 //   MstGradeController.cs:17-88     WA_Mst_Grade_Get
 // Nguồn biz:
@@ -26,23 +28,25 @@ namespace MiniLoyalty.Controllers.Port;
 //
 // GIỮ ĐÚNG NGUỒN:
 //   * Endpoint là POST (nguồn [AcceptVerbs("POST")]).
-//   * Lọc KeyWord: like '%kw%' trên GradeName (Mst_GradeController.cs:176-179). CHỈ tìm GradeName, KHÔNG tìm GradeCode, GradeDesc.
-//   * Lọc FlagActive: toán tử '=' nguyên giá trị StrValue (Mst_GradeController.cs:180-183), KHÔNG tách dấu phẩy, KHÔNG phải IN.
-//   * OrgID: gate nhận OrgID (:25, :55) nhưng hàm lọc strWhereClause_Mst_Grade (:171-186) KHÔNG dùng -> OrgID KHÔNG lọc gì.
+//   * Search lọc KeyWord: like '%kw%' trên GradeName (Mst_GradeController.cs:176-179). CHỈ tìm GradeName, KHÔNG tìm GradeCode, GradeDesc.
+//   * Lọc FlagActive: toán tử '=' nguyên giá trị StrValue (Search :180-183; GetAllActive :127-130, :195 cố định "1"), KHÔNG tách dấu phẩy, KHÔNG phải IN.
+//   * OrgID: gate nhận OrgID (:25, :55, :119) nhưng hàm lọc strWhereClause_Mst_Grade (:171-186) và strWhereClause_Mst_Grade_Active (:188-199) KHÔNG dùng -> OrgID KHÔNG lọc gì.
 //   * SQL không lọc NetworkID/OrgID.
-//   * Chuẩn hoá: gate KHÔNG gọi StdParam/StdStr/StdFlag cho KeyWord/FlagActive (:176-183) -> không Trim/ToUpper.
+//   * Chuẩn hoá: gate KHÔNG gọi StdParam/StdStr/StdFlag cho KeyWord/FlagActive (:176-183, :127-130) -> không Trim/ToUpper.
 //   * SQL Server không phân biệt hoa/thường -> dùng Like trên ToLower() kèm escape '\'.
-//   * Draft: select distinct identity(bigint,0,1) MyIdxSeq, mg.GradeCode từ Mst_Grade sắp xếp mg.GradeCode asc (MasterData.cs:35311-35320).
+//   * Draft: select distinct identity(bigint,0,1) MyIdxSeq, mg.GradeCode từ Mst_Grade sắp xếp mg.GradeCode asc (MasterData.cs:35311-35320, :35319).
 //   * MyCount: Count(0) của draft trước khi cắt trang (MasterData.cs:35323).
 //   * Cắt trang: MyIdxSeq >= start và MyIdxSeq <= end với end = start + count - 1 (MasterData.cs:35292, :35332-35333). RecordCount = 0 => trang rỗng.
 //   * Select cuối: inner join draft đã cắt trang với Mst_Grade theo GradeCode, sắp xếp theo t.MyIdxSeq asc (MasterData.cs:35352-35358).
 //   * Mỗi dòng trả đúng 8 cột: MyIdxSeq + 7 cột model. MyIdxSeq tính lại từ 0 sau khi lọc.
-//   * PageCount: CHỈ tính khi DataList KHÔNG rỗng (Mst_GradeController.cs:80-88). Khi DataList rỗng -> PageCount = 0.
-//   * DataList rỗng là mảng rỗng `[]`, KHÔNG null (Mst_GradeController.cs:50 new List<TModels.Mst_Grade>()).
+//   * PageCount (Search): CHỈ tính khi DataList KHÔNG rỗng (Mst_GradeController.cs:80-88). Khi DataList rỗng -> PageCount = 0.
+//   * DataList rỗng ở Search là mảng rỗng `[]`, KHÔNG null (Mst_GradeController.cs:50 new List<TModels.Mst_Grade>()).
+//   * Data ở GetAllActive (#163): danh sách trần (không bọc PageInfo), rỗng thì Data = null (Mst_GradeController.cs:126, :149-154).
 //   * PK = GradeCode (suy từ join, DDL chưa xác minh).
+//   * Tài khoản viết cứng tại Mst_GradeController.cs:135-136 — không chép giá trị.
 //
 // Bỏ qua có chủ đích (loại Đ):
-//   * CheckGatewayAuthentication / CheckAuthorize (gate Mst_GradeController.cs:34-35),
+//   * CheckGatewayAuthentication / CheckAuthorize (gate Mst_GradeController.cs:34-35, :116-117),
 //     Sys_User_CheckAuthentication (:35465-35469), Sys_Access_CheckDenyV30 (:35472-35476), drAbilityOfUser (:35296)
 //     đều bị COMMENT ở nguồn -> KHÔNG port (hệ thống đích chưa có hệ phân quyền).
 //   * Ghi RequestLog / ReturnLog (MasterData.cs:35455-35462, :35532-35539).
@@ -96,6 +100,33 @@ public class Mst_GradeControllerPort : ControllerBase
         {
             Success = true,
             Data = new PageInfo<object>(rows, itemCount, pageCount, pageIndex, pageSize)
+        });
+    }
+
+    // Hằng số tạm cho Ft_RecordStart / Ft_RecordCount (nguồn Mst_GradeController.cs:142-143, lớp cơ sở ngoài excerpt — giá trị tạm, cần Claude xác nhận).
+    private const long GetAllActiveRecordStart = 0;
+    private const long GetAllActiveRecordCount = 123456000;
+
+    /// <summary>
+    /// Port 1:1 <c>Mst_GradeController.GetAllActive</c> (nguồn gate Mst_GradeController.cs:107-167, #163 GetAllActive).
+    /// Lấy toàn bộ danh mục trình độ có FlagActive = "1" (danh sách trần, không nhận tham số lọc/phân trang từ request).
+    /// </summary>
+    [HttpPost("getallactive")]
+    public async Task<IActionResult> GetAllActive()
+    {
+        // 1. Lọc: FlagActive = "1" cố định với toán tử '=' (nguồn gate Mst_GradeController.cs:127-130, hàm lọc :195).
+        //    Không nhận từ request; KHÔNG có KeyWord; không lọc OrgID/NetworkID (gate :118-120 đọc header nhưng strWhereClause_Mst_Grade_Active :188-199 và SQL :35316-35318 không dùng).
+        //    Tài khoản viết cứng tại Mst_GradeController.cs:135-136 — không chép giá trị.
+        // 2. Tái sử dụng GetXAsync với recordStart = 0, recordCount = 123456000 (giá trị tạm cho Ft_RecordStart/Ft_RecordCount :142-143, cần Claude xác nhận).
+        // 3. Draft sắp xếp theo GradeCode asc, MyIdxSeq bắt đầu từ 0 (MasterData.cs:35313, :35319).
+        // 4. Data trả về danh sách trần (không bọc PageInfo, không ItemCount), mỗi dòng gồm đúng 8 trường (MyIdxSeq + 7 cột model).
+        // 5. Khi không có dòng nào (hoặc rỗng) -> Data = null (nguồn lst_Mst_Grade khởi tạo null :126, chỉ gán khi Count > 0 :149-152, :154).
+        var (_, rows) = await GetXAsync(null, "1", GetAllActiveRecordStart, GetAllActiveRecordCount);
+
+        return Ok(new
+        {
+            Success = true,
+            Data = rows.Count > 0 ? rows : null
         });
     }
 
