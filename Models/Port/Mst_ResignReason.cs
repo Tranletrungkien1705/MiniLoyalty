@@ -53,3 +53,22 @@ public class Mst_ResignReasonSeeder : IPortSeeder
         await db.SaveChangesAsync();
     }
 }
+
+/// <summary>
+/// Bảng sinh sequence cho ReasonID — port 1:1 bảng Seq_ReasonID (Seq.cs:118, SeqType.ReasonID; PK AutoId tự tăng).
+/// </summary>
+public class Seq_ReasonID
+{
+    public long AutoId { get; set; }
+    public string? Remark { get; set; }
+}
+
+public class Seq_ReasonIDConfig : IEntityTypeConfiguration<Seq_ReasonID>
+{
+    public void Configure(EntityTypeBuilder<Seq_ReasonID> b)
+    {
+        b.ToTable("Seq_ReasonID");
+        b.HasKey(x => x.AutoId);
+        b.Property(x => x.AutoId).ValueGeneratedOnAdd();
+    }
+}
