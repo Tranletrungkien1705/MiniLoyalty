@@ -10,11 +10,13 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục hình thức kỷ luật (Mst_Discipline) của dự án nguồn 2022.7.Loyalty (#132).
+// PORT 1:1 — màn danh mục hình thức kỷ luật (Mst_Discipline) của dự án nguồn 2022.7.Loyalty (#132, #133).
 //
 // Nguồn controller (tầng gate):
 //   Mst_DisciplineController.cs:26-106         Search -> WA_Mst_Discipline_Get (#132)
+//   Mst_DisciplineController.cs:108-171        GetByDisciplineCode -> WA_Mst_Discipline_Get (#133)
 //   Mst_DisciplineController.cs:523-538        strWhereClause_Mst_Discipline (mệnh đề lọc Search)
+//   Mst_DisciplineController.cs:540-555        strWhereClause_Mst_Discipline_By_DisciplineCode (mệnh đề lọc GetByDisciplineCode)
 // Nguồn API:
 //   MstDisciplineController.cs:17-88          WA_Mst_Discipline_Get
 // Nguồn biz:
@@ -32,10 +34,14 @@ namespace MiniLoyalty.Controllers.Port;
 //   * MyIdxSeq 0-based identity (MasterData.cs:34010).
 //   * PageSize = 0 -> DataList rỗng, PageCount = 0 (gate :81-89).
 //   * DDL: khong co DDL trong repo — PK = DisciplineCode (khoá draft), kieu cot can xac nhan.
+//   * GetByDisciplineCode: [HttpPost("getbydisciplinecode")], body { DisciplineCode } (gate :108-171).
+//     DisciplineCode rỗng -> Data null, không truy vấn (:128, :158). Ngược lại lọc DisciplineCode = (Like + PortQuery.Equal, :547).
+//     FlagActive không truyền (:130-133) nên hàng FlagActive '0' vẫn lấy.
+//     Ft_RecordStart = "0", Ft_RecordCount = "1" (:145-146). Trả Lst_Mst_Discipline[0] hoặc null (:152-155).
 //
 // Bỏ qua có chủ đích (loại Đ):
-//   - CheckGatewayAuthentication: gate :35, API :40-45
-//   - CheckAuthorize: gate :36 (hệ thống đích chưa có hệ phân quyền)
+//   - CheckGatewayAuthentication: gate :35, :117, API :40-45
+//   - CheckAuthorize: gate :36, :118 (hệ thống đích chưa có hệ phân quyền)
 //   - Ghi RequestLog/ReturnLog: MasterData.cs:34152-34159, 34229-34236
 //   - Sys_Access_CheckDenyV30, Sys_User_CheckAuthentication
 // ============================================================================================
@@ -48,6 +54,12 @@ public class MstDisciplineSearchReq
     public string? FlagActive { get; set; }          // Cờ hoạt động, toán tử '=' — :26, :57, :534
     public int Ft_PageIndex { get; set; } = 0;       // Trang (0-based) — :26, :47
     public int Ft_PageSize { get; set; } = 10;       // Số dòng/trang — :26, :48
+}
+
+/// <summary>Port 1:1 <c>GetByDisciplineCode</c> — body chỉ có DisciplineCode (Mst_DisciplineController.cs:108-171).</summary>
+public class MstDisciplineGetByDisciplineCodeReq
+{
+    public string? DisciplineCode { get; set; }       // Mã hình thức kỷ luật cần lấy — :108, :128-133
 }
 
 [ApiController]
@@ -81,11 +93,36 @@ public class Mst_DisciplineControllerPort : ControllerBase
         return Ok(new { Success = true, Data = new PageInfo<object>(rows, itemCount, pageCount, pageIndex, pageSize) });
     }
 
+    // ============================================================================================
+    // GetByDisciplineCode — nguồn Mst_DisciplineController.cs:108-171.
+    // Gate: nếu DisciplineCode rỗng thì KHÔNG truy vấn (:128), objMst_Discipline giữ null (:127) ⇒ Data = null (:158).
+    // Ngược lại gán DisciplineCode (:130-133) rồi gọi strWhereClause_Mst_Discipline_By_DisciplineCode (:540-555)
+    // (lọc `DisciplineCode = 'x'` — KHÔNG truyền FlagActive nên hàng FlagActive '0' VẪN lấy được).
+    // Ft_RecordStart = "0", Ft_RecordCount = "1" (:145-146) ⇒ lấy đúng 1 dòng, trả Lst_Mst_Discipline[0] (:152-155).
+    // ============================================================================================
+    [HttpPost("getbydisciplinecode")]
+    public async Task<IActionResult> GetByDisciplineCode([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] MstDisciplineGetByDisciplineCodeReq? req)
+    {
+        var disciplineCode = req?.DisciplineCode;
+
+        // DisciplineCode rỗng ⇒ nguồn không truy vấn (:128) và trả Data = null (:158).
+        if (string.IsNullOrWhiteSpace(disciplineCode))
+        {
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+
+        // Lấy 1 dòng theo DisciplineCode (Ft_RecordStart = "0", Ft_RecordCount = "1" — :145-146).
+        var (_, rows) = await GetXAsync(null, null, 0, 1, disciplineCodeEqual: disciplineCode);
+
+        // Nguồn trả Lst_Mst_Discipline[0] khi có dòng, ngược lại null (:152-155).
+        return Ok(new { Success = true, Data = rows.Count > 0 ? rows[0] : null });
+    }
+
     /// <summary>
-    /// Lọc + đếm + chia trang theo DisciplineCode asc — dùng cho Search.
+    /// Lọc + đếm + chia trang theo DisciplineCode asc — dùng cho Search, GetByDisciplineCode.
     /// Trả (itemCount, rows): itemCount = tổng số dòng sau lọc (MyCount, SQL :34020); rows = trang đã cắt kèm MyIdxSeq 0-based (:34050).
     /// </summary>
-    private async Task<(int itemCount, List<object> rows)> GetXAsync(string? keyWord, string? flagActive, long recordStart, long recordCount)
+    private async Task<(int itemCount, List<object> rows)> GetXAsync(string? keyWord, string? flagActive, long recordStart, long recordCount, string? disciplineCodeEqual = null)
     {
         var q = _db.Set<Mst_Discipline>().AsNoTracking().AsQueryable();
 
@@ -95,6 +132,15 @@ public class Mst_DisciplineControllerPort : ControllerBase
         {
             var kw = PortQuery.Contains(keyWord);
             q = q.Where(x => EF.Functions.Like((x.DisciplineName ?? "").ToLower(), kw, PortQuery.Esc));
+        }
+
+        // DisciplineCode -> `DisciplineCode = 'x'` (Mst_DisciplineController.cs:547 — strWhereClause_Mst_Discipline_By_DisciplineCode).
+        // Nguồn dùng `=` trên SQL Server collation KHÔNG phân biệt hoa/thường ⇒ Like KHÔNG wildcard, hạ chữ 2 phía (PortQuery.Equal).
+        // FlagActive không được truyền ở GetByDisciplineCode (:130-133) nên hàng FlagActive '0' vẫn lấy được.
+        if (!string.IsNullOrWhiteSpace(disciplineCodeEqual))
+        {
+            var dc = PortQuery.Equal(disciplineCodeEqual);
+            q = q.Where(x => EF.Functions.Like((x.DisciplineCode ?? "").ToLower(), dc, PortQuery.Esc));
         }
 
         // FlagActive -> toán tử '=' trên FlagActive (Mst_DisciplineController.cs:534) — KHÔNG IN.
