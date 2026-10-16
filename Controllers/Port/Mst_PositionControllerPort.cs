@@ -11,12 +11,13 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — port 1:1 Mst_PositionController.cs — Mst_Position (#197, #198).
+// PORT 1:1 — port 1:1 Mst_PositionController.cs — Mst_Position (#197, #198, #199).
 //
 // Nguồn controller (tầng gate):
 //   - Mst_PositionController.cs:26-106   Search -> WA_Mst_Position_Get (#197)
 //   - Mst_PositionController.cs:108-171  GetByPositionCode -> WA_Mst_Position_Get (#198)
-//   - Mst_PositionController.cs:624-652  strWhereClause_Mst_Position (mệnh đề lọc Search)
+//   - Mst_PositionController.cs:173-234  GetAllActive -> WA_Mst_Position_Get (#199)
+//   - Mst_PositionController.cs:624-652  strWhereClause_Mst_Position (mệnh đề lọc Search & GetAllActive)
 //   - Mst_PositionController.cs:654-673  strWhereClause_Mst_Position_By_PositionCode (mệnh đề lọc GetByPositionCode)
 // Nguồn API:
 //   - MstPositionController.cs:17-88     WA_Mst_Position_Get -> _biz.WAS_Mst_Position_Get
@@ -80,6 +81,15 @@ public class MstPositionGetByPositionCodeReq
 {
     public string? PositionCode { get; set; }
     public string? OrgID { get; set; }   // nguồn lấy từ session (orgUserUI.OrgId, gate :143) -> nhận tuỳ chọn trong body (LESSONS A.14); không truyền = không lọc
+}
+
+/// <summary>
+/// Port 1:1 tham số đầu vào của GetAllActive (Mst_PositionController.cs:173).
+/// Nguồn lấy OrgID từ session/header (orgUserUI.OrgId, gate :185, :195, :207) -> nhận tuỳ chọn trong body (LESSONS A.14); không truyền = không lọc.
+/// </summary>
+public class MstPositionGetAllActiveReq
+{
+    public string? OrgID { get; set; }
 }
 
 /// <summary>
@@ -157,6 +167,22 @@ public class Mst_PositionControllerPort : ControllerBase
 
         // Trả về 1 object duy nhất nếu tìm thấy, ngược lại null (gate Mst_PositionController.cs:152-158)
         return Ok(new { Success = true, Data = rows.Count > 0 ? rows[0] : null });
+    }
+
+    /// <summary>
+    /// Port 1:1 action GetAllActive từ gate Mst_PositionController.cs:173-234.
+    /// Lọc FlagActive = "1" (toán tử IN tách dấu phẩy, :641-649), OrgID tuỳ chọn từ body (nguồn lấy từ session/header :185, :195).
+    /// Ft_RecordStart = 0, Ft_RecordCount = int.MaxValue. Sắp xếp OrgID asc, PositionCode asc (MasterData.cs:23124-23126).
+    /// Trả danh sách trần (List&lt;Mst_PositionSearchResultItem&gt;), nếu không có dữ liệu trả Data = null (gate :192, :216-221).
+    /// </summary>
+    [HttpPost("getallactive")]
+    public async Task<IActionResult> GetAllActive([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] MstPositionGetAllActiveReq? req)
+    {
+        // Gọi GetXAsync với KeyWord = null, OrgID từ body (hoặc null nếu không truyền), FlagActive = "1", RecordStart = 0, RecordCount = int.MaxValue (gate Mst_PositionController.cs:192-215, MasterData.cs:23056-23224)
+        var (_, rows) = await GetXAsync(null, req?.OrgID, "1", 0, int.MaxValue, null);
+
+        // Trả về danh sách trần trong Data, rỗng trả về null (gate Mst_PositionController.cs:192, :216-221)
+        return Ok(new { Success = true, Data = rows.Count > 0 ? rows : null });
     }
 
     /// <summary>
