@@ -612,6 +612,76 @@ public class Mst_ResignReasonControllerPort : ControllerBase
     }
 
     /// <summary>
+    /// Port 1:1 Mst_ResignReasonController.ExportTemplate (gate Mst_ResignReasonController.cs:709-741).
+    /// - Không kiểm quyền ở nguồn (không có CheckGatewayAuthentication và không có CheckAuthorize).
+    /// - Không gọi tầng service, không truy vấn CSDL.
+    /// - Khởi tạo danh sách rỗng kiểu Mst_Department (:717) (lỗi copy-paste từ Mst_Department của dev nguồn, giữ nguyên).
+    /// - Lấy từ điển cột mẫu từ GetImportDicColumsTemplate (:719, :745-755) gồm 5 cột:
+    ///   ReasonID ("Mã lý do (*)"), ResignReason ("Lý do nghỉ việc (*)"), mnnt_NNTFullName ("Tổ chức"), ReasonDesc ("Mô tả"), FlagActive ("Trạng thái").
+    /// - Sinh đường dẫn file mẫu qua PortExcel.GenExcelExportFilePath(webRoot, "Mst_ResignReason") (:721).
+    /// - Xuất file Excel qua PortExcel.ExportToExcelFromList(list, dicColNames, physicalPath, "Mst_ResignReason") (:722).
+    /// - Trả về Success = true, Data = { Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath } (:723-727).
+    /// - Không có nhánh kiểm tra dữ liệu rỗng (khác với Export).
+    /// </summary>
+    [HttpPost("exporttemplate")]
+    public IActionResult ExportTemplate()
+    {
+        // Khởi tạo danh sách rỗng kiểu Mst_Department (gate Mst_ResignReasonController.cs:717)
+        var list = new List<Mst_ResignReason>();   // gate :709-: danh sách rỗng, chỉ xuất dòng tiêu đề
+
+        // Lấy từ điển 5 cột mẫu (gate Mst_ResignReasonController.cs:719, :745-755)
+        var dicColNames = GetImportDicColumsTemplate();
+
+        // Xác định thư mục webRoot và sinh đường dẫn file (gate Mst_ResignReasonController.cs:721)
+        var webRoot = _env.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = Path.Combine(_env.ContentRootPath, "wwwroot");
+        }
+
+        string virtualPath;
+        try
+        {
+            string physicalPath;
+            (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Mst_ResignReason");
+
+            // Ghi danh sách rỗng ra file Excel với tên sheet Mst_ResignReason (gate Mst_ResignReasonController.cs:722)
+            PortExcel.ExportToExcelFromList(list, dicColNames, physicalPath, "Mst_ResignReason");
+        }
+        catch (Exception ex)
+        {
+            // Bắt ngoại lệ và trả Fail (gate Mst_ResignReasonController.cs:730-734)
+            return PortResult.Fail("Mst_ResignReason_ExportTemplate", "Exception", ex.Message);
+        }
+
+        // Trả URL tải file với Success = true (gate Mst_ResignReasonController.cs:723-727)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+            }
+        });
+    }
+
+    /// <summary>
+    /// Từ điển cột mẫu import/export template: nguồn Mst_ResignReasonController.cs:719 gọi GetImportDicColumsTemplate(),
+    /// theo đề bài và định nghĩa tại :745-755 gồm 5 cột:
+    /// ReasonID ("Mã lý do (*)"), ResignReason ("Lý do nghỉ việc (*)"), mnnt_NNTFullName ("Tổ chức"), ReasonDesc ("Mô tả"), FlagActive ("Trạng thái").
+    /// </summary>
+    private static Dictionary<string, string> GetImportDicColumsTemplate()
+    {
+        // Mst_ResignReasonController.cs:757-767: ResignReason, OrgID, ReasonDesc (ReasonID/mnnt_NNTFullName bị comment) — cùng cột với file Import
+        return new Dictionary<string, string>
+        {
+            { "ResignReason", "Lý do nghỉ việc (*)" },
+            { "OrgID", "Mã tổ chức" },
+            { "ReasonDesc", "Mô tả" }
+        };
+    }
+
+    /// <summary>
     /// Từ điển cột xuất Excel: dùng GetImportDicColums() (gate Mst_ResignReasonController.cs:679, :745-755) — dùng từ điển Import cho Export là của nguồn.
     /// Giữ đúng thứ tự 5 cột từ nguồn:
     /// ReasonID ("Mã lý do (*)"), ResignReason ("Lý do nghỉ việc (*)"), mnnt_NNTFullName ("Tổ chức"), ReasonDesc ("Mô tả"), FlagActive ("Trạng thái").
