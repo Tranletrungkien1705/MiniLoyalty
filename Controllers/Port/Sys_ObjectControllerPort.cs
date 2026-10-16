@@ -11,13 +11,14 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn Sys_ObjectController.GetAllMenuActive (#317), GetAllMenuButtonActive (#318), GetFunctionActive (#319), GetFunctionByObjectCode (#320) & GetAllFunctionBy_ObjectCode (#321)
+// PORT 1:1 — màn Sys_ObjectController.GetAllMenuActive (#317), GetAllMenuButtonActive (#318), GetFunctionActive (#319), GetFunctionByObjectCode (#320), GetAllFunctionBy_ObjectCode (#321) & Get (#322)
 // Nguồn:
 //   Sys_ObjectController.cs:29-98 (GetAllMenuActive)
 //   Sys_ObjectController.cs:101-172 (GetAllMenuButtonActive)
 //   Sys_ObjectController.cs:175-243 (GetFunctionActive)
 //   Sys_ObjectController.cs:246-302 (GetFunctionByObjectCode)
 //   Sys_ObjectController.cs:305-406 (GetAllFunctionBy_ObjectCode)
+//   Sys_ObjectController.cs:408-515 (Get)
 //   SysObjectController.cs:20-91 (WA_Sys_Object_Get)
 //   System.cs:15325-15424 (WAS_Sys_Object_Get)
 //   System.cs:14892-15098 (Sys_Object_Get)
@@ -213,6 +214,21 @@ public class Sys_ObjectControllerPort : ControllerBase
     }
 
     /// <summary>
+    /// Port 1:1 <c>Sys_ObjectController.Get</c> (#322, gate :408-515).
+    /// Lấy danh sách Sys_Object với điều kiện lọc mặc định <c>FlagActive = "1"</c> (Sys_ObjectController.cs:435)
+    /// và hỗ trợ nhận tham số lọc <c>ObjectCode</c> qua body nếu được truyền vào (strWhereClause_Sys_Object, gate :582-593).
+    /// Trả về <c>JsonResultEntry&lt;object&gt;</c> tiêu chuẩn với <c>Success = true</c> và <c>Data</c> chứa danh sách hoặc <c>null</c> nếu rỗng.
+    /// </summary>
+        // Port 1:1 Sys_ObjectController.Get (#322, gate :408-504): KHÔNG nhận tham số. Gate gọi strWhereClause_Sys_Object({OrgID = session, FlagActive = "1"}) nhưng hàm lọc (:582-593)
+    // CHỈ xét ObjectCode (không được gán) -> where rỗng: trả TẤT CẢ Sys_Object (kể cả FlagActive = "0"), sắp theo ObjectCode asc (System.cs:14964). Rỗng -> null (:455-457).
+    [HttpPost("get")]
+    public async Task<IActionResult> Get()
+    {
+        var rows = await _db.Set<Sys_Object>().AsNoTracking().OrderBy(x => x.ObjectCode).ToListAsync();
+        return Ok(new { Success = true, Data = rows.Count > 0 ? rows : null });
+    }
+
+    /// <summary>
     /// BaseController.cs:654-669 GetSysObjectSetting: đọc <c>~/App_Data/SysObjectSetting.config</c> (DataContract XML: SysObjectSetting/List/SysObjectFunction{ObjectCode, FunctionCodes/string});
     /// không có tệp -> null. Tệp mẫu của nguồn được đặt tại App_Data/SysObjectSetting.config của dự án.
     /// </summary>
@@ -245,6 +261,11 @@ public class Sys_Object_GetFunctionByObjectCodeReq
 }
 
 public class Sys_Object_GetAllFunctionBy_ObjectCodeReq
+{
+    public string? ObjectCode { get; set; }
+}
+
+public class Sys_Object_GetReq
 {
     public string? ObjectCode { get; set; }
 }
