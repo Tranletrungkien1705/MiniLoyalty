@@ -10,11 +10,13 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục dân tộc (Mst_EthnicCategory) của dự án nguồn 2022.7.Loyalty (#149).
+// PORT 1:1 — màn danh mục dân tộc (Mst_EthnicCategory) của dự án nguồn 2022.7.Loyalty (#149, #150).
 //
 // Nguồn controller (tầng gate):
 //   Mst_EthnicCategoryController.cs:25-105     Search -> WA_Mst_EthnicCategory_Get (#149)
+//   Mst_EthnicCategoryController.cs:107-167    GetAllActive -> WA_Mst_EthnicCategory_Get (#150)
 //   Mst_EthnicCategoryController.cs:171-186    strWhereClause_Mst_EthnicCategory (mệnh đề lọc Search)
+//   Mst_EthnicCategoryController.cs:188-199    strWhereClause_Mst_EthnicCategory_Active (mệnh đề lọc GetAllActive)
 // Nguồn API:
 //   MstEthnicCategoryController.cs:17-88      WA_Mst_EthnicCategory_Get
 // Nguồn biz:
@@ -25,17 +27,21 @@ namespace MiniLoyalty.Controllers.Port;
 // GIỮ ĐÚNG NGUỒN:
 //   * Endpoint là POST (nguồn [AcceptVerbs("POST")]).
 //   * Lọc KeyWord: like '%kw%' trên EthnicName (Mst_EthnicCategoryController.cs:178).
-//   * Lọc FlagActive: toán tử '=' (Mst_EthnicCategoryController.cs:182) — KHÔNG IN.
+//   * Lọc FlagActive: toán tử '=' (Mst_EthnicCategoryController.cs:182, :195) — KHÔNG IN.
 //     Không tách dấu phẩy; "0,1" -> so sánh bằng chuỗi "0,1" -> 0 dòng.
-//   * OrgID truyền vào (:25, :55) nhưng strWhereClause_Mst_EthnicCategory (:171-186) KHÔNG dùng OrgID -> không lọc.
+//   * OrgID truyền vào (:25, :55, :119, :140) nhưng strWhereClause_Mst_EthnicCategory (:171-186)
+//     và strWhereClause_Mst_EthnicCategory_Active (:188-199) KHÔNG dùng OrgID -> không lọc.
 //   * Chia trang theo mec.EthnicCode asc (MasterData.cs:41583), select cuối sắp theo t.MyIdxSeq asc (MasterData.cs:41622).
 //   * MyIdxSeq 0-based identity (MasterData.cs:41577).
 //   * PageSize = 0 -> DataList rỗng, PageCount = 0 (gate :80-90).
+//   * GetAllActive: [HttpPost("getallactive")], không body, Ft_RecordStart = "0", Ft_RecordCount = "123456000" (gate :142-143).
+//     FlagActive = "1" (toán tử '=', gate :127-130, :195); KHÔNG có OrgID trong hàm lọc (:188-199).
+//     Trả Data là mảng trần list Mst_EthnicCategory (null nếu rỗng) (gate :126, :149-154).
 //   * DDL: khong co DDL trong repo — PK = EthnicCode (khoá draft), kieu cot can xac nhan.
 //
 // Bỏ qua có chủ đích (loại Đ):
-//   - CheckGatewayAuthentication: gate :34, API :40-45
-//   - CheckAuthorize: gate :35 (hệ thống đích chưa có hệ phân quyền)
+//   - CheckGatewayAuthentication: gate :34, :116, API :40-45
+//   - CheckAuthorize: gate :35, :117 (hệ thống đích chưa có hệ phân quyền)
 //   - Ghi RequestLog/ReturnLog: MasterData.cs:41719-41726, 41796-41803
 //   - Sys_Access_CheckDenyV30, Sys_User_CheckAuthentication
 // ============================================================================================
@@ -82,7 +88,26 @@ public class Mst_EthnicCategoryControllerPort : ControllerBase
     }
 
     /// <summary>
-    /// Lọc + đếm + chia trang theo EthnicCode asc — dùng cho Search.
+    /// Port 1:1 <c>Mst_EthnicCategoryController.GetAllActive</c> (nguồn gate Mst_EthnicCategoryController.cs:107-167, #150).
+    /// Nguồn gọi <c>strWhereClause_Mst_EthnicCategory_Active</c> với <c>FlagActive = "1"</c> (:127-130) ⇒ lọc
+    /// <c>FlagActive = '1'</c> (toán tử '=' tại :195, KHÔNG IN). Hàm lọc KHÔNG có OrgID (:188-199).
+    /// Không body: RecordStart = "0", RecordCount = "123456000" (nguồn Ft_RecordStart/Ft_RecordCount :142-143).
+    /// Trả <c>Ok(new { Success = true, Data = ... })</c> — Data là MẢNG TRẦN, rỗng thì <c>null</c>
+    /// (nguồn :126 khởi tạo null, :149-152 chỉ gán khi có dòng, :154 gán Data = lst_Mst_EthnicCategory).
+    /// </summary>
+    [HttpPost("getallactive")]
+    public async Task<IActionResult> GetAllActive()
+    {
+        // Nguồn: Ft_RecordStart = "0", Ft_RecordCount = "123456000" (gate :142-143).
+        // FlagActive = "1" (gate :127-130) ⇒ lọc toán tử '=' (gate :195); không lọc OrgID (:188-199); không body.
+        var (_, rows) = await GetXAsync(null, "1", 0, 123456000);
+
+        // Nguồn :154: Data = lst_Mst_EthnicCategory (mảng trần); rỗng ⇒ null (gate :126, :149-152).
+        return Ok(new { Success = true, Data = rows.Count > 0 ? rows : null });
+    }
+
+    /// <summary>
+    /// Lọc + đếm + chia trang theo EthnicCode asc — dùng cho Search và GetAllActive.
     /// Trả (itemCount, rows): itemCount = tổng số dòng sau lọc (MyCount, SQL :41587); rows = trang đã cắt kèm MyIdxSeq 0-based (:41617).
     /// </summary>
     private async Task<(int itemCount, List<object> rows)> GetXAsync(string? keyWord, string? flagActive, long recordStart, long recordCount)

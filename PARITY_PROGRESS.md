@@ -4,7 +4,7 @@ Nguồn mẫu số: `D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.Web
 
 **Mẫu số (N)**: 337
 
-**Tiến độ hiện tại**: 112/337 (33.23%)
+**Tiến độ hiện tại**: 116/337 (34.42%)
 
 Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã có` (đã port từ trước, có bằng chứng) · `Bỏ` (scaffold/không nghiệp vụ, ghi lý do) · `Cần xem tay`.
 
@@ -139,7 +139,7 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 127 | Mst_DepartmentController/Delete | Đã làm | d565dda |
 | 128 | Mst_DepartmentController/DeleteMultiple | Đã làm | 9de58bd |
 | 129 | Mst_DepartmentController/Import | Đã làm | e3c84ce |
-| 130 | Mst_DepartmentController/Export | Chưa làm | - |
+| 130 | Mst_DepartmentController/Export | Đã làm | 2d13be5 |
 | 131 | Mst_DepartmentController/ExportTemplate | Chưa làm | - |
 | 132 | Mst_DisciplineController/Search | Đã làm | 408c2b7 |
 | 133 | Mst_DisciplineController/GetByDisciplineCode | Đã làm | 70bd1db |
@@ -159,13 +159,13 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 147 | Mst_DistrictController/Export | Đã làm | e6b27ff |
 | 148 | Mst_DistrictController/ExportTemplate | Đã làm | 733b31b |
 | 149 | Mst_EthnicCategoryController/Search | Đã làm | 5b9504a |
-| 150 | Mst_EthnicCategoryController/GetAllActive | Chưa làm | - |
+| 150 | Mst_EthnicCategoryController/GetAllActive | Đã làm | cae436a |
 | 151 | Mst_ExpenseTypeController/GetAllActive | Đã làm | aecf24a |
 | 152 | Mst_FamilyStatusController/Search | Đã làm | b759701 |
-| 153 | Mst_FamilyStatusController/GetAllActive | Chưa làm | - |
+| 153 | Mst_FamilyStatusController/GetAllActive | Đã làm | b22f364 |
 | 154 | Mst_GenderController/Search | Chưa làm | - |
 | 155 | Mst_GenderController/GetAllActive | Chưa làm | - |
-| 156 | Mst_GovIDTypeController/Search | Chưa làm | - |
+| 156 | Mst_GovIDTypeController/Search | Đã làm | 0cab8a8 |
 | 157 | Mst_GovIDTypeController/GetByGovIDType | Chưa làm | - |
 | 158 | Mst_GovIDTypeController/GetAllActive | Chưa làm | - |
 | 159 | Mst_GovIDTypeController/Create | Chưa làm | - |

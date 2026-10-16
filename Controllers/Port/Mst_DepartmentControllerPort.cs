@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
@@ -14,7 +15,7 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục phòng ban (Mst_Department) của dự án nguồn 2022.7.Loyalty (#122, #123, #124, #125, #126, #127, #128, #129).
+// PORT 1:1 — màn danh mục phòng ban (Mst_Department) của dự án nguồn 2022.7.Loyalty (#122, #123, #124, #125, #126, #127, #128, #129, #130).
 //
 // Nguồn controller (tầng gate):
 //   Mst_DepartmentController.cs:30-109   Search -> WA_Mst_Department_Get (#122)
@@ -25,8 +26,10 @@ namespace MiniLoyalty.Controllers.Port;
 //   Mst_DepartmentController.cs:446-515  Delete -> WA_Mst_Department_Delete (#127)
 //   Mst_DepartmentController.cs:516-580  DeleteMultiple -> WA_Mst_Department_Delete (#128)
 //   Mst_DepartmentController.cs:584-730  Import -> WA_Mst_Department_Create (#129)
+//   Mst_DepartmentController.cs:735-812  Export -> WA_Mst_Department_Get (#130)
+//   Mst_DepartmentController.cs:851-862  GetImportDicColums (dùng cho Export)
 //   Mst_DepartmentController.cs:864-873  GetImportDicColumsTemplate
-//   Mst_DepartmentController.cs:877-905  strWhereClause_Mst_Department (mệnh đề lọc Search, GetAllActive)
+//   Mst_DepartmentController.cs:877-905  strWhereClause_Mst_Department (mệnh đề lọc Search, GetAllActive, Export)
 //   Mst_DepartmentController.cs:907-926  strWhereClause_Mst_Department_By_DepartmentCode (mệnh đề lọc GetByDepartmentCode)
 // Nguồn API:
 //   MstDepartmentController.cs:20-89     WA_Mst_Department_Get
@@ -210,6 +213,17 @@ public class MstDepartmentDeleteReq
     public string? OrgID { get; set; }
 }
 
+/// <summary>
+/// Body của Export: { OrgID, KeyWord, FlagActive }
+/// Nguồn gate Mst_DepartmentController.cs:735 (#130).
+/// </summary>
+public class MstDepartmentExportReq
+{
+    public string? OrgID { get; set; }
+    public string? KeyWord { get; set; }
+    public string? FlagActive { get; set; }
+}
+
 [ApiController]
 [Route("api/mst_department")]
 [Produces("application/json")]
@@ -217,11 +231,13 @@ public class Mst_DepartmentControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly IConfiguration _config;
+    private readonly IWebHostEnvironment _env;
 
-    public Mst_DepartmentControllerPort(AppDbContext db, IConfiguration config)
+    public Mst_DepartmentControllerPort(AppDbContext db, IConfiguration config, IWebHostEnvironment env)
     {
         _db = db;
         _config = config;
+        _env = env;
     }
 
     [HttpPost("search")]
@@ -876,10 +892,12 @@ public class Mst_DepartmentControllerPort : ControllerBase
 
                 await tx.CommitAsync();
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                // Nguồn (gate :719-723) bắt MỌI ngoại lệ và trả Success=false; không để văng ra thành HTTP 500.
+                // Các dòng trước dòng này đã commit (import một phần) — giữ đúng hành vi nguồn. Cùng mẫu với Create.
                 await tx.RollbackAsync();
-                throw;
+                return PortResult.Fail("Mst_Department_Import", "Exception", ex.Message);
             }
         }
 
@@ -889,6 +907,115 @@ public class Mst_DepartmentControllerPort : ControllerBase
             Success = true,
             Data = (object?)null
         });
+    }
+
+    /// <summary>
+    /// Port 1:1 Export action từ gate Mst_DepartmentController.cs:735-812 (#130).
+    /// Chuỗi gọi: gate Mst_DepartmentController.cs:735-812 (Export)
+    ///   -> Mst_DepartmentService.Instance.WA_Mst_Department_Get (:781)
+    ///   -> API MstDepartmentController.cs:20-89 (WA_Mst_Department_Get)
+    ///   -> biz WAS_Mst_Department_Get (Master.cs:29450-29548)
+    ///   -> biz Mst_Department_Get (Master.cs:29549-29701, luôn Rollback :29664, KHÔNG ghi DB)
+    ///   -> biz Mst_Department_GetX (Master.cs:30396-30568): sắp xếp order by md.DepartmentCode asc (:30457), select cuối order by t.MyIdxSeq asc (:30514).
+    ///
+    /// Tham số từ body { OrgID, KeyWord, FlagActive } (EmptyBodyBehavior.Allow, gate :735).
+    /// strWhereClause_Mst_Department (:756-761, :877-905):
+    ///   - KeyWord -> like '%kw%' trên DepartmentName (:882-885).
+    ///   - OrgID -> OrgID = 'x' (:886-889) — CÓ lọc, OrgID lọc theo tham số client.
+    ///   - FlagActive -> IN ('a','b') (:894-902): tách dấu phẩy (FlagActive IN).
+    /// Ft_RecordStart = "0" (:774), Ft_RecordCount = "123456000" (:775), Rt_Cols_Mst_Department = "*" (:778).
+    ///
+    /// Từ điển cột xuất Excel: dùng từ điển Import cho Export là của nguồn (gate :786, :851-862, GetImportDicColums) — đúng 4 cột theo thứ tự:
+    ///   1. DepartmentName: "Tên phòng ban (*)"
+    ///   2. DepartmentCodeParent: "Phòng ban cấp trên"
+    ///   3. DepartmentDesc: "Mô tả"
+    ///   4. FlagActive: "Trạng thái"
+    /// File: GenExcelExportFilePath("Mst_Department") (:788), sheet "Mst_Department" (:789).
+    /// Danh sách rỗng (rows null hoặc Count == 0, :782) -> throw ServiceException("Không có dữ liệu") (:798)
+    ///   -> catch trả về 400 ErridnLoyalty.Mst_Department_Export với Params Message = "Không có dữ liệu" (:801-805).
+    /// Thành công: trả Ok({ Success = true, Data = { Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath } }) (:790-793).
+    /// KHÔNG transaction, KHÔNG ghi DB (chỉ đọc).
+    ///
+    /// Bỏ qua có chủ đích (loại Đ):
+    /// - CheckGatewayAuthentication / CheckAuthorize: gate :745-746, biz :29606-29634 (đích chưa có phân quyền).
+    /// - Cột md_DepartmentNameParent, ss_QtyStaff có trong list nguồn nhưng không nằm trong từ điển -> không lên file.
+    /// - Cột "Phòng ban cấp trên" ghi giá trị property DepartmentCodeParent (mã, không phải tên) — suy từ key của từ điển (DLL nguồn không có mã).
+    /// </summary>
+    [HttpPost("export")]
+    public async Task<IActionResult> Export([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] MstDepartmentExportReq? req)
+    {
+        req ??= new MstDepartmentExportReq();
+
+        // Gọi GetXAsync(keyWord, orgIdEqual, flagActiveCsv, recordStart, recordCount):
+        // KeyWord lọc trên DepartmentName (like %kw%), OrgID lọc theo tham số client (=), FlagActive IN tách dấu phẩy.
+        // RecordStart = 0, RecordCount = 123456000 (gate Mst_DepartmentController.cs:774-775).
+        var (_, rows) = await GetXAsync(
+            keyWord: req.KeyWord,
+            orgIdEqual: req.OrgID,
+            flagActiveCsv: req.FlagActive,
+            recordStart: 0,
+            recordCount: 123456000);
+
+        // Nguồn Mst_DepartmentController.cs:782, 796-798: nếu danh sách null hoặc Count == 0 -> throw ServiceException("Không có dữ liệu")
+        if (rows == null || rows.Count == 0)
+        {
+            return PortResult.Fail("Mst_Department_Export", "Message", "Không có dữ liệu");
+        }
+
+        // Tạo thư mục và đường dẫn file Excel xuất: GenExcelExportFilePath(prefix) (gate :788)
+        var webRoot = _env.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = Path.Combine(_env.ContentRootPath, "wwwroot");
+        }
+
+        // Dùng từ điển GetImportDicColums() (gate :786, :851-862) — dùng từ điển Import cho Export là của nguồn
+        var dicColNames = GetImportDicColums();
+        string virtualPath;
+        try
+        {
+            string physicalPath;
+            (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Mst_Department");
+
+            // Ghi danh sách ra file Excel với tên sheet "Mst_Department" (gate :789)
+            PortExcel.ExportToExcelFromList(rows, dicColNames, physicalPath, "Mst_Department");
+        }
+        catch (Exception ex)
+        {
+            // Nguồn (gate :801-805) bắt mọi ngoại lệ (kể cả lỗi ghi file) và trả Success=false, không để thành HTTP 500.
+            return PortResult.Fail("Mst_Department_Export", "Exception", ex.Message);
+        }
+
+        // Trả URL tải file: Data = { Url = GetRequestBaseAddress() + url } (gate :791-793)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+            }
+        });
+    }
+
+    /// <summary>
+    /// Từ điển cột xuất Excel: dùng GetImportDicColums() từ gate Mst_DepartmentController.cs:851-862.
+    /// Chú ý: dùng từ điển Import cho Export là của nguồn (gate :786).
+    /// Đúng 4 cột theo đúng thứ tự:
+    ///   1. DepartmentName: "Tên phòng ban (*)"
+    ///   2. DepartmentCodeParent: "Phòng ban cấp trên"
+    ///   3. DepartmentDesc: "Mô tả"
+    ///   4. FlagActive: "Trạng thái"
+    /// (DepartmentCode :855 và MST :859 bị comment ở nguồn nên không xuất).
+    /// </summary>
+    private static Dictionary<string, string> GetImportDicColums()
+    {
+        return new Dictionary<string, string>
+        {
+            { "DepartmentName", "Tên phòng ban (*)" },
+            { "DepartmentCodeParent", "Phòng ban cấp trên" },
+            { "DepartmentDesc", "Mô tả" },
+            { "FlagActive", "Trạng thái" }
+        };
     }
 
     /// <summary>
@@ -974,10 +1101,12 @@ public class Mst_DepartmentControllerPort : ControllerBase
 
             return null;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            // Nguồn (gate :503-507, :569-573) bắt MỌI ngoại lệ và trả Success=false; không để văng ra thành HTTP 500.
+            // Dùng chung cho Delete và DeleteMultiple. Cùng mẫu với Create/Update.
             await tx.RollbackAsync();
-            throw;
+            return PortResult.Fail("Mst_Department_Delete", "Exception", ex.Message);
         }
     }
 
