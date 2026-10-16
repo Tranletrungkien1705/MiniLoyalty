@@ -11,17 +11,21 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — Sys_GroupController/Search (#307).
+// PORT 1:1 — Sys_GroupController:
+//   - Search (#307)
+//   - GetAllActive (#308)
 //
-// Nguồn gate: Sys_GroupController.cs:27-135 -> WA_Sys_Group_Get
-//   - Nhận OrgID, KeyWord, FlagActive, Ft_PageIndex = 0, Ft_PageSize = 10
+// Nguồn gate: Sys_GroupController.cs:27-135 (Search), 136-243 (GetAllActive) -> WA_Sys_Group_Get
+//   - Search: Nhận OrgID, KeyWord, FlagActive, Ft_PageIndex = 0, Ft_PageSize = 10
+//   - GetAllActive: Nhận FlagActive = "1" (:163), OrgID đưa vào request nhưng không lọc
 //   - Hàm lọc strWhereClause_Sys_Group (:917-932):
 //     * KeyWord được map vào Sys_GroupUI.KeyWord (:56), nhưng hàm lọc chỉ kiểm tra data.GroupCode (:922-925).
 //       Do GroupCode không được map -> điều kiện này KHÔNG BAO GIỜ được kích hoạt -> KeyWord BỎ QUA hoàn toàn.
-//     * OrgID map vào Sys_GroupUI.OrgID (:57) nhưng hàm lọc KHÔNG HỀ kiểm tra -> BỎ QUA hoàn toàn.
+//     * OrgID map vào Sys_GroupUI.OrgID (:57, :162) nhưng hàm lọc KHÔNG HỀ kiểm tra -> BỎ QUA hoàn toàn.
 //     * FlagActive lọc bằng toán tử = nguyên chuỗi (:928).
-//   - Gate map kết quả (:85-110): Lấy Lst_Sys_Group, map đếm user từ Lst_Sys_UserInGroup theo GroupCode.
+//   - Gate Search map kết quả (:85-110): Lấy Lst_Sys_Group, map đếm user từ Lst_Sys_UserInGroup theo GroupCode.
 //     Trả ra mảng object gồm 7 trường: GroupCode, GroupName, MST, FlagActive, LogLUDTimeUTC, LogLUBy, QtyUserInGroup.
+//   - Gate GetAllActive (:183-228): Trả listSys_Group trần (null nếu rỗng), không map Sys_GroupExt hay QtyUserInGroup.
 //
 // Nguồn API: SysGroupController.cs:20-91
 // Nguồn biz: System.cs:2510-2625 (WAS_Sys_Group_Get) -> :2171-2508 (Sys_Group_Get_New20191102)
@@ -30,8 +34,8 @@ namespace MiniLoyalty.Controllers.Port;
 //   - Select cuối (:2356-2363): select t.MyIdxSeq, sg.* from #tbl_Sys_Group_Filter t inner join Sys_Group sg ... order by t.MyIdxSeq asc
 //
 // Bỏ qua có chủ đích (loại Đ):
-//   - CheckGatewayAuthentication: Sys_GroupController.cs:36, SysGroupController.cs:43-48
-//   - CheckAuthorize: Sys_GroupController.cs:37, Sys_User_CheckAuthorize (System.cs:2236-2249)
+//   - CheckGatewayAuthentication: Sys_GroupController.cs:36, :149, SysGroupController.cs:43-48
+//   - CheckAuthorize: Sys_GroupController.cs:37, :150, Sys_User_CheckAuthorize (System.cs:2236-2249)
 //   - Sys_Access_CheckDenyV30: System.cs:2268-2272
 //   - Ghi RequestLog/ReturnLog: System.cs:2217-2224, 2498-2505
 // ============================================================================================
@@ -137,6 +141,47 @@ public class Sys_GroupControllerPort : ControllerBase
             Data = pageInfo
         });
     }
+
+    /// <summary>
+    /// Port 1:1 GetAllActive action từ gate Sys_GroupController.cs:136-243 (#308).
+    /// </summary>
+    [HttpPost("getallactive")]
+    public async Task<IActionResult> GetAllActive([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] object? req = null)
+    {
+        // Truy vấn Entity Sys_Group với FlagActive = "1"
+        // Gate Sys_GroupController.cs:160-164 truyền FlagActive = "1"
+        // Hàm lọc strWhereClause_Sys_Group (:926-929): FlagActive lọc bằng toán tử = nguyên chuỗi
+        var q = _db.Set<Sys_Group>().AsNoTracking().AsQueryable();
+        var fa = PortQuery.Equal("1");
+        q = q.Where(x => EF.Functions.Like((x.FlagActive ?? "").ToLower(), fa, PortQuery.Esc));
+
+        // Sắp xếp theo GroupCode asc (SQL System.cs:2318)
+        var ordered = q.OrderBy(x => x.GroupCode);
+
+        // Lấy từ chỉ mục 0 đến 123456000 (System.cs:2331-2332; gate Ft_RecordStart=0, Ft_RecordCount=123456000)
+        var paged = await ordered.Skip(0).Take(123456000).ToListAsync();
+
+        // Map DTO Sys_GroupGetAllActiveRes gồm 6 cột Sys_Group + MyIdxSeq (SQL System.cs:2305, 2356-2363)
+        // GetAllActive gate không map Sys_GroupExt hay join Sys_UserInGroup nên không trả QtyUserInGroup
+        var rows = paged.Select((x, i) => new Sys_GroupGetAllActiveRes
+        {
+            MyIdxSeq = i,
+            GroupCode = x.GroupCode,
+            GroupName = x.GroupName,
+            FlagActive = x.FlagActive,
+            LogLUDTimeUTC = x.LogLUDTimeUTC,
+            LogLUBy = x.LogLUBy,
+            MST = x.MST
+        }).ToList();
+
+        // Gate Sys_GroupController.cs:183, 220-230:
+        // Data = listSys_Group (danh sách trần, null nếu rỗng)
+        return Ok(new
+        {
+            Success = true,
+            Data = rows.Count > 0 ? rows : null
+        });
+    }
 }
 
 /// <summary>
@@ -164,4 +209,19 @@ public class Sys_GroupSearchResultItem
     public DateTime? LogLUDTimeUTC { get; set; }
     public string? LogLUBy { get; set; }
     public int QtyUserInGroup { get; set; }
+}
+
+/// <summary>
+/// DTO trả về cho action GetAllActive (Sys_GroupController.cs:136-243, #308).
+/// Gồm 6 cột của Sys_Group + MyIdxSeq (SQL System.cs:2356-2363).
+/// </summary>
+public class Sys_GroupGetAllActiveRes
+{
+    public long MyIdxSeq { get; set; }
+    public string GroupCode { get; set; } = "";
+    public string? GroupName { get; set; }
+    public string? FlagActive { get; set; }
+    public DateTime? LogLUDTimeUTC { get; set; }
+    public string? LogLUBy { get; set; }
+    public string? MST { get; set; }
 }
