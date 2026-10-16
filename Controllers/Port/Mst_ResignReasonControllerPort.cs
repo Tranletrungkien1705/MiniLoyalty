@@ -69,6 +69,17 @@ public class Mst_ResignReasonControllerPort : ControllerBase
         return Ok(new { Success = true, Data = rows.FirstOrDefault() }); // gate (dòng 141-147): gán phần tử [0] hoặc null
     }
 
+    [HttpPost("getallactive")]
+    public async Task<IActionResult> GetAllActive()
+    {
+        // gate truyen: Ft_RecordStart, Ft_RecordCount mac dinh tu Controller, hieu ngam la lay tat ca vi khong phan trang (Mst_ResignReasonController.cs:197-198)
+        // filter FlagActive = "1", khong truyen OrgID/KeyWord null (Mst_ResignReasonController.cs:182-185)
+        var (_, rows) = await GetXAsync(null, null, null, "1", 0, int.MaxValue);
+
+        // gate tra mang (lst_Mst_ResignReason), null neu rong (Mst_ResignReasonController.cs:204-209)
+        return Ok(new { Success = true, Data = rows.Count > 0 ? rows : null });
+    }
+
     private async Task<(int itemCount, List<object> rows)> GetXAsync(string? orgId, string? reasonId, string? keyWord, string? flagActive, long recordStart, long recordCount)
     {
         var q = _db.Set<Mst_ResignReason>().AsNoTracking().AsQueryable();
