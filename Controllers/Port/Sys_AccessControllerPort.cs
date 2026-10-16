@@ -45,8 +45,17 @@ public class SysAccessGetAllFunctionByObjectCodeReq
 }
 
 /// <summary>
-/// Port 1:1 Sys_AccessController — màn phân quyền truy cập hệ thống (#300 Search, #301 Get, #302 GetByGroupCode, #303 GetAllFunctionBy_ObjectCode).
-/// Nguồn Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Sys_AccessController.cs:27-109, 110-217, 220-285, 288-402
+/// DTO tham số cho Sys_AccessController.GetByObjectCode (gate Sys_AccessController.cs:405-472).
+/// Nhận ObjectCode qua JSON body (Bài học A.14).
+/// </summary>
+public class SysAccessGetByObjectCodeReq
+{
+    public string? ObjectCode { get; set; }
+}
+
+/// <summary>
+/// Port 1:1 Sys_AccessController — màn phân quyền truy cập hệ thống (#300 Search, #301 Get, #302 GetByGroupCode, #303 GetAllFunctionBy_ObjectCode, #304 GetByObjectCode).
+/// Nguồn Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Sys_AccessController.cs:27-109, 110-217, 220-285, 288-402, 405-472
 /// Nguồn API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\SysAccessController.cs:20-91 (WA_Sys_Access_Get)
 /// Nguồn BIZ: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\System.cs:757-850 (WAS_Sys_Access_Get)
 ///            D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\System.cs:290-512 (Sys_Access_Get)
@@ -111,6 +120,23 @@ public class Sys_AccessControllerPort : ControllerBase
         }
 
         var (_, rows) = await GetXAsync(null, null, null, groupCode, 0, 123456000);
+        return Ok(new { Success = true, Data = rows.Count > 0 ? rows : null });
+    }
+
+    /// <summary>
+    /// Port 1:1 Sys_AccessController.GetByObjectCode (gate Sys_AccessController.cs:405-472).
+    /// ObjectCode rỗng/null: bỏ qua gọi Biz, trả Success = true, Data = null (gate :427, :458-459).
+    /// </summary>
+    [HttpPost("getbyobjectcode")]
+    public async Task<IActionResult> GetByObjectCode([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] SysAccessGetByObjectCodeReq? req)
+    {
+        var objectCode = req?.ObjectCode;
+        if (string.IsNullOrEmpty(objectCode))
+        {
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+
+        var (_, rows) = await GetXAsync(null, null, null, groupCode: null, 0, 123456000, objectCode: objectCode);
         return Ok(new { Success = true, Data = rows.Count > 0 ? rows : null });
     }
 
@@ -199,7 +225,7 @@ public class Sys_AccessControllerPort : ControllerBase
     /// - Sys_Object ĐÃ port ở #317 -> left join thật (so_* lấy từ Sys_Object).
     /// - Phân quyền Sys_Access_CheckDeny (System.cs:332) được coi là GAP trong MiniLoyalty.
     /// </summary>
-    private async Task<(int itemCount, List<object> rows)> GetXAsync(string? orgId, string? keyWord, string? flagActive, string? groupCode, long recordStart, long recordCount)
+    private async Task<(int itemCount, List<object> rows)> GetXAsync(string? orgId, string? keyWord, string? flagActive, string? groupCode, long recordStart, long recordCount, string? objectCode = null)
     {
         var q = _db.Set<Sys_Access>().AsNoTracking().AsQueryable();
 
@@ -207,6 +233,12 @@ public class Sys_AccessControllerPort : ControllerBase
         if (!string.IsNullOrEmpty(groupCode))
         {
             q = q.Where(x => EF.Functions.Like(x.GroupCode.ToLower(), PortQuery.Equal(groupCode), PortQuery.Esc));
+        }
+
+        // Lọc theo ObjectCode nếu có (gate Sys_AccessController.cs:427-434, strWhereClause_Sys_Access :804-807)
+        if (!string.IsNullOrEmpty(objectCode))
+        {
+            q = q.Where(x => EF.Functions.Like(x.ObjectCode.ToLower(), PortQuery.Equal(objectCode), PortQuery.Esc));
         }
 
         // Nguồn gốc: Where 1=1 (KeyWord, OrgID, FlagActive không được gán vào GroupCode/ObjectCode của Sys_AccessUI)
