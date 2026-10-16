@@ -15,7 +15,7 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục phòng ban (Mst_Department) của dự án nguồn 2022.7.Loyalty (#122, #123, #124, #125, #126, #127, #128, #129, #130).
+// PORT 1:1 — màn danh mục phòng ban (Mst_Department) của dự án nguồn 2022.7.Loyalty (#122, #123, #124, #125, #126, #127, #128, #129, #130, #131).
 //
 // Nguồn controller (tầng gate):
 //   Mst_DepartmentController.cs:30-109   Search -> WA_Mst_Department_Get (#122)
@@ -27,6 +27,7 @@ namespace MiniLoyalty.Controllers.Port;
 //   Mst_DepartmentController.cs:516-580  DeleteMultiple -> WA_Mst_Department_Delete (#128)
 //   Mst_DepartmentController.cs:584-730  Import -> WA_Mst_Department_Create (#129)
 //   Mst_DepartmentController.cs:735-812  Export -> WA_Mst_Department_Get (#130)
+//   Mst_DepartmentController.cs:815-847  ExportTemplate (#131)
 //   Mst_DepartmentController.cs:851-862  GetImportDicColums (dùng cho Export)
 //   Mst_DepartmentController.cs:864-873  GetImportDicColumsTemplate
 //   Mst_DepartmentController.cs:877-905  strWhereClause_Mst_Department (mệnh đề lọc Search, GetAllActive, Export)
@@ -995,6 +996,56 @@ public class Mst_DepartmentControllerPort : ControllerBase
                 Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
             }
         });
+    }
+
+    /// <summary>
+    /// Xuất file Excel mẫu để import danh mục phòng ban — port 1:1 từ action ExportTemplate (gate Mst_DepartmentController.cs:815-847).
+    /// - Không body, không đọc DB, không kiểm quyền hay lọc điều kiện.
+    /// - Khởi tạo danh sách rỗng kiểu Mst_Department (gate :823).
+    /// - Lấy từ điển 3 cột mẫu từ GetImportDicColumsTemplate() (gate :825).
+    /// - Sinh đường dẫn file mẫu qua PortExcel.GenExcelExportFilePath(webRoot, "Mst_Department") (gate :827).
+    /// - Xuất file Excel qua PortExcel.ExportToExcelFromList(list, dicColNames, physicalPath, "Mst_Department") (gate :828).
+    /// - Trả về Ok(new { Success = true, Data = new { Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath } }) (gate :829-833).
+    /// - Bắt ngoại lệ và trả Fail: PortResult.Fail("Mst_Department_ExportTemplate", "Exception", ex.Message) (gate :836-840).
+    /// </summary>
+    [HttpPost("exporttemplate")]
+    public IActionResult ExportTemplate()
+    {
+        try
+        {
+            // Khởi tạo danh sách rỗng kiểu Mst_Department (gate Mst_DepartmentController.cs:823)
+            var list = new List<Mst_Department>();
+
+            // Lấy từ điển 3 cột mẫu import (gate Mst_DepartmentController.cs:825)
+            var dicColNames = GetImportDicColumsTemplate();
+
+            // Xác định thư mục webRoot và sinh đường dẫn file (gate Mst_DepartmentController.cs:827)
+            var webRoot = _env.WebRootPath;
+            if (string.IsNullOrWhiteSpace(webRoot))
+            {
+                webRoot = Path.Combine(_env.ContentRootPath, "wwwroot");
+            }
+
+            var (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Mst_Department");
+
+            // Ghi danh sách rỗng ra file Excel với tên sheet Mst_Department (gate Mst_DepartmentController.cs:828)
+            PortExcel.ExportToExcelFromList(list, dicColNames, physicalPath, "Mst_Department");
+
+            // Trả URL tải file với Success = true (gate Mst_DepartmentController.cs:829-833)
+            return Ok(new
+            {
+                Success = true,
+                Data = new
+                {
+                    Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            // Lỗi ngoại lệ trả Success = false (gate Mst_DepartmentController.cs:836-840)
+            return PortResult.Fail("Mst_Department_ExportTemplate", "Exception", ex.Message);
+        }
     }
 
     /// <summary>
