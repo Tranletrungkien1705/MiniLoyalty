@@ -11,7 +11,7 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục hình thức kỷ luật (Mst_Discipline) của dự án nguồn 2022.7.Loyalty (#132, #133, #134, #135, #136, #137).
+// PORT 1:1 — màn danh mục hình thức kỷ luật (Mst_Discipline) của dự án nguồn 2022.7.Loyalty (#132, #133, #134, #135, #136, #137, #138).
 //
 // Nguồn controller (tầng gate):
 //   Mst_DisciplineController.cs:26-106         Search -> WA_Mst_Discipline_Get (#132)
@@ -20,13 +20,14 @@ namespace MiniLoyalty.Controllers.Port;
 //   Mst_DisciplineController.cs:237-320        Create -> WA_Mst_Discipline_Create (#135)
 //   Mst_DisciplineController.cs:324-389        Update -> WA_Mst_Discipline_Update (#136)
 //   Mst_DisciplineController.cs:393-454        Delete -> WA_Mst_Discipline_Delete (#137)
+//   Mst_DisciplineController.cs:455-520        DeleteMultiple -> WA_Mst_Discipline_Delete (#138)
 //   Mst_DisciplineController.cs:523-538        strWhereClause_Mst_Discipline (mệnh đề lọc Search)
 //   Mst_DisciplineController.cs:540-555        strWhereClause_Mst_Discipline_By_DisciplineCode (mệnh đề lọc GetByDisciplineCode, GetAllActive)
 // Nguồn API:
 //   MstDisciplineController.cs:17-88          WA_Mst_Discipline_Get
 //   MstDisciplineController.cs:91-162         WA_Mst_Discipline_Create (#135)
 //   MstDisciplineController.cs:165-236        WA_Mst_Discipline_Update (#136)
-//   MstDisciplineController.cs:239-310        WA_Mst_Discipline_Delete (#137)
+//   MstDisciplineController.cs:239-310        WA_Mst_Discipline_Delete (#137, #138)
 // Nguồn biz:
 //   MasterData.cs:34241-34331                 WAS_Mst_Discipline_Get
 //   MasterData.cs:34111-34239                 Mst_Discipline_Get
@@ -37,9 +38,9 @@ namespace MiniLoyalty.Controllers.Port;
 //   MasterData.cs:34861-34939                 WAS_Mst_Discipline_Update (#136)
 //   MasterData.cs:34731-34859                 Mst_Discipline_Update (#136)
 //   MasterData.cs:34632-34729                 Mst_Discipline_UpdateX (#136)
-//   MasterData.cs:35113-35186                 WAS_Mst_Discipline_Delete (#137)
-//   MasterData.cs:34998-35111                 Mst_Discipline_Delete (#137)
-//   MasterData.cs:34941-34996                 Mst_Discipline_DeleteX (#137)
+//   MasterData.cs:35113-35186                 WAS_Mst_Discipline_Delete (#137, #138)
+//   MasterData.cs:34998-35111                 Mst_Discipline_Delete (#137, #138)
+//   MasterData.cs:34941-34996                 Mst_Discipline_DeleteX (#137, #138)
 //
 // GIỮ ĐÚNG NGUỒN:
 //   * Endpoint là POST (nguồn [AcceptVerbs("POST")]).
@@ -89,6 +90,13 @@ namespace MiniLoyalty.Controllers.Port;
 //     - CheckDB(ma, "1") (:34973-34979): mã rỗng hoặc không tìm thấy dòng trong DB -> ErridnLoyalty.Mst_Discipline_CheckDB_DisciplineCodeNotFound.
 //     - FK trỏ tới Mst_Discipline: KHÔNG có trong DDL -> không giả lập.
 //     - Xoá dòng Mst_Discipline (:34987) -> Success = true, Data = null (gate :434-435).
+//   * DeleteMultiple: [HttpPost("deletemultiple")], body mảng [{ DisciplineCode }] (gate :455-520, #138).
+//     - Body rỗng hoàn toàn / null -> ServiceException("strJson null") (:465-472) -> 400 ErridnLoyalty.Mst_Discipline_Delete.
+//     - Mảng rỗng [] -> Success = true, Data = null (:505-506).
+//     - Lặp tuần tự (:486-503), mỗi phần tử gọi WA_Mst_Discipline_Delete trong 1 transaction riêng (DeleteXAsync).
+//     - KHÔNG kiểm tra DisciplineCode rỗng ở gate (khác Delete đơn #137): mã rỗng -> CheckDB -> ErridnLoyalty.Mst_Discipline_CheckDB_DisciplineCodeNotFound.
+//     - Lỗi ở phần tử thứ k dừng ngay, các phần tử TRƯỚC k ĐÃ XÓA (xóa một phần là hành vi nguồn).
+//     - Thành công: Data = null.
 //
 // Bỏ qua có chủ đích (loại Đ):
 //   - CheckGatewayAuthentication: gate :35, :117, :182, :256, :343, :402, API :40-45, :114-119, :188-193, :261-267
@@ -498,6 +506,68 @@ public class Mst_DisciplineControllerPort : ControllerBase
         }
 
         // 3. Thành công: gate Mst_DisciplineController.cs:434-435 SetSuccess + Data = null
+        return Ok(new
+        {
+            Success = true,
+            Data = (object?)null
+        });
+    }
+
+    /// <summary>
+    /// Port 1:1 DeleteMultiple action từ gate Mst_DisciplineController.cs:455-520 (#138).
+    /// Chuỗi gọi: gate :455-520 -> lặp qua danh sách Lst_Mst_Discipline, mỗi phần tử gọi
+    /// WA_Mst_Discipline_Delete (:486-503) -> biz WAS_Mst_Discipline_Delete -> Mst_Discipline_Delete -> Mst_Discipline_DeleteX.
+    ///
+    /// Request JSON: mảng [{ DisciplineCode }].
+    /// 1. Kiểm tra body rỗng / null: Gate Mst_DisciplineController.cs:465-472
+    ///    if (!string.IsNullOrEmpty(strJson)) { ... } else { throw new ServiceException("strJson null"); }
+    ///    Khi body null hoặc rỗng -> trả về 400 ErridnLoyalty.Mst_Discipline_Delete với Check.strJson = null.
+    /// 2. Danh sách rỗng `[]`: vòng lặp foreach không chạy, trả về Ok(Success = true, Data = null).
+    /// 3. Lặp tuần tự qua từng phần tử trong danh sách (:486-503):
+    ///    Mỗi lần lặp là một lời gọi độc lập tới chuỗi nghiệp vụ Delete, sử dụng TRANSACTION RIÊNG
+    ///    (MasterData.cs:35027 _cf.db.BeginTransaction() và :35074 CommitSafety).
+    ///    - KHÔNG có bước kiểm tra DisciplineCode rỗng ở tầng gate như Delete đơn (:412, 439);
+    ///      khi DisciplineCode rỗng, lỗi phát sinh ở tầng nghiệp vụ Mst_Discipline_CheckDB
+    ///      -> trả về 400 ErridnLoyalty.Mst_Discipline_CheckDB_DisciplineCodeNotFound.
+    ///    - Hành vi "xóa một phần" (nguồn Mst_DisciplineController.cs:486-512):
+    ///      Nếu phần tử thứ k gặp lỗi, exception được ném ra và thoát khỏi vòng lặp ngay lập tức
+    ///      nhảy vào khối catch (ex) (:508-512).
+    ///      Do mỗi phần tử chạy trên một transaction riêng đã được commit, các phần tử TRƯỚC k
+    ///      ĐÃ BỊ XÓA VÀ KHÔNG BỊ ROLLBACK; các phần tử SAU k hoàn toàn không được xử lý.
+    ///      "xóa một phần" là hành vi nguồn.
+    /// 4. Thành công: gate :505-506 trả objJsonResultEntry.Data = null -> Ok(new { Success = true, Data = (object?)null }).
+    ///
+    /// Bỏ qua có chủ đích (loại Đ):
+    /// - CheckGatewayAuthentication: gate Mst_DisciplineController.cs:475
+    /// - CheckAuthorize: gate Mst_DisciplineController.cs:476 (hệ thống đích chưa có hệ phân quyền)
+    /// - Sys_User_CheckAuthentication, Sys_Access_CheckDenyV30
+    /// - Ghi RequestLog/ReturnLog: MasterData.cs:35030-35037, 35101-35108
+    /// </summary>
+    [HttpPost("deletemultiple")]
+    public async Task<IActionResult> DeleteMultiple([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] List<MstDisciplineDeleteReq>? req)
+    {
+        // 1. Kiểm tra body rỗng / null: Gate Mst_DisciplineController.cs:465-472
+        // if (!string.IsNullOrEmpty(strJson)) { ... } else { throw new ServiceException("strJson null"); }
+        if (req == null)
+        {
+            return PortResult.Fail("Mst_Discipline_Delete", "Check.strJson", null);
+        }
+
+        // 2. Lặp tuần tự qua từng phần tử (gate Mst_DisciplineController.cs:486-503).
+        // Mỗi phần tử chạy trong 1 transaction riêng biệt (hàm DeleteXAsync).
+        // Nếu phần tử thứ k gặp lỗi -> return ngay lỗi đó (hành vi nguồn :486-512:
+        // "xóa một phần" là hành vi nguồn: các phần tử trước k đã commit thành công
+        // vào DB và KHÔNG bị rollback; các phần tử sau k không được xử lý).
+        foreach (var item in req)
+        {
+            var err = await DeleteXAsync(item?.DisciplineCode);
+            if (err != null)
+            {
+                return err;
+            }
+        }
+
+        // 3. Thành công: gate Mst_DisciplineController.cs:505-506
         return Ok(new
         {
             Success = true,
