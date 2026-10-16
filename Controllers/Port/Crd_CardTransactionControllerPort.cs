@@ -25,6 +25,19 @@ namespace MiniLoyalty.Controllers.Port;
 /// <summary>
 /// DTO tham số tìm kiếm giao dịch thẻ — port 1:1 Crd_CardTransactionSearch (gate :32-72, :191-308).
 /// </summary>
+public class Crd_CardTransactionDetailPromotionReq
+{
+    public string? CreateDTimeUTCFrom { get; set; }
+    public string? CreateDTimeUTCTo { get; set; }
+    public string? CardType { get; set; }
+    public string? MemberNo { get; set; }
+    public string? PhoneNo { get; set; }
+    public string? PrProgramCode { get; set; }
+    public string? DLCode { get; set; }
+    public string? UsePrmDTimeFrom { get; set; }
+    public string? UsePrmDTimeTo { get; set; }
+}
+
 public class Crd_CardTransactionSearchReq
 {
     public string? CreateDTimeUTCFrom { get; set; }     // Gate :32 — Thời gian thực hiện từ
@@ -46,6 +59,7 @@ public class Crd_CardTransactionSearchReq
     public string? PrProgramCode { get; set; }          // strWhereClause :198 — Mã chương trình ưu đãi
     public string? FlagPoint { get; set; }              // strWhereClause :212 — Cờ điểm
     public string? PhoneNo { get; set; }                // strWhereClause :246 — Số điện thoại
+    public string? CardType { get; set; }               // Gate :114 SearchDetailCrdDealUsePromotion — Hạng thẻ
     public string? CardTypeUse { get; set; }            // strWhereClause :250 — Hạng thẻ sử dụng
     public string? UsePrmDTimeFrom { get; set; }        // strWhereClause :297 — Ngày dùng ưu đãi từ
     public string? UsePrmDTimeTo { get; set; }          // strWhereClause :302 — Ngày dùng ưu đãi đến
@@ -170,6 +184,53 @@ public class Crd_CardTransactionControllerPort : ControllerBase
     public async Task<IActionResult> Search([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_CardTransactionSearchReq? req)
     {
         var r = req ?? new Crd_CardTransactionSearchReq();
+        if (!string.IsNullOrWhiteSpace(r.CardType) && string.IsNullOrWhiteSpace(r.CardTypeUse))
+        {
+            r.CardTypeUse = r.CardType;
+        }
+        return await SearchCoreAsync(r);
+    }
+
+    /// <summary>
+    /// Port 1:1 Crd_CardTransactionController.SearchDetailCrdDealUsePromotion (#13, gate :114-187). Gate CHỈ nhận 9 tham số:
+    /// CreateDTimeUTCFrom/To (StdDTimeBeginDay/EndDay), CardType (-> CardTypeUse), MemberNo, PhoneNo, PrProgramCode, DLCode, UsePrmDTimeFrom/To;
+    /// DealPointType GHI ĐÈ cố định "PRPROGRAM" (:141) — KHÔNG nhận từ client; không phân trang (Ft_RecordStart = "0", Ft_RecordCount = mặc định 123456000);
+    /// Data = { DataList = danh sách } (không PageInfo, không ItemCount), rỗng -> DataList null (:166-174). Dùng chung lõi truy vấn GetX với Search (#12).
+    /// </summary>
+    [HttpPost("searchdetailcrddealusepromotion")]
+    public async Task<IActionResult> SearchDetailCrdDealUsePromotion([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_CardTransactionDetailPromotionReq? req)
+    {
+        var r = req ?? new Crd_CardTransactionDetailPromotionReq();
+        var core = new Crd_CardTransactionSearchReq
+        {
+            CreateDTimeUTCFrom = r.CreateDTimeUTCFrom,
+            CreateDTimeUTCTo = r.CreateDTimeUTCTo,
+            UsePrmDTimeFrom = r.UsePrmDTimeFrom,
+            UsePrmDTimeTo = r.UsePrmDTimeTo,
+            MemberNo = r.MemberNo,
+            DealPointType = "PRPROGRAM",
+            CardTypeUse = r.CardType,
+            PhoneNo = r.PhoneNo,
+            DLCode = r.DLCode,
+            PrProgramCode = r.PrProgramCode,
+            Ft_PageIndex = 0,
+            Ft_PageSize = 123456000,
+            Ft_RecordStart = "0",
+            Ft_RecordCount = "123456000"
+        };
+
+        var res = await SearchCoreAsync(core);
+        if (res is OkObjectResult ok && ok.Value != null)
+        {
+            var data = ok.Value.GetType().GetProperty("Data")?.GetValue(ok.Value);
+            var list = data?.GetType().GetProperty("DataList")?.GetValue(data) as System.Collections.IList;
+            return Ok(new { Success = true, Data = new { DataList = (list != null && list.Count > 0) ? list : null } });
+        }
+        return res;
+    }
+
+    private async Task<IActionResult> SearchCoreAsync(Crd_CardTransactionSearchReq r)
+    {
 
         // 1. Base query trên Crd_CardTransaction join Crd_Member, Crd_Card, Mst_PromotionProgram, Mst_PromotionProgramDtl
         // Master.Loyalty.cs:21484-21486, :21604-21615
