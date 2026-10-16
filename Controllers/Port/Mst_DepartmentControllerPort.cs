@@ -5,17 +5,19 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using MiniLoyalty.Data;
 using MiniLoyalty.Models.Port;
 
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — màn danh mục phòng ban (Mst_Department) của dự án nguồn 2022.7.Loyalty (#122).
+// PORT 1:1 — màn danh mục phòng ban (Mst_Department) của dự án nguồn 2022.7.Loyalty (#122, #123).
 //
 // Nguồn controller (tầng gate):
-//   Mst_DepartmentController.cs:30-109   Search -> WA_Mst_Department_Get
-//   Mst_DepartmentController.cs:877-905  strWhereClause_Mst_Department (mệnh đề lọc Search)
+//   Mst_DepartmentController.cs:30-109   Search -> WA_Mst_Department_Get (#122)
+//   Mst_DepartmentController.cs:110-218  GetAllActive -> WA_Mst_Department_Get (#123)
+//   Mst_DepartmentController.cs:877-905  strWhereClause_Mst_Department (mệnh đề lọc Search, GetAllActive)
 // Nguồn API:
 //   MstDepartmentController.cs:20-89     WA_Mst_Department_Get
 // Nguồn biz:
@@ -24,14 +26,20 @@ namespace MiniLoyalty.Controllers.Port;
 //   Master.cs:30396-30568                Mst_Department_GetX (SQL :30449-30515)
 //
 // GIỮ ĐÚNG NGUỒN:
-//   * Endpoint là POST (nguồn Mst_DepartmentController.cs:30).
+//   * Endpoint là POST (nguồn Mst_DepartmentController.cs:30, :110).
 //   * Lọc KeyWord: like '%kw%' trên DepartmentName (Mst_DepartmentController.cs:884).
-//   * Lọc OrgID: tham số CLIENT, toán tử '=' trên OrgID (Mst_DepartmentController.cs:888).
+//   * Lọc OrgID: tham số CLIENT ở Search (:30, :888), hoặc OrgID từ user đăng nhập ở GetAllActive (:138).
+//     Toán tử '=' trên OrgID.
 //   * Lọc FlagActive: tách dấu phẩy -> danh sách IN ('a','b') (Mst_DepartmentController.cs:894-902).
 //     Dòng '=' (:890-893) BỊ COMMENT trong nguồn nên KHÔNG chạy.
 //   * Chia trang theo md.DepartmentCode asc (Master.cs:30457), select cuối sắp theo t.MyIdxSeq asc (Master.cs:30514).
 //   * MyIdxSeq 0-based identity (Master.cs:30450).
 //   * PageSize = 0 -> DataList rỗng, PageCount = 0 (gate :84-94).
+//   * GetAllActive: không body, Ft_RecordStart = "0", Ft_RecordCount = "123456000" (gate :152-153).
+//     FlagActive = "1" (:139). OrgID lấy từ user đăng nhập orgUserUI.OrgId (:138).
+//     Đích chưa có user đăng nhập: lấy từ IConfiguration["Biz_OrgID"]; nếu không cấu hình (null/rỗng)
+//     thì GetXAsync bỏ nhánh lọc OrgID -> lấy mọi tổ chức (GAP: nguồn lọc theo tổ chức của user đăng nhập).
+//     Khối Ext/tree (:162-193) bị comment ở nguồn -> trả Data là mảng trần list Mst_Department (null nếu rỗng) (:199-204).
 //   * Cột tính md_DepartmentNameParent: left join Mst_Department f on t.DepartmentCodeParent = f.DepartmentCode (:30512-30513),
 //     lấy tên phòng ban cấp trên f.DepartmentName (null nếu không có cấp trên).
 //   * Cột tính ss_QtyStaff: nguồn left join count StaffCode từ Staff_MapDepartment group by DepartmentCode (:30490-30499, :30506).
@@ -40,8 +48,8 @@ namespace MiniLoyalty.Controllers.Port;
 //   * DDL: không có DDL trong repo nguồn — PK = DepartmentCode (khoá draft), kiểu cột cần xác nhận.
 //
 // Bỏ qua có chủ đích (loại Đ):
-//   - CheckGatewayAuthentication: gate :39, API :40-46
-//   - CheckAuthorize: gate :40 (hệ thống đích chưa có hệ phân quyền)
+//   - CheckGatewayAuthentication: gate :39, :123, API :40-46
+//   - CheckAuthorize: gate :40, :124 (hệ thống đích chưa có hệ phân quyền)
 //   - Ghi RequestLog/ReturnLog: Master.cs:29593-29600, 29691-29698
 //   - Sys_User_CheckAuthorize / Sys_Access_CheckDenyV30: Master.cs:29606-29620, 29630-29634
 // ============================================================================================
@@ -62,10 +70,12 @@ public class MstDepartmentSearchReq
 public class Mst_DepartmentControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly IConfiguration _config;
 
-    public Mst_DepartmentControllerPort(AppDbContext db)
+    public Mst_DepartmentControllerPort(AppDbContext db, IConfiguration config)
     {
         _db = db;
+        _config = config;
     }
 
     [HttpPost("search")]
@@ -85,6 +95,29 @@ public class Mst_DepartmentControllerPort : ControllerBase
         var pageCount = rows.Count == 0 ? 0 : (itemCount % ps == 0 ? itemCount / ps : itemCount / ps + 1);
 
         return Ok(new { Success = true, Data = new PageInfo<object>(rows, itemCount, pageCount, pageIndex, pageSize) });
+    }
+
+    /// <summary>
+    /// Port 1:1 <c>Mst_DepartmentController.GetAllActive</c> (nguồn gate Mst_DepartmentController.cs:110-218).
+    /// Nguồn gọi <c>strWhereClause_Mst_Department</c> với <c>OrgID = orgUserUI.OrgId</c>, <c>FlagActive = "1"</c> (:136-140) ⇒ lọc
+    /// phòng ban đang hoạt động thuộc tổ chức của user đang đăng nhập.
+    /// Không body: RecordStart = "0", RecordCount = "123456000" (nguồn Ft_RecordStart/Ft_RecordCount gate :152-153).
+    /// Khối Ext/tree (:162-193) bị comment ở nguồn. Trả <c>Ok(new { Success = true, Data = ... })</c> — Data là MẢNG TRẦN,
+    /// null nếu rỗng (nguồn :133 khởi tạo null, :159-161 gán list khi có dòng, :199-204 trả Json).
+    /// Đích chưa có user: lấy OrgID từ cấu hình <c>_config["Biz_OrgID"]</c>; nếu không cấu hình (null/rỗng)
+    /// thì GetXAsync bỏ nhánh lọc OrgID -> lấy mọi tổ chức (GAP: nguồn lọc theo tổ chức của user đang đăng nhập).
+    /// Trả <c>Ok(new { Success = true, Data = rows.Count > 0 ? rows : null })</c>.
+    /// </summary>
+    [HttpPost("getallactive")]
+    public async Task<IActionResult> GetAllActive()
+    {
+        // Nguồn: Ft_RecordStart = "0", Ft_RecordCount = "123456000" (gate :152-153).
+        // Nguồn lọc: OrgID = orgUserUI.OrgId (:138), FlagActive = "1" (:139).
+        // Đích chưa có user: lấy OrgID từ cấu hình Biz_OrgID (GAP: nguồn lọc theo user đăng nhập); null/rỗng -> mọi tổ chức.
+        var (_, rows) = await GetXAsync(null, _config["Biz_OrgID"], "1", 0, 123456000);
+
+        // Nguồn :199-204: Data = listMst_Department (mảng trần); rỗng ⇒ null (:133, :159-161).
+        return Ok(new { Success = true, Data = rows.Count > 0 ? rows : null });
     }
 
     /// <summary>
