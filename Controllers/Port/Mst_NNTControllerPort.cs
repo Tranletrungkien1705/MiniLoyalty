@@ -12,12 +12,13 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 /// <summary>
-/// Port 1:1 Mst_NNTController.cs — Mst_NNT (#172 Search, #173 GetAllActive, #174 GetByMST, #175 Create)
+/// Port 1:1 Mst_NNTController.cs — Mst_NNT (#172 Search, #173 GetAllActive, #174 GetByMST, #175 Create, #176 Update)
 /// Chuỗi gọi nguồn:
-///   gate: 13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Mst_NNTController.cs:26-187 (Search), :189-289 (GetAllActive), :291-434 (GetByMST), :438-499 (Create), :666-698 (strWhereClause_Mst_NNT), :700-719 (strWhereClause_Mst_NNT_By_MST)
-///   API:  11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\MstNNTController.cs:20-89 (WA_Mst_NNT_Get), :1254-1324 (WA_Mst_NNT_CreateForNetworkCP)
+///   gate: 13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Mst_NNTController.cs:26-187 (Search), :189-289 (GetAllActive), :291-434 (GetByMST), :438-499 (Create), :503-597 (Update), :666-698 (strWhereClause_Mst_NNT), :700-719 (strWhereClause_Mst_NNT_By_MST)
+///   API:  11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\MstNNTController.cs:20-89 (WA_Mst_NNT_Get), :604-673 (WA_Mst_NNT_Update), :1254-1324 (WA_Mst_NNT_CreateForNetworkCP)
 ///   biz:  11.BackEnd\V10\idn.Loyalty.Biz\Master.cs:7933-8030 (WAS_Mst_NNT_Get) -> :8126-8295 (Mst_NNT_Get) -> :21344-21524 (Mst_NNT_GetX),
-///         11.BackEnd\V10\idn.Loyalty.Biz\Master.1.cs:3699-3812 (WAS_Mst_NNT_CreateForNetworkCP) -> :3813-4545 (Mst_NNT_CreateForNetworkCP) -> Master.cs:11937-12356 (Mst_NNT_CreateForNetworkCPX)
+///         11.BackEnd\V10\idn.Loyalty.Biz\Master.1.cs:3699-3812 (WAS_Mst_NNT_CreateForNetworkCP) -> :3813-4545 (Mst_NNT_CreateForNetworkCP) -> Master.cs:11937-12356 (Mst_NNT_CreateForNetworkCPX),
+///         11.BackEnd\V10\idn.Loyalty.Biz\Master.cs:25240-25354 (WAS_Mst_NNT_Update_New20190822) -> :25909-26156 (Mst_NNT_Update_New20200208) -> :26520-26885 (Mst_NNT_UpdateX_New20200208)
 ///
 /// Bỏ qua có chủ đích (loại Đ):
 /// - CheckGatewayAuthentication, CheckAuthorize (Mst_NNTController.cs:37-38, :198-199, :302-303, :457-458)
@@ -367,8 +368,184 @@ public class Mst_NNTControllerPort : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Port 1:1 Update action từ gate Mst_NNTController.cs:503-597.
+    /// Chuỗi gọi nguồn:
+    ///   gate: 13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Mst_NNTController.cs:503-597 (Update)
+    ///   API:  11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\MstNNTController.cs:604-673 (WA_Mst_NNT_Update)
+    ///   biz:  11.BackEnd\V10\idn.Loyalty.Biz\Master.cs:25240-25354 (WAS_Mst_NNT_Update_New20190822)
+    ///         -> Master.cs:25909-26156 (Mst_NNT_Update_New20200208)
+    ///         -> Master.cs:26520-26885 (Mst_NNT_UpdateX_New20200208)
+    ///
+    /// Nghiệp vụ:
+    /// - Nhận body JSON ánh xạ sang Mst_NNTUpdateRequest (Mst_NNTController.cs:511-514).
+    ///   Nếu body rỗng hoặc null -> 400 ErridnLoyalty.Mst_NNT_Update kèm tham số Check.strJson = null (dòng :518).
+    /// - Mở transaction toàn bộ quá trình cập nhật (Master.cs:26016 _cf.db.BeginTransaction()). Lỗi -> rollback.
+    /// - Gate gửi strFt_Cols_Upd gồm 9 cột (Mst_NNTController.cs:534-561):
+    ///   MST, NNTFullName, NNTShortName, NNTAddress, ContactName, ContactPhone, ContactEmail, BizType, FlagActive.
+    ///   Các cột khác (PresentBy, NNTPosition, ProvinceCode...) bị comment out ở gate nên không nằm trong Ft_Cols_Upd.
+    /// - Chuẩn hoá đầu vào:
+    ///   strMST = StdParam(objMST)
+    ///   strNNTFullName = string.Format("{0}", objNNTFullName).Trim()
+    ///   strNNTShortName = string.Format("{0}", objNNTShortName).Trim()
+    ///   strNNTAddress = string.Format("{0}", objNNTAddress).Trim()
+    ///   strContactName = string.Format("{0}", objContactName).Trim()
+    ///   strContactPhone = string.Format("{0}", objContactPhone).Trim()
+    ///   strContactEmail = string.Format("{0}", objContactEmail).Trim()
+    ///   strPresentBy = string.Format("{0}", objPresentBy).Trim()
+    ///   strBizType = StdParam(objBizType)
+    ///   strFlagActive = StdFlag(objFlagActive) (nếu thiếu hoặc khác '1' -> '0')
+    /// - Thứ tự guards (Master.cs:26696-26831):
+    ///   1. Mst_NNT_CheckDB: kiểm tra MST tồn tại trong DB với strFlagExistToCheck = "1".
+    ///      Nếu không tồn tại -> 400 ErridnLoyalty.Mst_NNT_CheckDB_NNTNotFound (tham số Check.MST, strMST).
+    ///   2. strNNTFullName.Length < 1 -> 400 ErridnLoyalty.Mst_NNT_Update_InvalidNNTFullName (tham số Check.strNNTFullName).
+    ///   3. strPresentBy.Length < 1 -> 400 ErridnLoyalty.Mst_NNT_Update_InvalidPresentBy (tham số Check.strPresentBy).
+    ///      (Lưu ý: PresentBy không được cập nhật vì gate không gửi trong Ft_Cols_Upd, nhưng CÓ kiểm tra).
+    ///   4. strContactEmail.Length < 1 -> 400 ErridnLoyalty.Mst_NNT_Update_InvalidContactEmail (tham số Check.strContactEmail).
+    /// - Cập nhật dữ liệu vào entity theo cờ bUpd_* (Master.cs:26841-26875):
+    ///   Cập nhật 8 trường: NNTFullName, NNTShortName, NNTAddress, ContactName, ContactPhone, ContactEmail, BizType, FlagActive.
+    ///   Luôn cập nhật LogLUDTimeUTC = DateTime.UtcNow và LogLUBy = "port".
+    /// - Thành công commit transaction, trả về Ok(new { Success = true, Data = (object?)null }) (Mst_NNTController.cs:583-584).
+    /// </summary>
+    [HttpPost("update")]
+    public async Task<IActionResult> Update([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Mst_NNTUpdateRequest? req)
+    {
+        // 1. Kiểm tra body rỗng / null: gate Mst_NNTController.cs:512-518
+        if (req == null)
+        {
+            return PortResult.Fail("Mst_NNT_Update", "Check.strJson", null);
+        }
+
+        var input = req.Mst_NNT ?? req;
+
+        // 2. Mở 1 transaction cho toàn bộ quá trình cập nhật (Master.cs:26016 _cf.db.BeginTransaction())
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // 3. Chuỗi Ft_Cols_Upd do gate gửi lên: gate Mst_NNTController.cs:532-561
+            var strFt_Cols_Upd = "";
+            var tblMstNNT = "Mst_NNT.";
+            strFt_Cols_Upd += string.Format("{0}{1},", tblMstNNT, "MST");
+            strFt_Cols_Upd += string.Format("{0}{1},", tblMstNNT, "NNTFullName");
+            strFt_Cols_Upd += string.Format("{0}{1},", tblMstNNT, "NNTShortName");
+            //strFt_Cols_Upd += string.Format("{0}{1},", tblMstNNT, "PresentBy");
+            //strFt_Cols_Upd += string.Format("{0}{1},", tblMstNNT, "NNTPosition");
+            //strFt_Cols_Upd += string.Format("{0}{1},", tblMstNNT, "ProvinceCode");
+            //strFt_Cols_Upd += string.Format("{0}{1},", tblMstNNT, "DistrictCode");
+            strFt_Cols_Upd += string.Format("{0}{1},", tblMstNNT, "NNTAddress");
+            //
+            strFt_Cols_Upd += string.Format("{0}{1},", tblMstNNT, "ContactName");
+            strFt_Cols_Upd += string.Format("{0}{1},", tblMstNNT, "ContactPhone");
+            strFt_Cols_Upd += string.Format("{0}{1},", tblMstNNT, "ContactEmail");
+            //strFt_Cols_Upd += string.Format("{0}{1},", tblMstNNT, "PresentIDNo");
+            //strFt_Cols_Upd += string.Format("{0}{1},", tblMstNNT, "PresentIDType");
+            //strFt_Cols_Upd += string.Format("{0}{1},", tblMstNNT, "NNTMobile");
+            //strFt_Cols_Upd += string.Format("{0}{1},", tblMstNNT, "NNTPhone");
+            //strFt_Cols_Upd += string.Format("{0}{1},", tblMstNNT, "NNTFax");
+            //strFt_Cols_Upd += string.Format("{0}{1},", tblMstNNT, "Website");
+            //
+            //strFt_Cols_Upd += string.Format("{0}{1},", tblMstNNT, "AccNo");
+            //strFt_Cols_Upd += string.Format("{0}{1},", tblMstNNT, "AccHolder");
+            //strFt_Cols_Upd += string.Format("{0}{1},", tblMstNNT, "BankName");
+            //strFt_Cols_Upd += string.Format("{0}{1},", tblMstNNT, "CANumber");
+            //strFt_Cols_Upd += string.Format("{0}{1},", tblMstNNT, "CAOrg");
+            strFt_Cols_Upd += string.Format("{0}{1},", tblMstNNT, "BizType");
+            //strFt_Cols_Upd += string.Format("{0}{1}", tblMstNNT, "CAEffDTimeUTCStart");
+            //strFt_Cols_Upd += string.Format("{0}{1}", tblMstNNT, "CAEffDTimeUTCEnd");
+            strFt_Cols_Upd += string.Format("{0}{1},", tblMstNNT, "FlagActive");
+
+            // Chuẩn hóa Ft_Cols_Upd: Master.cs:26618-26619
+            strFt_Cols_Upd = StdParam(strFt_Cols_Upd) ?? "";
+
+            // Kiểm tra cột cần update: Master.cs:26657-26690
+            bool bUpd_NNTFullName = strFt_Cols_Upd.Contains("Mst_NNT.NNTFullName".ToUpperInvariant());
+            bool bUpd_NNTShortName = strFt_Cols_Upd.Contains("Mst_NNT.NNTShortName".ToUpperInvariant());
+            bool bUpd_NNTAddress = strFt_Cols_Upd.Contains("Mst_NNT.NNTAddress".ToUpperInvariant());
+            bool bUpd_ContactName = strFt_Cols_Upd.Contains("Mst_NNT.ContactName".ToUpperInvariant());
+            bool bUpd_ContactPhone = strFt_Cols_Upd.Contains("Mst_NNT.ContactPhone".ToUpperInvariant());
+            bool bUpd_ContactEmail = strFt_Cols_Upd.Contains("Mst_NNT.ContactEmail".ToUpperInvariant());
+            bool bUpd_BizType = strFt_Cols_Upd.Contains("Mst_NNT.BizType".ToUpperInvariant());
+            bool bUpd_FlagActive = strFt_Cols_Upd.Contains("Mst_NNT.FlagActive".ToUpperInvariant());
+
+            // 4. Chuẩn hóa dữ liệu input: Master.cs:26621-26655
+            var strMST = StdParam(input.MST);
+            var strNNTFullName = string.Format("{0}", input.NNTFullName).Trim();
+            var strNNTShortName = string.Format("{0}", input.NNTShortName).Trim();
+            var strNNTAddress = string.Format("{0}", input.NNTAddress).Trim();
+            var strContactName = string.Format("{0}", input.ContactName).Trim();
+            var strContactPhone = string.Format("{0}", input.ContactPhone).Trim();
+            var strContactEmail = string.Format("{0}", input.ContactEmail).Trim();
+            var strPresentBy = string.Format("{0}", input.PresentBy).Trim();
+            var strBizType = StdParam(input.BizType);
+            var strFlagActive = StdFlag(input.FlagActive);
+
+            // 5. Guards theo đúng thứ tự (Master.cs:26696-26831):
+
+            // Guard 1: Mst_NNT_CheckDB (Master.cs:26696, 7813-7850) strFlagExistToCheck = "1"
+            var nnt = await _db.Set<Mst_NNT>().FirstOrDefaultAsync(x =>
+                EF.Functions.Like((x.MST ?? "").ToLower(), PortQuery.Equal(strMST ?? ""), PortQuery.Esc));
+
+            if (nnt == null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_NNT_CheckDB_NNTNotFound", "Check.MST", strMST);
+            }
+
+            // Guard 2: strNNTFullName.Length < 1 (Master.cs:26705-26715)
+            if (strNNTFullName.Length < 1)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_NNT_Update_InvalidNNTFullName", "Check.strNNTFullName", strNNTFullName);
+            }
+
+            // Guard 3: strPresentBy.Length < 1 (Master.cs:26729-26739)
+            if (strPresentBy.Length < 1)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_NNT_Update_InvalidPresentBy", "Check.strPresentBy", strPresentBy);
+            }
+
+            // Guard 4: strContactEmail.Length < 1 (Master.cs:26821-26831)
+            if (strContactEmail.Length < 1)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Mst_NNT_Update_InvalidContactEmail", "Check.strContactEmail", strContactEmail);
+            }
+
+            // 6. Cập nhật dữ liệu vào entity (Master.cs:26841-26875):
+            if (bUpd_NNTFullName) nnt.NNTFullName = strNNTFullName;
+            if (bUpd_NNTShortName) nnt.NNTShortName = strNNTShortName;
+            if (bUpd_NNTAddress) nnt.NNTAddress = strNNTAddress;
+            if (bUpd_ContactName) nnt.ContactName = strContactName;
+            if (bUpd_ContactPhone) nnt.ContactPhone = strContactPhone;
+            if (bUpd_ContactEmail) nnt.ContactEmail = strContactEmail;
+            if (bUpd_BizType) nnt.BizType = strBizType;
+            if (bUpd_FlagActive) nnt.FlagActive = strFlagActive;
+
+            // LogLUDTimeUTC (UtcNow) và LogLUBy ("port") luôn được cập nhật: Master.cs:26874-26875
+            nnt.LogLUDTimeUTC = DateTime.UtcNow;
+            nnt.LogLUBy = "port";
+
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+
+            // 7. Hoàn tất thành công: gate Mst_NNTController.cs:583-584
+            return Ok(new
+            {
+                Success = true,
+                Data = (object?)null
+            });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return PortResult.Fail("Mst_NNT_Update", "Exception", ex.Message);
+        }
+    }
+
     private static string? StdParam(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim().ToUpperInvariant();
     private static string? StdStr(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+    private static string StdFlag(string? s) => s?.Trim() == "1" ? "1" : "0";
 
     /// <summary>
     /// Hàm truy vấn tương ứng Mst_NNT_GetX (Master.cs:21344-21524):
@@ -640,6 +817,54 @@ public class Mst_NNTCreateRequest
     public string? BizSizeCode { get; set; }
     public string? DealerType { get; set; }
     public string? AreaCode { get; set; }
+    public string? Remark { get; set; }
+}
+
+/// <summary>
+/// Request DTO cho action Update — Mst_NNTController.cs:503, :511-514
+/// </summary>
+public class Mst_NNTUpdateRequest
+{
+    public Mst_NNTUpdateRequest? Mst_NNT { get; set; }
+
+    public string? MST { get; set; }
+    public string? OrgID { get; set; }
+    public string? NNTFullName { get; set; }
+    public string? NNTShortName { get; set; }
+    public string? NetworkID { get; set; }
+    public string? MSTParent { get; set; }
+    public string? ProvinceCode { get; set; }
+    public string? DistrictCode { get; set; }
+    public string? DLCode { get; set; }
+    public string? NNTAddress { get; set; }
+    public string? NNTMobile { get; set; }
+    public string? NNTPhone { get; set; }
+    public string? NNTFax { get; set; }
+    public string? PresentBy { get; set; }
+    public string? BusinessRegNo { get; set; }
+    public string? NNTPosition { get; set; }
+    public string? PresentIDNo { get; set; }
+    public string? PresentIDType { get; set; }
+    public string? GovTaxID { get; set; }
+    public string? ContactName { get; set; }
+    public string? ContactPhone { get; set; }
+    public string? ContactEmail { get; set; }
+    public string? Website { get; set; }
+    public string? CANumber { get; set; }
+    public string? CAOrg { get; set; }
+    public string? CAEffDTimeUTCStart { get; set; }
+    public string? CAEffDTimeUTCEnd { get; set; }
+    public string? PackageCode { get; set; }
+    public string? CreatedDate { get; set; }
+    public string? AccNo { get; set; }
+    public string? AccHolder { get; set; }
+    public string? BankName { get; set; }
+    public string? BizType { get; set; }
+    public string? BizFieldCode { get; set; }
+    public string? BizSizeCode { get; set; }
+    public string? DealerType { get; set; }
+    public string? AreaCode { get; set; }
+    public string? FlagActive { get; set; }
     public string? Remark { get; set; }
 }
 
