@@ -9,6 +9,12 @@ using MiniLoyalty.Models.Port;
 
 namespace MiniLoyalty.Controllers.Port;
 
+public class MstResignReasonGetByReasonIDReq
+{
+    public string? ReasonID { get; set; }
+    public string? OrgID { get; set; }
+}
+
 public class MstResignReasonSearchReq
 {
     public string? OrgID { get; set; }
@@ -39,7 +45,7 @@ public class Mst_ResignReasonControllerPort : ControllerBase
 
         // Tinh RecordStart = PageIndex*PageSize, RecordCount = PageSize (Mst_ResignReasonController.cs:67-68)
         var start = (long)pageIndex * pageSize;
-        var (itemCount, rows) = await GetXAsync(r.OrgID, r.KeyWord, r.FlagActive, start, pageSize);
+        var (itemCount, rows) = await GetXAsync(r.OrgID, null, r.KeyWord, r.FlagActive, start, pageSize);
 
         // PageCount chi tinh khi DataList KHONG rong; doi PageSize = 0 thanh 10 (Mst_ResignReasonController.cs:81-85)
         var ps = pageSize == 0 ? 10 : pageSize;
@@ -48,16 +54,38 @@ public class Mst_ResignReasonControllerPort : ControllerBase
         return Ok(new { Success = true, Data = new PageInfo<object>(rows, itemCount, pageCount, pageIndex, pageSize) });
     }
 
-    private async Task<(int itemCount, List<object> rows)> GetXAsync(string? orgId, string? keyWord, string? flagActive, long recordStart, long recordCount)
+    [HttpPost("getbyreasonid")]
+    public async Task<IActionResult> GetByReasonID([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] MstResignReasonGetByReasonIDReq? req)
+    {
+        // gate (dòng 117): nếu ReasonID rỗng, bỏ qua gọi Biz và trả về mặc định là null.
+        // OrgID nguồn lấy từ session (orgUserUI.OrgId, :132) — hệ đích không có session nên nhận OrgID tuỳ chọn trong body
+        // (cùng quy ước với Search); không truyền thì không lọc OrgID. Nhận qua JSON body như mọi action GetBy* khác (#174, #185, #192).
+        if (string.IsNullOrWhiteSpace(req?.ReasonID))
+        {
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+
+        var (_, rows) = await GetXAsync(req.OrgID, req.ReasonID, null, null, 0, 1);
+        return Ok(new { Success = true, Data = rows.FirstOrDefault() }); // gate (dòng 141-147): gán phần tử [0] hoặc null
+    }
+
+    private async Task<(int itemCount, List<object> rows)> GetXAsync(string? orgId, string? reasonId, string? keyWord, string? flagActive, long recordStart, long recordCount)
     {
         var q = _db.Set<Mst_ResignReason>().AsNoTracking().AsQueryable();
 
-        // OrgID: loc OrgID = ... (Mst_ResignReasonController.cs:781)
+        // OrgID: loc OrgID = ... (Mst_ResignReasonController.cs:781, 809-812)
         if (!string.IsNullOrWhiteSpace(orgId))
         {
-            // toán tử '=' (Mst_ResignReasonController.cs:779-782): không phân biệt hoa/thường như SQL Server
+            // toán tử '=' (Mst_ResignReasonController.cs:779-782, 811): không phân biệt hoa/thường như SQL Server
             var oid = PortQuery.Equal(orgId.Trim());
             q = q.Where(x => EF.Functions.Like((x.OrgID ?? "").ToLower(), oid, PortQuery.Esc));
+        }
+
+        // ReasonID: loc ReasonID = ... (Mst_ResignReasonController.cs:805-808)
+        if (!string.IsNullOrWhiteSpace(reasonId))
+        {
+            var rid = PortQuery.Equal(reasonId.Trim());
+            q = q.Where(x => EF.Functions.Like((x.ReasonID ?? "").ToLower(), rid, PortQuery.Esc));
         }
 
         // KeyWord: loc ResignReason like '%...%' (Mst_ResignReasonController.cs:777)
@@ -67,7 +95,7 @@ public class Mst_ResignReasonControllerPort : ControllerBase
             q = q.Where(x => EF.Functions.Like((x.ResignReason ?? "").ToLower(), kw, PortQuery.Esc));
         }
 
-        // FlagActive: cat chuoi bang dau phay, dung toan tu IN (Mst_ResignReasonController.cs:789-794)
+        // FlagActive: cat chuoi bang dau phay, dung toan tu IN (Mst_ResignReasonController.cs:789-794) / toán tử = ở By_ReasonID (dòng 815)
         if (!string.IsNullOrWhiteSpace(flagActive))
         {
             var faArr = flagActive.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim()).ToList();
