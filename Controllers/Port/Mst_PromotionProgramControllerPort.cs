@@ -18,6 +18,7 @@ namespace MiniLoyalty.Controllers.Port;
 //   - GetByPrProgramCode (#207)
 //   - Save (#208) — action GHI upsert xóa-ghi lại trong 1 transaction (ép FlagActive = '1')
 //   - Update (#209) — action GHI cập nhật (dùng chung SaveCoreAsync, FlagActive theo client, nếu FlagActive='0' ghi đè EffDateEnd bằng DateTime.Now)
+//   - Delete (#210) — action GHI xóa (1 transaction, kiểm tra EffDateStart <= now, xóa Spec, Dtl, Header)
 //
 // Nguồn tra cứu (chỉ đọc):
 //   - Gate controller: 13.ClientGate/V10/idn.Loyalty.WebAPI/Controllers/Mst_PromotionProgramController.cs
@@ -29,6 +30,8 @@ namespace MiniLoyalty.Controllers.Port;
 //     * Update: :406-502 (y hệt Save, gọi cùng WA_Mst_PromotionProgram_Save -> SaveX. Khác Save ở 2 điểm:
 //       1. KHÔNG ép FlagActive = '1' mà dùng FlagActive client gửi (StdFlag: chỉ '1' là 1, thiếu/khác -> '0').
 //       2. :480-484 nếu StdFlag(FlagActive) == "0" (kể cả khi không gửi) -> EffDateEnd = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") - giờ máy chủ, không UTC).
+//     * Delete: :506-569 (PrProgramCode rỗng -> ném ServiceException("invalid_BirthPolicyNo", "invalid_BirthPolicyNo") :555;
+//       ngược lại gọi WA_Mst_PromotionProgram_Save với FlagIsDelete = "1", Data = null).
 //     * strWhereClause_Mst_PromotionProgram: :718-730 (chỉ lọc KeyWord -> PrProgramCode like '%kw%', OrgID KHÔNG dùng)
 //     * strWhereClause_Mst_PromotionProgram_By_PrProgramCode: :732-743 (lọc PrProgramCode =)
 //   - Service: WA_Mst_PromotionProgram_Get (11.BackEnd/V10/idn.Loyalty.Biz.Web/Controllers/MstPromotionProgramController.cs:22-90)
@@ -87,6 +90,12 @@ public class MstPromotionProgramSearchReq
 
 /// <summary>Port 1:1 <c>GetByPrProgramCode</c> — body nhận PrProgramCode (Mst_PromotionProgramController.cs:224).</summary>
 public class MstPromotionProgramGetByPrProgramCodeReq
+{
+    public string? PrProgramCode { get; set; }
+}
+
+/// <summary>Port 1:1 <c>Delete</c> — body nhận PrProgramCode (Mst_PromotionProgramController.cs:506, #210).</summary>
+public class MstPromotionProgramDeleteReq
 {
     public string? PrProgramCode { get; set; }
 }
@@ -282,6 +291,140 @@ public class Mst_PromotionProgramControllerPort : ControllerBase
         [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] MstPromotionProgramSaveReq? req)
     {
         return await SaveCoreAsync(req, forceActive: false);
+    }
+
+    /// <summary>
+    /// Port 1:1 action Delete của Mst_PromotionProgramController (gate Mst_PromotionProgramController.cs:506-569, #210).
+    /// Chuỗi gọi: gate Delete -> API WA_Mst_PromotionProgram_Save (MstPromotionProgramController.cs:93-163)
+    /// -> BIZ WAS_Mst_PromotionProgram_Save (Master.Loyalty.cs:13893-13995)
+    /// -> BIZ Mst_PromotionProgram_Save (Master.Loyalty.cs:13736-13891)
+    /// -> BIZ Mst_PromotionProgram_SaveX (Master.Loyalty.cs:13179-13734, bIsDelete = true).
+    ///
+    /// Hành vi tầng gate (Mst_PromotionProgramController.cs:525-556):
+    ///   - PrProgramCode rỗng / null / whitespace (hoặc body rỗng, `{}`) -> ném ServiceException("invalid_BirthPolicyNo", "invalid_BirthPolicyNo") (:555,
+    ///     chép nhầm tên từ BirthPolicy — GIỮ NGUYÊN mã nguồn) -> HTTP 400 ErridnLoyalty.invalid_BirthPolicyNo.
+    ///   - Ngược lại gọi DeleteXAsync(code) trong 1 transaction duy nhất.
+    ///   - Thành công: gate :550-551 SetSuccess + Data = null -> HTTP 200 { Success: true, Data: null }.
+    /// </summary>
+    [HttpPost("delete")]
+    public async Task<IActionResult> Delete(
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] MstPromotionProgramDeleteReq? req)
+    {
+        // 1. Kiểm tra mã rỗng tại gate (Mst_PromotionProgramController.cs:525, :555):
+        //    PrProgramCode rỗng / body rỗng -> throw new ServiceException("invalid_BirthPolicyNo", "invalid_BirthPolicyNo")
+        if (string.IsNullOrWhiteSpace(req?.PrProgramCode))
+        {
+            return PortResult.Fail("invalid_BirthPolicyNo", "Check.PrProgramCode", req?.PrProgramCode);
+        }
+
+        // 2. Thực hiện nghiệp vụ xóa qua DeleteXAsync (1 transaction) — tách riêng để DeleteMultiple sau dùng lại.
+        var err = await DeleteXAsync(req.PrProgramCode);
+        if (err != null)
+        {
+            return err;
+        }
+
+        // 3. Thành công: gate Mst_PromotionProgramController.cs:550-551 SetSuccess + Data = null
+        return Ok(new
+        {
+            Success = true,
+            Data = (object?)null
+        });
+    }
+
+    /// <summary>
+    /// Nghiệp vụ xóa 1 chương trình khuyến mại — 1 transaction duy nhất.
+    /// Nguồn:
+    ///   - WA_Mst_PromotionProgram_Save (MstPromotionProgramController.cs:93-163)
+    ///   - WAS_Mst_PromotionProgram_Save (Master.Loyalty.cs:13893-13995)
+    ///   - Mst_PromotionProgram_Save (Master.Loyalty.cs:13736-13891)
+    ///   - Mst_PromotionProgram_SaveX (Master.Loyalty.cs:13179-13734, bIsDelete = true).
+    ///
+    /// Quy trình nghiệp vụ:
+    ///   1. Chuẩn hoá mã qua StdParam (Trim + ToUpper, rỗng -> null).
+    ///   2. CheckDB (:13245-13253): So sánh chuỗi DB bằng Like + PortQuery.Equal.
+    ///      Nếu KHÔNG tồn tại trong DB -> goto MyCodeLabel_Done = THÀNH CÔNG, không làm gì (:13255-13258).
+    ///   3. CẢNH BÁO HÀNH VI NGUỒN (:13298-13331):
+    ///      Nếu chương trình có EffDateStart > now (DateTime.UtcNow) -> ném lỗi ErridnLoyalty.Mst_PromotionProgram_SaveX_InvalidEffDateStart.
+    ///      Hành vi nguồn: CHỈ cho phép xóa chương trình ĐÃ BẮT ĐẦU (EffDateStart <= now). Chương trình có ngày bắt đầu ở tương lai KHÔNG xóa được.
+    ///   4. Xóa Spec, Dtl, Header cùng PrProgramCode trong 1 transaction (:13562-13588). Không insert mới (:13591 chỉ chạy khi !bIsDelete).
+    ///
+    /// Dùng chung cho Delete (#210) và DeleteMultiple sau này.
+    /// </summary>
+    private async Task<IActionResult?> DeleteXAsync(string? code)
+    {
+        // 1. Mở 1 transaction cho nghiệp vụ xóa (Master.Loyalty.cs:13776 _cf.db.BeginTransaction()).
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // 2. Chuẩn hoá mã qua StdParam: Trim, ToUpper, rỗng -> null (Master.Loyalty.cs:13230)
+            var strPrProgramCode = StdParam(code);
+            if (string.IsNullOrEmpty(strPrProgramCode))
+            {
+                // Nếu mã sau chuẩn hoá rỗng -> không tồn tại -> thành công không làm gì (Master.Loyalty.cs:13255-13258)
+                return null;
+            }
+
+            var codeParam = PortQuery.Equal(strPrProgramCode);
+
+            // 3. CheckDB (Master.Loyalty.cs:13245-13253):
+            //    Tìm chương trình bằng Like + PortQuery.Equal (hạ chữ 2 phía, collation không phân biệt hoa thường)
+            var program = await _db.Set<Mst_PromotionProgram>()
+                .FirstOrDefaultAsync(h => EF.Functions.Like((h.PrProgramCode ?? "").ToLower(), codeParam, PortQuery.Esc));
+
+            // Bước 1 nguồn: KHÔNG tồn tại -> goto MyCodeLabel_Done = THÀNH CÔNG, không làm gì (Master.Loyalty.cs:13255-13258).
+            if (program == null)
+            {
+                return null;
+            }
+
+            // Bước 2 nguồn (Master.Loyalty.cs:13298-13331):
+            // CẢNH BÁO HÀNH VI NGUỒN:
+            // Nguồn kiểm tra nếu chương trình có EffDateStart > now (DateTime.UtcNow) -> ném Mst_PromotionProgram_SaveX_InvalidEffDateStart.
+            // Nghĩa là: CHỈ xóa được chương trình ĐÃ BẮT ĐẦU (EffDateStart <= now). Chương trình ở tương lai KHÔNG xóa được.
+            var nowUtc = DateTime.UtcNow;
+            if (program.EffDateStart > nowUtc)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail(
+                    "Mst_PromotionProgram_SaveX_InvalidEffDateStart",
+                    "Check.PrProgramCode", strPrProgramCode,
+                    "Check.EffDateStart", program.EffDateStart.ToString("yyyy-MM-dd HH:mm:ss"),
+                    "Check.strToday", nowUtc.ToString("yyyy-MM-dd HH:mm:ss"));
+            }
+
+            // Bước 3 nguồn: Xóa Spec, Dtl, Header cùng PrProgramCode (Master.Loyalty.cs:13562-13588)
+            // 3.1. Xóa Spec cũ (Master.Loyalty.cs:13563-13569)
+            var specs = await _db.Set<Mst_PromotionProgramSpec>()
+                .Where(s => EF.Functions.Like((s.PrProgramCode ?? "").ToLower(), codeParam, PortQuery.Esc))
+                .ToListAsync();
+            if (specs.Count > 0)
+            {
+                _db.Set<Mst_PromotionProgramSpec>().RemoveRange(specs);
+            }
+
+            // 3.2. Xóa Dtl cũ (Master.Loyalty.cs:13570-13576)
+            var dtls = await _db.Set<Mst_PromotionProgramDtl>()
+                .Where(d => EF.Functions.Like((d.PrProgramCode ?? "").ToLower(), codeParam, PortQuery.Esc))
+                .ToListAsync();
+            if (dtls.Count > 0)
+            {
+                _db.Set<Mst_PromotionProgramDtl>().RemoveRange(dtls);
+            }
+
+            // 3.3. Xóa Header cũ (Master.Loyalty.cs:13578-13584)
+            _db.Set<Mst_PromotionProgram>().Remove(program);
+
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+
+            return null; // Thành công
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return PortResult.Fail("Mst_PromotionProgram_Save", "Exception", ex.Message);
+        }
     }
 
     /// <summary>
