@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using MiniLoyalty.Data;
 using MiniLoyalty.Models.Port;
 
@@ -87,16 +88,44 @@ public class MstPolicyExpenseTypeGetByPolicyExpenseTypeNoReq
     public string? PolicyExpenseTypeNo { get; set; }
 }
 
+/// <summary>
+/// DTO đại diện 1 dòng chi phí trong danh sách gửi lên của Save (Master.Loyalty.cs:8273-8287).
+/// </summary>
+public class MstPolicyExpenseTypeSaveRowReq
+{
+    public string? ExpenseType { get; set; }
+    public string? ExpenseTypeNameActual { get; set; }
+    public string? FlagPoint { get; set; }
+    public string? FlagPointRank { get; set; }
+    public double? AmountRate { get; set; }
+    public double? MaxRankReviewPoint { get; set; }
+    public double? MaxAccumulationPoint { get; set; }
+    public string? FlagCountService { get; set; }
+    public string? FlagDiscount { get; set; }
+    public double? DiscountRate { get; set; }
+    public string? Remark { get; set; }
+}
+
+/// <summary>
+/// Body của Save: { Lst_Mst_PolicyExpenseType: [ ... ] } (gate Mst_PolicyExpenseTypeController.cs:328-336).
+/// </summary>
+public class MstPolicyExpenseTypeSaveReq
+{
+    public List<MstPolicyExpenseTypeSaveRowReq>? Lst_Mst_PolicyExpenseType { get; set; }
+}
+
 [ApiController]
 [Route("api/mst_policyexpensetype")]
 [Produces("application/json")]
 public class Mst_PolicyExpenseTypeControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly IConfiguration _config;
 
-    public Mst_PolicyExpenseTypeControllerPort(AppDbContext db)
+    public Mst_PolicyExpenseTypeControllerPort(AppDbContext db, IConfiguration config)
     {
         _db = db;
+        _config = config;
     }
 
     /// <summary>
@@ -177,6 +206,220 @@ public class Mst_PolicyExpenseTypeControllerPort : ControllerBase
             Success = true,
             Data = rows.Count > 0 ? rows[0] : null
         });
+    }
+
+    // ============================================================================================
+    // Save — nguồn Mst_PolicyExpenseTypeController.cs:319-411 (gate) -> MstPolicyExpenseTypeController.cs:23-93 (API)
+    //   -> Master.Loyalty.cs:7876-7961 (WAS_Mst_PolicyExpenseType_Save) -> :7962-8101 (Mst_PolicyExpenseType_Save)
+    //   -> :8203-8498 (Mst_PolicyExpenseType_SaveX) -> :8103-8195 (Mst_PolicyExpenseType_Perform).
+    //
+    // GIỮ ĐÚNG NGUỒN:
+    //   * Body JSON: { Lst_Mst_PolicyExpenseType: [ { ExpenseType, ExpenseTypeNameActual, FlagPoint, ... } ] }
+    //   * seq tăng cả khi lỗi: Lấy mã sequence trước khi lưu (gate :351-371, SeqType.PolicyExpenseTypeNo)
+    //     qua bảng Seq_PolicyExpenseTypeNo trong transaction RIÊNG đã commit độc lập (Seq.cs:172-180),
+    //     rồi gán CÙNG 1 mã cho mọi dòng (:373-376). Do đó sequence tăng MỖI LẦN GỌI vượt qua bước body rỗng,
+    //     KỂ CẢ KHI LƯU LỖI SAU ĐÓ hoặc khi Lst_Mst_PolicyExpenseType là null (gate :373 gọi .Count() ném NullReferenceException SAU khi lấy seq).
+    //     Body rỗng hoàn toàn -> ServiceException("strJson null") -> mã mặc định Mst_PolicyExpenseType_Save (KHÔNG tăng seq).
+    //   * xoá toàn bảng: Mst_PolicyExpenseType_SaveX (:8391-8401) thực hiện `delete t from Mst_PolicyExpenseType t where (1=1)`
+    //     xoá toàn bộ chính sách trước khi insert các dòng input mới.
+    //   * [] xoá hết: Nếu client gửi Lst_Mst_PolicyExpenseType: [], không có lỗi xảy ra, bảng Mst_PolicyExpenseType
+    //     bị XOÁ HẾT thành 0 dòng (hành vi nguồn :8261-8271 bị comment). CẢNH BÁO: xoá sạch dữ liệu chính sách.
+    //   * Hist lưu lịch sử: Mst_PolicyExpenseType_Perform (:8103-8195, :8469) copy toàn bộ các dòng input vào bảng
+    //     Mst_PolicyExpenseTypeHist (14 cột DB + AutoId PK tự tăng). Bảng này không bao giờ bị xoá khi Save.
+    //   * validate DiscountRate:
+    //     - 0 <= DiscountRate <= 100 (:8309-8328), vi phạm ném Mst_PolicyExpenseType_Save_InvalidValue.
+    //     - Kiểm tra chéo: FlagDiscount != "1" mà DiscountRate != 0 (:8330-8346), vi phạm ném Mst_PolicyExpenseType_Save_InvalidValue.
+    //   * Kiểm tra hợp lệ từng dòng:
+    //     1) Mst_ExpenseType_CheckDB(ExpenseType, "1", "1") (:8301-8307, :6705-6769):
+    //        Không tồn tại: ErridnLoyalty.Mst_ExpenseType_CheckDB_ExpenseTypeNotFound (:6737).
+    //        FlagActive != '1': ErridnLoyalty.Mst_ExpenseType_CheckDB_FlagActiveNotMatched (:6764).
+    //     2) validate DiscountRate như trên.
+    //     3) Trùng ExpenseType trong input -> vi phạm composite PK (PolicyExpenseTypeNo, ExpenseType) -> rollback -> Mst_PolicyExpenseType_Save.
+    //   * Lưu: 1 transaction duy nhất, lỗi -> rollback + PortResult.Fail. Thành công -> Data = null, Success = true (:397-398).
+    //   * NetworkID lấy từ cấu hình: IConfiguration["Biz_NetworkID"] ?? "1001" (GAP nguồn lấy từ session user).
+    //   * LogLUBy = "port", LogLUDTimeUTC = DateTime.UtcNow.
+    // ============================================================================================
+    [HttpPost("save")]
+    public async Task<IActionResult> Save([FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] MstPolicyExpenseTypeSaveReq? req)
+    {
+        // 0. Body rỗng / null: gate :329-335 ném ServiceException("strJson null") -> mã mặc định Mst_PolicyExpenseType_Save.
+        // Bước này xảy ra TRƯỚC khi gọi sequence nên seq KHÔNG tăng.
+        if (req == null)
+        {
+            return PortResult.Fail("Mst_PolicyExpenseType_Save", "Check.strJson", null);
+        }
+
+        // seq tăng cả khi lỗi: Lấy sequence trong transaction RIÊNG đã commit (gate :351-371, Seq.cs:172-180).
+        // Nhờ transaction riêng commit độc lập, sequence vẫn tăng kể cả khi bước lưu sau bị lỗi.
+        var seq = await PortSeq.NextAsync<Seq_PolicyExpenseTypeNo>(_db);
+        var policyExpenseTypeNo = PortSeq.Build("{0}POLICYEXPENSETYPENO.{3}.{1:00000}{2}", "", seq, 100000, "", DateTime.UtcNow);
+
+        // 1. Kiểm tra Lst_Mst_PolicyExpenseType:
+        // Gate :373 gọi objRQ_Mst_PolicyExpenseTypeInput.Lst_Mst_PolicyExpenseType.Count() ném NullReferenceException SAU khi đã lấy seq
+        // -> mã mặc định Mst_PolicyExpenseType_Save.
+        if (req.Lst_Mst_PolicyExpenseType == null)
+        {
+            return PortResult.Fail("Mst_PolicyExpenseType_Save", "Check.Lst_Mst_PolicyExpenseType", null);
+        }
+
+        var inputRows = req.Lst_Mst_PolicyExpenseType;
+
+        // [] xoá hết: Nếu mảng rỗng -> xoá sạch toàn bộ Mst_PolicyExpenseType, Data = null, Success = true (hành vi nguồn :8391-8401).
+        // CẢNH BÁO: hành vi nguồn xoá sạch toàn bộ bảng chính sách khi danh sách rỗng.
+        if (inputRows.Count == 0)
+        {
+            await using var txEmpty = await _db.Database.BeginTransactionAsync();
+            try
+            {
+                // xoá toàn bảng Mst_PolicyExpenseType (Master.Loyalty.cs:8391-8401)
+                await _db.Database.ExecuteSqlRawAsync("DELETE FROM \"Mst_PolicyExpenseType\"");
+                await txEmpty.CommitAsync();
+                return Ok(new { Success = true, Data = (object?)null });
+            }
+            catch (Exception ex)
+            {
+                await txEmpty.RollbackAsync();
+                return PortResult.Fail("Mst_PolicyExpenseType_Save", "Exception", ex.Message);
+            }
+        }
+
+        // 2. Duyệt từng dòng theo thứ tự gửi lên để kiểm tra hợp lệ (Master.Loyalty.cs:8294-8356)
+        var networkId = _config["Biz_NetworkID"] ?? "1001";
+        var now = DateTime.UtcNow;
+        var newPolicies = new List<Mst_PolicyExpenseType>();
+        var newHists = new List<Mst_PolicyExpenseTypeHist>();
+
+        for (int nScan = 0; nScan < inputRows.Count; nScan++)
+        {
+            var drScan = inputRows[nScan];
+
+            // Chuẩn hoá đầu vào (Master.Loyalty.cs:8273-8287)
+            // PolicyExpenseTypeNo, ExpenseType: StdParam (Trim + ToUpper)
+            var expenseType = string.IsNullOrWhiteSpace(drScan.ExpenseType) ? "" : drScan.ExpenseType.Trim().ToUpperInvariant();
+            var expenseTypeNameActual = drScan.ExpenseTypeNameActual ?? "";
+
+            // FlagPoint, FlagPointRank, FlagCountService, FlagDiscount: StdFlag ("1" nếu "1", ngược lại "0")
+            var flagPoint = string.Equals(drScan.FlagPoint?.Trim(), "1", StringComparison.OrdinalIgnoreCase) ? "1" : "0";
+            var flagPointRank = string.Equals(drScan.FlagPointRank?.Trim(), "1", StringComparison.OrdinalIgnoreCase) ? "1" : "0";
+            var flagCountService = string.Equals(drScan.FlagCountService?.Trim(), "1", StringComparison.OrdinalIgnoreCase) ? "1" : "0";
+            var flagDiscount = string.Equals(drScan.FlagDiscount?.Trim(), "1", StringComparison.OrdinalIgnoreCase) ? "1" : "0";
+
+            var amountRate = drScan.AmountRate;
+            var maxRankReviewPoint = drScan.MaxRankReviewPoint;
+            var maxAccumulationPoint = drScan.MaxAccumulationPoint;
+            var discountRate = drScan.DiscountRate;
+            var remark = string.IsNullOrWhiteSpace(drScan.Remark) ? null : drScan.Remark.Trim();
+
+            // 2.a: Mst_ExpenseType_CheckDB(ExpenseType, "1", "1") (Master.Loyalty.cs:8301-8307, :6705-6769)
+            // So sánh chuỗi trong DB qua PortQuery.Equal và PortQuery.Esc (bẫy #18/#31, PORT_RULES §3)
+            var matchEt = PortQuery.Equal(expenseType);
+            var dbExpenseType = await _db.Set<Mst_ExpenseType>()
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => EF.Functions.Like(x.ExpenseType.ToLower(), matchEt, PortQuery.Esc));
+
+            if (dbExpenseType == null)
+            {
+                // Không tìm thấy ExpenseType trong Mst_ExpenseType (:6737)
+                return PortResult.Fail("Mst_ExpenseType_CheckDB_ExpenseTypeNotFound", "Check.ExpenseType", drScan.ExpenseType);
+            }
+
+            if (!string.Equals(dbExpenseType.FlagActive, "1", StringComparison.OrdinalIgnoreCase))
+            {
+                // Tìm thấy nhưng FlagActive != "1" (:6764)
+                return PortResult.Fail(
+                    "Mst_ExpenseType_CheckDB_FlagActiveNotMatched",
+                    "Check.ExpenseType", drScan.ExpenseType,
+                    "Check.strFlagActiveListToCheck", "1",
+                    "DB.FlagActive", dbExpenseType.FlagActive);
+            }
+
+            // 2.b: validate DiscountRate: 0 <= DiscountRate <= 100 (Master.Loyalty.cs:8309-8328)
+            var dDiscountRate = discountRate ?? 0.0;
+            if (dDiscountRate < 0 || dDiscountRate > 100)
+            {
+                return PortResult.Fail(
+                    "Mst_PolicyExpenseType_Save_InvalidValue",
+                    "Check.ExpenseType", drScan.ExpenseType,
+                    "Check.DiscountRate", drScan.DiscountRate,
+                    "Check.ErrCoditional", "DiscountRate < 0 or DiscountRate > 100");
+            }
+
+            // 2.c: validate DiscountRate: kiểm tra chéo FlagDiscount != "1" mà DiscountRate != 0 (Master.Loyalty.cs:8330-8346)
+            if (!string.Equals(flagDiscount, "1", StringComparison.OrdinalIgnoreCase) && dDiscountRate != 0)
+            {
+                return PortResult.Fail(
+                    "Mst_PolicyExpenseType_Save_InvalidValue",
+                    "Check.ExpenseType", drScan.ExpenseType,
+                    "Check.FlagDiscount", drScan.FlagDiscount,
+                    "Check.DiscountRate", drScan.DiscountRate,
+                    "Check.ErrCoditional", "FlagDiscount not '1' but DiscountRate <> 0");
+            }
+
+            // Thêm vào danh sách entity Mst_PolicyExpenseType (16 cột DB)
+            newPolicies.Add(new Mst_PolicyExpenseType
+            {
+                PolicyExpenseTypeNo = policyExpenseTypeNo,
+                ExpenseType = expenseType,
+                NetworkID = networkId,
+                ExpenseTypeNameActual = expenseTypeNameActual,
+                FlagPoint = flagPoint,
+                FlagPointRank = flagPointRank,
+                AmountRate = amountRate,
+                MaxRankReviewPoint = maxRankReviewPoint,
+                MaxAccumulationPoint = maxAccumulationPoint,
+                FlagCountService = flagCountService,
+                FlagDiscount = flagDiscount,
+                DiscountRate = discountRate,
+                FlagActive = "1",
+                Remark = remark,
+                LogLUDTimeUTC = now,
+                LogLUBy = "port"
+            });
+
+            // Hist lưu lịch sử: Mst_PolicyExpenseTypeHist (14 cột DB + AutoId tự tăng) — Master.Loyalty.cs:8129-8145
+            newHists.Add(new Mst_PolicyExpenseTypeHist
+            {
+                PolicyExpenseTypeNo = policyExpenseTypeNo,
+                ExpenseType = expenseType,
+                NetworkID = networkId,
+                ExpenseTypeNameActual = expenseTypeNameActual,
+                FlagPoint = flagPoint,
+                AmountRate = amountRate,
+                MaxRankReviewPoint = maxRankReviewPoint,
+                MaxAccumulationPoint = maxAccumulationPoint,
+                FlagDiscount = flagDiscount,
+                DiscountRate = discountRate,
+                FlagActive = "1",
+                Remark = remark,
+                LogLUDTimeUTC = now,
+                LogLUBy = "port"
+            });
+        }
+
+        // 3. Xoá toàn bộ Mst_PolicyExpenseType (where 1=1) rồi ghi lại và ghi lịch sử (Master.Loyalty.cs:8391-8465, :8469)
+        // 1 transaction duy nhất; trùng ExpenseType trong input -> vi phạm PK composite -> rollback -> lỗi mặc định Mst_PolicyExpenseType_Save
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // xoá toàn bảng Mst_PolicyExpenseType (Master.Loyalty.cs:8391-8401)
+            await _db.Database.ExecuteSqlRawAsync("DELETE FROM \"Mst_PolicyExpenseType\"");
+
+            // Thêm các dòng Mst_PolicyExpenseType
+            _db.Set<Mst_PolicyExpenseType>().AddRange(newPolicies);
+
+            // Hist lưu lịch sử: Mst_PolicyExpenseType_Perform: copy các dòng input vào Mst_PolicyExpenseTypeHist (Master.Loyalty.cs:8103-8195)
+            _db.Set<Mst_PolicyExpenseTypeHist>().AddRange(newHists);
+
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return PortResult.Fail("Mst_PolicyExpenseType_Save", "Exception", ex.Message);
+        }
     }
 
     /// <summary>

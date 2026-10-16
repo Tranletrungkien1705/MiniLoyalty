@@ -229,3 +229,76 @@ public class Mst_PolicyExpenseTypeSeeder : IPortSeeder
         await db.SaveChangesAsync();
     }
 }
+
+/// <summary>
+/// Lịch sử chính sách loại chi phí — port 1:1 bảng <c>Mst_PolicyExpenseTypeHist</c>.
+/// DDL: 20221026.CreateDatabase.sql:129-150 + 20260723.z16.PolicyExpenseType_Discount.sql:41,50.
+/// PK = AutoId (bigint IDENTITY(1,1) PK tự tăng).
+/// Gồm 14 cột theo DDL và câu insert Master.Loyalty.cs:8129-8145.
+/// Được ghi bởi Mst_PolicyExpenseType_Perform (Master.Loyalty.cs:8103-8195).
+/// </summary>
+public class Mst_PolicyExpenseTypeHist
+{
+    public long AutoId { get; set; }                       // AutoId — bigint IDENTITY(1,1) PK
+    public string PolicyExpenseTypeNo { get; set; } = "";  // Mã chính sách chi phí (Varchar50 NOT NULL) — Master.Loyalty.cs:8132
+    public string ExpenseType { get; set; } = "";          // Mã loại chi phí (Varchar50 NOT NULL) — :8131
+    public string NetworkID { get; set; } = "";            // Mã mạng (Varchar50 NOT NULL) — :8133
+    public string ExpenseTypeNameActual { get; set; } = "";// Tên loại đối tượng thực tế (Varchar200 NOT NULL) — :8134
+    public string? FlagPoint { get; set; }                 // Đối tượng áp dụng (MyStatus) — :8135
+    public double? AmountRate { get; set; }                // Tỉ lệ tích điểm (MyValue) — :8136
+    public double? MaxRankReviewPoint { get; set; }        // Điểm xét hạng tối đa (MyValue) — :8137
+    public double? MaxAccumulationPoint { get; set; }      // Điểm tích lũy tối đa (MyValue) — :8138
+    public string? FlagDiscount { get; set; }              // Có chiết khấu dịch vụ (MyStatus) — :8139
+    public double? DiscountRate { get; set; }              // Tỉ lệ chiết khấu dịch vụ (0..100) (MyValue) — :8140
+    public string? FlagActive { get; set; }                // Cờ hoạt động (MyStatus) — :8141
+    public string? Remark { get; set; }                    // Ghi chú (Varchar400) — :8142
+    public DateTime? LogLUDTimeUTC { get; set; }           // Thời điểm cập nhật UTC (MyDateTime) — :8143
+    public string? LogLUBy { get; set; }                   // Người cập nhật (Varchar50) — :8144
+}
+
+/// <summary>
+/// Cấu hình EF cho <see cref="Mst_PolicyExpenseTypeHist"/> — PK AutoId tự tăng.
+/// </summary>
+public class Mst_PolicyExpenseTypeHistConfig : IEntityTypeConfiguration<Mst_PolicyExpenseTypeHist>
+{
+    public void Configure(EntityTypeBuilder<Mst_PolicyExpenseTypeHist> b)
+    {
+        b.ToTable("Mst_PolicyExpenseTypeHist");
+        b.HasKey(x => x.AutoId);
+        b.Property(x => x.AutoId).ValueGeneratedOnAdd();
+        b.Property(x => x.PolicyExpenseTypeNo).IsRequired().HasMaxLength(50);
+        b.Property(x => x.ExpenseType).IsRequired().HasMaxLength(50);
+        b.Property(x => x.NetworkID).IsRequired().HasMaxLength(50);
+        b.Property(x => x.ExpenseTypeNameActual).IsRequired().HasMaxLength(200);
+        b.Property(x => x.FlagPoint).HasMaxLength(10);
+        b.Property(x => x.FlagDiscount).HasMaxLength(10);
+        b.Property(x => x.FlagActive).HasMaxLength(10);
+        b.Property(x => x.Remark).HasMaxLength(400);
+        b.Property(x => x.LogLUBy).HasMaxLength(50);
+    }
+}
+
+/// <summary>
+/// Bảng sinh sequence cho mã chính sách chi phí — port 1:1 bảng <c>Seq_PolicyExpenseTypeNo</c>.
+/// DDL: 20221026.CreateDatabase.sql:290-300.
+/// PK = AutoId (bigint IDENTITY(1,1) PK tự tăng).
+/// </summary>
+public class Seq_PolicyExpenseTypeNo
+{
+    public long AutoId { get; set; }                       // AutoId — bigint IDENTITY(1,1) PK
+    public string? Remark { get; set; }                    // Remark — Varchar50
+}
+
+/// <summary>
+/// Cấu hình EF cho <see cref="Seq_PolicyExpenseTypeNo"/> — PK AutoId tự tăng.
+/// </summary>
+public class Seq_PolicyExpenseTypeNoConfig : IEntityTypeConfiguration<Seq_PolicyExpenseTypeNo>
+{
+    public void Configure(EntityTypeBuilder<Seq_PolicyExpenseTypeNo> b)
+    {
+        b.ToTable("Seq_PolicyExpenseTypeNo");
+        b.HasKey(x => x.AutoId);
+        b.Property(x => x.AutoId).ValueGeneratedOnAdd();
+    }
+}
+
