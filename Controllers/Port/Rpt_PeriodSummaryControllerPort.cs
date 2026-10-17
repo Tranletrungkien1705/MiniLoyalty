@@ -4,10 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
-<<<<<<< Updated upstream
-=======
 using ClosedXML.Excel;
->>>>>>> Stashed changes
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
@@ -869,7 +866,6 @@ public class Rpt_PeriodSummaryControllerPort : ControllerBase
     }
 
     /// <summary>
-<<<<<<< Updated upstream
     /// Từ điển 10 cột xuất Excel báo cáo đối soát tổng hợp kỳ Rpt_PeriodSummary.
     /// Nguồn: Rpt_PeriodSummaryController.cs:1568-1587 (GetImportDicColumsRpt).
     /// </summary>
@@ -947,7 +943,46 @@ public class Rpt_PeriodSummaryControllerPort : ControllerBase
         // 5. Tính toán nghiệp vụ lại cho cột HCol: (rps.HCol + rps.LCol) — Report.cs:4754
         // "Tổng số điểm hết hạn của tháng đối soát = Điểm hết hạn của tháng + Điểm hủy của tháng"
         foreach (var item in list)
-=======
+        {
+            item.HCol = (item.HCol ?? 0) + (item.LCol ?? 0);
+        }
+
+        // 6. Chuẩn bị đường dẫn thư mục xuất file Excel — gate :851-852
+        var webRoot = _env?.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = _env != null
+                ? Path.Combine(_env.ContentRootPath, "wwwroot")
+                : Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+        }
+
+        string virtualPath;
+        try
+        {
+            // 7. Lấy từ điển 10 cột từ GetImportDicColumsRpt(), sinh file và xuất Excel — gate :849, :852, :854
+            var dicColNames = GetImportDicColumsRpt();
+            var (physicalPath, vPath) = PortExcel.GenExcelExportFilePath(webRoot, "Rpt_PeriodSummary");
+            virtualPath = vPath;
+            PortExcel.ExportToExcelFromList(list, dicColNames, physicalPath, "Rpt_PeriodSummary");
+        }
+        catch (Exception ex)
+        {
+            // Bắt ngoại lệ nếu ghi file lỗi -> trả Fail (gate :868-872)
+            return PortResult.Fail("Rpt_PeriodSummary_ExportExcelRpt", "Exception", ex.Message);
+        }
+
+        // 8. Trả URL tải file với Success = true — gate :856-860
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+            }
+        });
+    }
+
+    /// <summary>
     /// Port 1:1 action ExportExcelRptDtl — xuất Excel báo cáo đối soát chi tiết 3 sheet (#292).
     /// Nguồn tra cứu (chỉ đọc):
     ///   - Gate:     13.ClientGate/V10/idn.Loyalty.WebAPI/Controllers/Rpt_PeriodSummaryController.cs:881-1041 (ExportExcelRptDtl)
@@ -995,14 +1030,10 @@ public class Rpt_PeriodSummaryControllerPort : ControllerBase
         }
         var list1 = await q1.OrderByDescending(x => x.LogLUDTimeUTC).ToListAsync();
         foreach (var item in list1)
->>>>>>> Stashed changes
         {
             item.HCol = (item.HCol ?? 0) + (item.LCol ?? 0);
         }
 
-<<<<<<< Updated upstream
-        // 6. Chuẩn bị đường dẫn thư mục xuất file Excel — gate :851-852
-=======
         // 2. Sheet 2 — Rpt_PeriodSummary_Transaction (gate :940-975, biz :5785-6275)
         var q2 = _db.Set<Rpt_PeriodSummary_Transaction>().AsNoTracking().AsQueryable();
         if (!string.IsNullOrWhiteSpace(req?.DLCPCode))
@@ -1085,7 +1116,6 @@ public class Rpt_PeriodSummaryControllerPort : ControllerBase
         }).ToList();
 
         // 4. Chuẩn bị đường dẫn thư mục xuất file Excel (gate :1017-1019)
->>>>>>> Stashed changes
         var webRoot = _env?.WebRootPath;
         if (string.IsNullOrWhiteSpace(webRoot))
         {
@@ -1094,24 +1124,6 @@ public class Rpt_PeriodSummaryControllerPort : ControllerBase
                 : Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
         }
 
-<<<<<<< Updated upstream
-        string virtualPath;
-        try
-        {
-            // 7. Lấy từ điển 10 cột từ GetImportDicColumsRpt(), sinh file và xuất Excel — gate :849, :852, :854
-            var dicColNames = GetImportDicColumsRpt();
-            var (physicalPath, vPath) = PortExcel.GenExcelExportFilePath(webRoot, "Rpt_PeriodSummary");
-            virtualPath = vPath;
-            PortExcel.ExportToExcelFromList(list, dicColNames, physicalPath, "Rpt_PeriodSummary");
-        }
-        catch (Exception ex)
-        {
-            // Bắt ngoại lệ nếu ghi file lỗi -> trả Fail (gate :868-872)
-            return PortResult.Fail("Rpt_PeriodSummary_ExportExcelRpt", "Exception", ex.Message);
-        }
-
-        // 8. Trả URL tải file với Success = true — gate :856-860
-=======
         var (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Rpt_PeriodSummaryDtl");
 
         // 5. Ghi 1 workbook duy nhất gồm 3 sheet (gate :1020-1022)
@@ -1129,7 +1141,6 @@ public class Rpt_PeriodSummaryControllerPort : ControllerBase
         }
 
         // 6. Trả URL tải file với Success = true (gate :1024-1028)
->>>>>>> Stashed changes
         return Ok(new
         {
             Success = true,
@@ -1139,8 +1150,235 @@ public class Rpt_PeriodSummaryControllerPort : ControllerBase
             }
         });
     }
-<<<<<<< Updated upstream
-=======
+
+    /// <summary>
+    /// Port 1:1 action ExportExcelRptDtl_New20230317 — xuất Excel báo cáo đối soát chi tiết 4 sheet (#293).
+    /// Nguồn tra cứu (chỉ đọc):
+    ///   - Gate:     13.ClientGate/V10/idn.Loyalty.WebAPI/Controllers/Rpt_PeriodSummaryController.cs:1042-1243 (ExportExcelRptDtl_New20230317)
+    ///   - Filter:   Rpt_PeriodSummaryController.cs:649-666 (strWhereClause_Rpt_PeriodSummaryDtl_01),
+    ///               :667-700 (strWhereClause_Rpt_PeriodSummary_Transaction),
+    ///               :702-736 (strWhereClause_RptPE_CrdTransationDeCreaseInstPeriodDtl)
+    ///   - Service:  13.ClientGate/V10/idn.Loyalty.ClientService/Services/Loyalty/Rpt_PeriodSummaryService.cs:21-27, :41-45, :46-50
+    ///   - API:      11.BackEnd/V10/idn.Loyalty.Biz.Web/Controllers/ReportController.cs:656-724, :725-789, :795-862
+    ///   - Biz LIVE: 11.BackEnd/V10/idn.Loyalty.Biz/Report.cs:5376-5781 (WAS_Rpt_PeriodSummaryDtl_01_Get -> Rpt_PeriodSummaryDtl_01_GetX),
+    ///               :5785-6275 (WAS_Rpt_PeriodSummary_Transaction_Get -> Rpt_PeriodSummary_Transaction_GetX),
+    ///               :10941-11394 (WAS_RptPE_CrdTransationDeCreaseInstPeriodDtl_Get -> RptPE_CrdTransationDeCreaseInstPeriodDtl_GetX)
+    ///   - Columns:  Rpt_PeriodSummaryController.cs:1617-1649 (GetImportDicColumsRptDtl01 - 24 cột),
+    ///               :1518-1537 (GetImportDicColumsTransaction - 14 cột),
+    ///               :1652-1680 (GetImportDicColumsCrdTransationDeCreaseInstPeriodDtl - 22 cột)
+    ///
+    /// ĐẶC ĐIỂM NGHIỆP VỤ:
+    ///   - Gate ExportExcelRptDtl_New20230317 nhận 3 tham số: DLCPCode, PeriodMonth, DLCodeExceptionally (:1042).
+    ///   - Sheet 1: Rpt_PeriodSummaryDtl_01 (:1064-1100)
+    ///       + Lọc DLCPCode (toán tử '=' trên cột DLCPCode) và PeriodMonth (toán tử '=' trên cột PeriodMonth) (:649-666).
+    ///       + Sắp xếp order by rpsd.LogLUDTimeUTC desc (:5685, :5726).
+    ///       + Cột HCol: KHÔNG tính lại (giữ nguyên DB theo Report.cs:5721-5726).
+    ///       + 24 cột từ điển theo GetImportDicColumsRptDtl01() (:1617-1649).
+    ///   - Sheet 2: Rpt_PeriodSummary_Transaction (:1102-1137)
+    ///       + Lọc DLCode = DLCPCode (toán tử '=' trên cột DLCode) và PeriodMonth (toán tử '=' trên cột PeriodMonth) (:667-700).
+    ///       + Join Crd_CardTransaction lấy CreateDTimeUTC và CardNo; sắp xếp order by rpst.LogLUDTimeUTC desc (:6167).
+    ///       + 14 cột từ điển theo GetImportDicColumsTransaction() (:1518-1537).
+    ///   - Sheet 3: Rpt_PeriodSummary_TransactionExceptionally (:1139-1173)
+    ///       + Lọc draft theo DLCodeExceptionally (=) và PeriodMonth (=) (:667-700).
+    ///       + Inner join rpste trên (PeriodMonth, DLCodeExceptionally, AutoID); left join Crd_CardTransaction cct trên AutoID (:6206-6210).
+    ///       + Điều kiện lọc trên rpste: rpste.DLCode != rpste.DLCodeExceptionally và rpste.DealPointType == "CONSUMPTION" (:6212-6213).
+    ///       + Sắp xếp order by rpste.LogLUDTimeUTC desc (:6215).
+    ///       + Che 3 cột: AutoID = "N/A", RefNo = "N/A", DLCode = "N/A" (:6184-6189).
+    ///       + 14 cột từ điển theo GetImportDicColumsTransaction() (:1518-1537).
+    ///   - Sheet 4: RptPE_CrdTransationDeCreaseInstPeriodDtl (:1175-1211)
+    ///       + Lọc DLCodeTranDC = DLCPCode (toán tử '=' trên cột DLCodeTranDC) và PeriodMonth (toán tử '=' trên cột PeriodMonth) (:702-736).
+    ///       + Inner join cct trên RefNoDC == cct.AutoId.ToString(), cct_ic trên RefNoIC == cct_ic.AutoId.ToString(), cm trên MemberNo (:11327-11339).
+    ///       + Sắp xếp order by rpctipd.LogLUDTimeUTC desc (:11252, :11338).
+    ///       + Quyền xem đại lý DLCodeTranIC: nếu DLCPCode == "HTV" hoặc DLCPCode == item.DLCodeTranIC thì giữ nguyên, còn lại hiển thị "ĐL khác" (:11309-11314).
+    ///       + Định dạng ngày CreateDateUTCIC và CreateDateUTCDC: chuỗi yyyy-MM-dd sau quy đổi giờ VN (+7h) từ CreateDTimeUTC tương ứng (:11012-11020).
+    ///       + 22 cột từ điển theo GetImportDicColumsCrdTransationDeCreaseInstPeriodDtl() (:1652-1680).
+    ///   - Xuất 1 file Excel 4 sheet với prefix "Rpt_PeriodSummaryDtl", khi dữ liệu rỗng KHÔNG ném lỗi, vẫn tạo file 4 sheet có header (:1219-1230).
+    /// </summary>
+    [HttpPost("exportexcelrptdtl_new20230317")]
+    public async Task<IActionResult> ExportExcelRptDtl_New20230317([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Rpt_PeriodSummaryExportExcelRptDtlReq? req)
+    {
+        // 1. Sheet 1 — Rpt_PeriodSummaryDtl_01 (gate :1064-1100, biz :5376-5781)
+        var q1 = _db.Set<Rpt_PeriodSummaryDtl_01>().AsNoTracking().AsQueryable();
+        if (!string.IsNullOrWhiteSpace(req?.DLCPCode))
+        {
+            var p_dl = PortQuery.Equal(req.DLCPCode);
+            q1 = q1.Where(x => EF.Functions.Like(x.DLCPCode.ToLower(), p_dl, PortQuery.Esc));
+        }
+        if (!string.IsNullOrWhiteSpace(req?.PeriodMonth))
+        {
+            var p_m = PortQuery.Equal(req.PeriodMonth);
+            q1 = q1.Where(x => EF.Functions.Like(x.PeriodMonth.ToLower(), p_m, PortQuery.Esc));
+        }
+        var list1 = await q1.OrderByDescending(x => x.LogLUDTimeUTC).ToListAsync();
+
+        // 2. Sheet 2 — Rpt_PeriodSummary_Transaction (gate :1102-1137, biz :5785-6275)
+        var q2 = _db.Set<Rpt_PeriodSummary_Transaction>().AsNoTracking().AsQueryable();
+        if (!string.IsNullOrWhiteSpace(req?.DLCPCode))
+        {
+            var p_dl = PortQuery.Equal(req.DLCPCode);
+            q2 = q2.Where(x => x.DLCode != null && EF.Functions.Like(x.DLCode.ToLower(), p_dl, PortQuery.Esc));
+        }
+        if (!string.IsNullOrWhiteSpace(req?.PeriodMonth))
+        {
+            var p_m = PortQuery.Equal(req.PeriodMonth);
+            q2 = q2.Where(x => EF.Functions.Like(x.PeriodMonth.ToLower(), p_m, PortQuery.Esc));
+        }
+        var joinedQuery2 = from rpst in q2
+                           join cct in _db.Set<CrdCardTransaction>().AsNoTracking()
+                               on rpst.AutoID equals cct.AutoId
+                           orderby rpst.LogLUDTimeUTC descending
+                           select new
+                           {
+                               Item = rpst,
+                               CardNo = cct.CardNo,
+                               CreateDTimeUtc = cct.CreateDTimeUTC
+                           };
+        var rawList2 = await joinedQuery2.ToListAsync();
+        var list2 = rawList2.Select(x =>
+        {
+            var item = x.Item;
+            item.CardNo = x.CardNo;
+            if (x.CreateDTimeUtc.HasValue)
+            {
+                item.CreateDTimeUTC = x.CreateDTimeUtc.Value.ToString("yyyy-MM-dd HH:mm:ss");
+            }
+            return item;
+        }).ToList();
+
+        // 3. Sheet 3 — Rpt_PeriodSummary_TransactionExceptionally (gate :1139-1173, biz :6180-6217)
+        var draftQuery = _db.Set<Rpt_PeriodSummary_Transaction>().AsNoTracking().AsQueryable();
+        if (!string.IsNullOrWhiteSpace(req?.PeriodMonth))
+        {
+            var p_m = PortQuery.Equal(req.PeriodMonth);
+            draftQuery = draftQuery.Where(x => EF.Functions.Like(x.PeriodMonth.ToLower(), p_m, PortQuery.Esc));
+        }
+        if (!string.IsNullOrWhiteSpace(req?.DLCodeExceptionally))
+        {
+            var p_dlExc = PortQuery.Equal(req.DLCodeExceptionally);
+            draftQuery = draftQuery.Where(x => x.DLCodeExceptionally != null && EF.Functions.Like(x.DLCodeExceptionally.ToLower(), p_dlExc, PortQuery.Esc));
+        }
+        var joinedQuery3 = from t in draftQuery
+                           join rpste in _db.Set<Rpt_PeriodSummary_TransactionExceptionally>().AsNoTracking()
+                               on new { t.PeriodMonth, t.DLCodeExceptionally, t.AutoID }
+                               equals new { rpste.PeriodMonth, rpste.DLCodeExceptionally, rpste.AutoID }
+                           join cct in _db.Set<CrdCardTransaction>().AsNoTracking()
+                               on t.AutoID equals cct.AutoId into cctGroup
+                           from cct in cctGroup.DefaultIfEmpty()
+                           where rpste.DLCode != rpste.DLCodeExceptionally
+                              && rpste.DealPointType == "CONSUMPTION"
+                           orderby rpste.LogLUDTimeUTC descending
+                           select new
+                           {
+                               Item = rpste,
+                               CardNo = cct != null ? cct.CardNo : null,
+                               CreateDTimeUtc = cct != null ? cct.CreateDTimeUTC : null
+                           };
+        var rawList3 = await joinedQuery3.ToListAsync();
+        var list3 = rawList3.Select(x => new
+        {
+            AutoID = "N/A",
+            DLCode = "N/A",
+            RefNo = "N/A",
+            MemberNo = x.Item.MemberNo,
+            MemberName = x.Item.MemberName,
+            CardTypeUse = x.Item.CardTypeUse,
+            CardTypeInit = x.Item.CardTypeInit,
+            DealPointType = x.Item.DealPointType,
+            DLCodeExceptionally = x.Item.DLCodeExceptionally,
+            AmountChTotal = x.Item.AmountChTotal,
+            AmountChTotalInit = x.Item.AmountChTotalInit,
+            AmountChTotalDiffer = x.Item.AmountChTotalDiffer,
+            PointExpiryDTime = x.Item.PointExpiryDTime,
+            CreateDTimeUTC = x.CreateDTimeUtc.HasValue ? x.CreateDTimeUtc.Value.ToString("yyyy-MM-dd HH:mm:ss") : null
+        }).ToList();
+
+        // 4. Sheet 4 — RptPE_CrdTransationDeCreaseInstPeriodDtl (gate :1175-1211, biz :10941-11394)
+        var q4 = _db.Set<RptPE_CrdTransationDeCreaseInstPeriodDtl>().AsNoTracking().AsQueryable();
+        if (!string.IsNullOrWhiteSpace(req?.DLCPCode))
+        {
+            var p_dlCode = PortQuery.Equal(req.DLCPCode);
+            q4 = q4.Where(x => x.DLCodeTranDC != null && EF.Functions.Like(x.DLCodeTranDC.ToLower(), p_dlCode, PortQuery.Esc));
+        }
+        if (!string.IsNullOrWhiteSpace(req?.PeriodMonth))
+        {
+            var p_month = PortQuery.Equal(req.PeriodMonth);
+            q4 = q4.Where(x => EF.Functions.Like(x.PeriodMonth.ToLower(), p_month, PortQuery.Esc));
+        }
+        var joinedQuery4 = from rpctipd in q4
+                           join cct in _db.Set<CrdCardTransaction>().AsNoTracking()
+                               on rpctipd.RefNoDC equals cct.AutoId.ToString()
+                           join cct_ic in _db.Set<CrdCardTransaction>().AsNoTracking()
+                               on rpctipd.RefNoIC equals cct_ic.AutoId.ToString()
+                           join cm in _db.Set<CrdMember>().AsNoTracking()
+                               on rpctipd.MemberNo equals cm.MemberNo
+                           orderby rpctipd.LogLUDTimeUTC descending
+                           select new
+                           {
+                               Item = rpctipd,
+                               CardTypeUseDC = cct.CardTypeUse,
+                               CardTypeInitDC = cct.CardTypeInit,
+                               RefNo = cct.RefNo,
+                               MemberName = cm.MemberName,
+                               CreateDTimeUTC_DC = cct.CreateDTimeUTC,
+                               CreateDTimeUTC_IC = cct_ic.CreateDTimeUTC
+                           };
+        var rawList4 = await joinedQuery4.ToListAsync();
+        var list4 = rawList4.Select(x =>
+        {
+            var item = x.Item;
+            item.CardTypeUseDC = x.CardTypeUseDC;
+            item.CardTypeInitDC = x.CardTypeInitDC;
+            item.RefNo = x.RefNo;
+            item.MemberName = x.MemberName;
+
+            // Format ngày yyyy-MM-dd sau quy đổi giờ VN (+7h) — Report.cs:11012-11020
+            item.CreateDateUTCIC = x.CreateDTimeUTC_IC.HasValue ? x.CreateDTimeUTC_IC.Value.AddHours(7).ToString("yyyy-MM-dd") : null;
+            item.CreateDateUTCDC = x.CreateDTimeUTC_DC.HasValue ? x.CreateDTimeUTC_DC.Value.AddHours(7).ToString("yyyy-MM-dd") : null;
+
+            // Xử lý DLCodeTranIC theo quyền xem đại lý (so với DLCPCode) — Report.cs:11309-11314
+            item.DLCodeTranIC = (req?.DLCPCode == "HTV" || string.Equals(req?.DLCPCode, item.DLCodeTranIC, StringComparison.OrdinalIgnoreCase))
+                ? item.DLCodeTranIC
+                : "ĐL khác";
+
+            return item;
+        }).ToList();
+
+        // 5. Chuẩn bị đường dẫn thư mục xuất file Excel (gate :1218-1220)
+        var webRoot = _env?.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = _env != null
+                ? Path.Combine(_env.ContentRootPath, "wwwroot")
+                : Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+        }
+
+        var (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Rpt_PeriodSummaryDtl");
+
+        // 6. Ghi 1 workbook duy nhất gồm 4 sheet (gate :1221-1224)
+        try
+        {
+            using var wb = new XLWorkbook();
+            AddWorksheetFromList(wb, list1, GetImportDicColumsRptDtl01(), "Rpt_PeriodSummaryDtl_01");
+            AddWorksheetFromList(wb, list2, GetImportDicColumsTransaction(), "Rpt_PeriodSummary_Transaction");
+            AddWorksheetFromList(wb, list3, GetImportDicColumsTransaction(), "Rpt_PeriodSummary_TransactionExceptionally");
+            AddWorksheetFromList(wb, list4, GetImportDicColumsCrdTransationDeCreaseInstPeriodDtl(), "RptPE_CrdTransationDeCreaseInstPeriodDtl");
+            wb.SaveAs(physicalPath);
+        }
+        catch (Exception ex)
+        {
+            return PortResult.Fail("Rpt_PeriodSummary_ExportExcelRptDtl_New20230317", "Exception", ex.Message);
+        }
+
+        // 7. Trả URL tải file với Success = true (gate :1226-1230)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+            }
+        });
+    }
 
     private static void AddWorksheetFromList<T>(XLWorkbook wb, IEnumerable<T> rows, IReadOnlyDictionary<string, string> dicColNames, string sheetName)
     {
@@ -1197,6 +1435,37 @@ public class Rpt_PeriodSummaryControllerPort : ControllerBase
         };
     }
 
+    private static Dictionary<string, string> GetImportDicColumsRptDtl01()
+    {
+        return new Dictionary<string, string>
+        {
+            { nameof(Rpt_PeriodSummaryDtl_01.PeriodMonthDay), "Ngày giao dịch" },
+            { nameof(Rpt_PeriodSummaryDtl_01.DLCPCode), "Mã đại lý" },
+            { nameof(Rpt_PeriodSummaryDtl_01.ACol), "Điểm tích HV do phát sinh làm dịch vụ tại ĐL trong kỳ" },
+            { nameof(Rpt_PeriodSummaryDtl_01.BCol), "Điểm tích từ các chương trình ngoài Dịch vụ tại ĐL (Sinh nhật, giới thiệu…)" },
+            { nameof(Rpt_PeriodSummaryDtl_01.DCol), "Tổng điểm tích phát sinh trong kỳ" },
+            { nameof(Rpt_PeriodSummaryDtl_01.ECol), "Điểm tiêu có nguồn tích từ làm Dịch vụ tại ĐL" },
+            { nameof(Rpt_PeriodSummaryDtl_01.FCol), "Điểm tiêu có nguồn tích từ các chương trình ngoài Dịch vụ tại ĐL (Sinh nhật, giới thiệu…)" },
+            { nameof(Rpt_PeriodSummaryDtl_01.MCol), "Điểm tiêu có nguồn tích từ ĐL khác" },
+            { nameof(Rpt_PeriodSummaryDtl_01.M1Col), "Điểm tiêu có nguồn tích từ HTV (KMDV)" },
+            { nameof(Rpt_PeriodSummaryDtl_01.M2Col), "Điểm tiêu có nguồn tích từ HTV (KMBH)" },
+            { nameof(Rpt_PeriodSummaryDtl_01.M3Col), "Điểm tiêu có nguồn tích từ HTV (KMMT)" },
+            { nameof(Rpt_PeriodSummaryDtl_01.GCol), "Tổng điểm tiêu của Đại lý(Nguồn tích không gồm HTV)" },
+            { nameof(Rpt_PeriodSummaryDtl_01.HCol), "Số điểm ĐL chuyển vào quỹ hội viên vì đặc cách hội viên" },
+            { nameof(Rpt_PeriodSummaryDtl_01.H1Col), "Số điểm ĐL chuyển vào quỹ hội viên vì Bán hạng hội viên" },
+            { nameof(Rpt_PeriodSummaryDtl_01.K1Col), "Số điểm ĐL chuyển vào  quỹ hội viên theo Dịch vụ ưu đãi do Bán hạng HV từ ĐL khác" },
+            { nameof(Rpt_PeriodSummaryDtl_01.ICol), "Số điểm ĐL nhận được từ quỹ hội viên theo đặc cách của ĐL khác" },
+            { nameof(Rpt_PeriodSummaryDtl_01.I1Col), "Số điểm ĐL nhận được từ quỹ hội viên theo Bán hạng hội viên của ĐL khác" },
+            { nameof(Rpt_PeriodSummaryDtl_01.K2Col), "Số điểm ĐL nhận được từ quỹ hội viên theo Dịch vụ ưu đãi do Bán hạng HV từ ĐL khác" },
+            { nameof(Rpt_PeriodSummaryDtl_01.QCol), "Tổng số điểm ĐL chuyển vào Quỹ Hội viên (Theo ngày)" },
+            { nameof(Rpt_PeriodSummaryDtl_01.RCol), "Tổng số điểm Quỹ Hội viên chuyển cho ĐL (Theo ngày)" },
+            { nameof(Rpt_PeriodSummaryDtl_01.SCol), "Kết quả đối soát theo kỳ (Ngày/Tháng)" },
+            { nameof(Rpt_PeriodSummaryDtl_01.TCol), "Tổng số điểm hết\u00a0hiệu lực\u00a0của tháng đối soát" },
+            { nameof(Rpt_PeriodSummaryDtl_01.UCol), "Tổng điểm hết hạn do hủy thẻ tại tháng đối soát" },
+            { nameof(Rpt_PeriodSummaryDtl_01.WCol), "Tổng số điểm hết\u00a0hiệu lực\u00a0lũy kế năm tính đến tháng đối soát" }
+        };
+    }
+
     private static Dictionary<string, string> GetImportDicColumsTransaction()
     {
         return new Dictionary<string, string>
@@ -1217,7 +1486,35 @@ public class Rpt_PeriodSummaryControllerPort : ControllerBase
             { nameof(Rpt_PeriodSummary_Transaction.CreateDTimeUTC), "Ngày giao dịch" }
         };
     }
->>>>>>> Stashed changes
+
+    private static Dictionary<string, string> GetImportDicColumsCrdTransationDeCreaseInstPeriodDtl()
+    {
+        return new Dictionary<string, string>
+        {
+            { nameof(RptPE_CrdTransationDeCreaseInstPeriodDtl.RefNoDC), "Mã giao dịch tiêu điểm" },
+            { nameof(RptPE_CrdTransationDeCreaseInstPeriodDtl.DLCodeTranDC), "Đại lý giao dịch tiêu điểm" },
+            { nameof(RptPE_CrdTransationDeCreaseInstPeriodDtl.RptPEPDCInstNo), "Số tham chiếu" },
+            { nameof(RptPE_CrdTransationDeCreaseInstPeriodDtl.MemberNo), "Mã hội viên" },
+            { nameof(RptPE_CrdTransationDeCreaseInstPeriodDtl.MemberName), "Tên hội viên" },
+            { nameof(RptPE_CrdTransationDeCreaseInstPeriodDtl.CardTypeUseDC), "Hạng sử dụng tiêu điểm" },
+            { nameof(RptPE_CrdTransationDeCreaseInstPeriodDtl.CardTypeInitDC), "Hạng thực tiêu điểm" },
+            { nameof(RptPE_CrdTransationDeCreaseInstPeriodDtl.DLCodeExceptionallyDC), "Đại lý yêu cầu đặc cách tiêu điểm" },
+            { nameof(RptPE_CrdTransationDeCreaseInstPeriodDtl.CreateDateUTCDC), "Ngày giao dịch tiêu điểm" },
+            { nameof(RptPE_CrdTransationDeCreaseInstPeriodDtl.DealPointTypeDC), "Loại tiêu điểm" },
+            { nameof(RptPE_CrdTransationDeCreaseInstPeriodDtl.PointInitDC), "Điểm tiêu hạng sử dụng" },
+            { nameof(RptPE_CrdTransationDeCreaseInstPeriodDtl.PointDeCreaseDealer), "Số điểm tiêu từ đại lý giao dịch TÍCH" },
+            { nameof(RptPE_CrdTransationDeCreaseInstPeriodDtl.PointDeCreaseHTV), "Số điểm tiêu từ Đại lý đặc cách" },
+            { nameof(RptPE_CrdTransationDeCreaseInstPeriodDtl.RefNoIC), "Mã giao dịch tích điểm" },
+            { nameof(RptPE_CrdTransationDeCreaseInstPeriodDtl.DLCodeTranIC), "Đại lý giao dịch tích điểm" },
+            { nameof(RptPE_CrdTransationDeCreaseInstPeriodDtl.DLCodeExceptionallyIC), "Đại lý đặc cách GD tích điểm" },
+            { nameof(RptPE_CrdTransationDeCreaseInstPeriodDtl.CardTypeUseIC), "Hạng sử dụng tích điểm" },
+            { nameof(RptPE_CrdTransationDeCreaseInstPeriodDtl.CardTypeInitIC), "Hạng thực tích điểm" },
+            { nameof(RptPE_CrdTransationDeCreaseInstPeriodDtl.CreateDateUTCIC), "Ngày giao dịch tích điểm" },
+            { nameof(RptPE_CrdTransationDeCreaseInstPeriodDtl.DealPointTypeIC), "Loại tích điểm" },
+            { nameof(RptPE_CrdTransationDeCreaseInstPeriodDtl.AmountChTotalIC), "Điểm tích hạng sử dụng" },
+            { nameof(RptPE_CrdTransationDeCreaseInstPeriodDtl.AmountChTotalInitIC), "Điểm tích hạng thực" }
+        };
+    }
 }
 
 
