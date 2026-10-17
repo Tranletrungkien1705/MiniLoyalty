@@ -12,10 +12,11 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ===========================================================================================
-// PORT 1:1 từ dự án nguồn 2022.7.Loyalty — Crd_DealSerROController (#019, #021).
+// PORT 1:1 từ dự án nguồn 2022.7.Loyalty — Crd_DealSerROController (#019, #020, #021).
 //
 // Nguồn tra cứu (chỉ đọc):
 //   - Gate Search: 13.ClientGate/V10/idn.Loyalty.WebAPI/Controllers/Crd_DealSerROController.cs:29-109
+//   - Gate Calc:   13.ClientGate/V10/idn.Loyalty.WebAPI/Controllers/Crd_DealSerROController.cs:113-184
 //   - Gate Add:    13.ClientGate/V10/idn.Loyalty.WebAPI/Controllers/Crd_DealSerROController.cs:188-251
 //   - Filter:      Crd_DealSerROController.cs:255-270 (strWhereClause_Crd_DealSerRO)
 //   - API Add:     11.BackEnd/V10/idn.Loyalty.Biz.Web/Controllers/CrdDealSerROController.cs:96-166
@@ -45,6 +46,13 @@ public class RQ_Crd_DealSerRO
     public Crd_DealSerROInput? Crd_DealSerRO { get; set; }
     public List<Crd_DealSerRODtlInput>? Lst_Crd_DealSerRODtl { get; set; }
     public List<Crd_DealSerROVoucherInput>? Lst_Crd_DealSerROVoucher { get; set; }
+}
+
+/// <summary>
+/// DTO yêu cầu tính toán thử báo giá dịch vụ (#020) — gate:121-124.
+/// </summary>
+public class Crd_DealSerROCalcReq : RQ_Crd_DealSerRO
+{
 }
 
 public class Crd_DealSerROInput
@@ -179,20 +187,39 @@ public class Crd_DealSerROControllerPort : ControllerBase
     [HttpPost("add")]
     public async Task<IActionResult> Add([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] RQ_Crd_DealSerRO? req)
     {
+        return await ExecuteDealSerROAsync(req, isCalc: false);
+    }
+
+    /// <summary>
+    /// Port 1:1 action Calc — Tính toán báo giá dịch vụ (Repair Order) (#020).
+    /// Nguồn: Gate:113-184, API:96-166, Biz:14810-15174, Biz Core:12009-14441.
+    /// </summary>
+    [HttpPost("calc")]
+    public async Task<IActionResult> Calc([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_DealSerROCalcReq? req)
+    {
+        return await ExecuteDealSerROAsync(req, isCalc: true);
+    }
+
+    /// <summary>
+    /// Helper dùng chung cho cả Add (#021) và Calc (#020) — đều gọi WA_Crd_DealSerRO_Add ở backend.
+    /// </summary>
+    private async Task<IActionResult> ExecuteDealSerROAsync(RQ_Crd_DealSerRO? req, bool isCalc)
+    {
         var nowUtc = DateTime.UtcNow;
         var userCode = Request?.Headers["WAUserCode"].FirstOrDefault() ?? "SYS";
+        var actionName = isCalc ? "Crd_DealSerRO_Calc" : "Crd_DealSerRO_Add";
 
-        // Guard 1: Kiểm tra body null / rỗng (Gate:203)
-        if (req == null || req.Crd_DealSerRO == null)
+        // Guard 1: Kiểm tra body null / rỗng (Gate:128, :203)
+        var ro = req?.Crd_DealSerRO;
+        if (ro == null)
         {
-            return PortResult.Fail("Crd_DealSerRO_Add", "Check.strJson", null);
+            return PortResult.Fail(actionName, "Check.strJson", null);
         }
 
-        var ro = req.Crd_DealSerRO;
         var strDealSerRONo = StdParam(ro.DealSerRONo);
         if (string.IsNullOrEmpty(strDealSerRONo))
         {
-            return PortResult.Fail("Crd_DealSerRO_Add", "Check.strJson", null);
+            return PortResult.Fail(actionName, "Check.strJson", null);
         }
 
         var strDLCode = StdParam(ro.DLCode);
@@ -316,10 +343,14 @@ public class Crd_DealSerROControllerPort : ControllerBase
             select d
         ).FirstOrDefaultAsync();
 
+        // Ở action Calc (gate :159), Lst_Crd_DealSerRODtl bị comment out nên không truyền chi phí sang backend
+        var dtlList = isCalc ? null : req?.Lst_Crd_DealSerRODtl;
+        var voucherList = isCalc ? null : req?.Lst_Crd_DealSerROVoucher;
+
         // Guard 9: Kiểm tra danh sách chi tiết Lst_Crd_DealSerRODtl (Card.Deal.cs:12444-12473)
-        if (req.Lst_Crd_DealSerRODtl != null)
+        if (dtlList != null)
         {
-            foreach (var dtl in req.Lst_Crd_DealSerRODtl)
+            foreach (var dtl in dtlList)
             {
                 var expTypeParam = StdParam(dtl.ExpenseType);
                 var exp = await _db.Set<Mst_ExpenseType>().AsNoTracking()
@@ -339,10 +370,10 @@ public class Crd_DealSerROControllerPort : ControllerBase
         }
 
         // Kiểm tra điểm voucher (Card.Deal.cs:12520-12540)
-        if (req.Lst_Crd_DealSerROVoucher != null && req.Lst_Crd_DealSerROVoucher.Count > 0)
+        if (voucherList != null && voucherList.Count > 0)
         {
-            double sumVoucher = req.Lst_Crd_DealSerROVoucher.Sum(v => v.PointVoucher ?? 0.0);
-            double sumActual = req.Lst_Crd_DealSerROVoucher.Sum(v => v.PointActualVoucher ?? 0.0);
+            double sumVoucher = voucherList.Sum(v => v.PointVoucher ?? 0.0);
+            double sumActual = voucherList.Sum(v => v.PointActualVoucher ?? 0.0);
             if (dblPointVoucher != sumVoucher || dblPointActualVoucher != sumActual)
             {
                 return PortResult.Fail("Crd_DealSerRO_Add_InvalidPointVoucher",
@@ -354,7 +385,7 @@ public class Crd_DealSerROControllerPort : ControllerBase
         }
 
         // Thực thi trong Transaction (Card.Deal.cs:14904-15132)
-        using var tx = await _db.Database.BeginTransactionAsync();
+        await using var tx = await _db.Database.BeginTransactionAsync();
         try
         {
             // Khóa hội viên: cập nhật LogLUDTimeUTC (Card.Deal.cs:14951-14966)
@@ -362,7 +393,7 @@ public class Crd_DealSerROControllerPort : ControllerBase
             member.LogLUBy = userCode;
 
             // Lấy danh sách Mst_PolicyExpenseType tương ứng với các khoản chi phí (Card.Deal.cs:13056-13058)
-            var expenseTypes = req.Lst_Crd_DealSerRODtl?
+            var expenseTypes = dtlList?
                 .Select(d => StdParam(d.ExpenseType))
                 .Where(et => !string.IsNullOrEmpty(et))
                 .Distinct()
@@ -421,9 +452,9 @@ public class Crd_DealSerROControllerPort : ControllerBase
             _db.Set<Crd_DealSerRO>().Add(dealSerRO);
 
             // Thêm các dòng chi tiết Crd_DealSerRODtl (Card.Deal.cs:12700-12728)
-            if (req.Lst_Crd_DealSerRODtl != null)
+            if (dtlList != null)
             {
-                foreach (var dtl in req.Lst_Crd_DealSerRODtl)
+                foreach (var dtl in dtlList)
                 {
                     var expTypeParam = StdParam(dtl.ExpenseType)!;
                     var mpet = policyExpList.FirstOrDefault(p => p.ExpenseType == expTypeParam);
@@ -551,12 +582,12 @@ public class Crd_DealSerROControllerPort : ControllerBase
 
                 double countService_AmountRef = 0.0;
 
-                if (req.Lst_Crd_DealSerRODtl != null && req.Lst_Crd_DealSerRODtl.Count > 0)
+                if (dtlList != null && dtlList.Count > 0)
                 {
                     double cv = policyDtl?.ConvertValue ?? 0.0;
                     double cp = policyDtl?.ConvertPoint ?? 0.0;
 
-                    foreach (var dtl in req.Lst_Crd_DealSerRODtl)
+                    foreach (var dtl in dtlList)
                     {
                         var expTypeParam = StdParam(dtl.ExpenseType);
                         var mpet = policyExpList.FirstOrDefault(p => p.ExpenseType == expTypeParam);
@@ -904,7 +935,11 @@ public class Crd_DealSerROControllerPort : ControllerBase
             await _db.SaveChangesAsync();
             await tx.CommitAsync();
 
-            // Thành công: gate :237-238 trả Data = null
+            // Trả kết quả: Calc trả { Success = true, Data = { Crd_DealSerRO = null } }, Add trả { Success = true, Data = null }
+            if (isCalc)
+            {
+                return Ok(new { Success = true, Data = new { Crd_DealSerRO = (Crd_DealSerRO?)null } });
+            }
             return Ok(new { Success = true, Data = (object?)null });
         }
         catch (PortThresholdException pte)
@@ -915,7 +950,7 @@ public class Crd_DealSerROControllerPort : ControllerBase
         catch (Exception ex)
         {
             await tx.RollbackAsync();
-            return PortResult.Fail("Crd_DealSerRO_Add", "Exception", ex.Message);
+            return PortResult.Fail(actionName, "Exception", ex.Message);
         }
     }
 
@@ -979,8 +1014,8 @@ public class Crd_DealSerROControllerPort : ControllerBase
                 db.Set<Crd_CardRank>().Add(new Crd_CardRank
                 {
                     CardRankNo = cardRankNo,
-                    NetworkID = member.NetworkID,
-                    OrgID = member.OrgID,
+                    NetworkID = member.NetworkID ?? "",
+                    OrgID = member.OrgID ?? "",
                     RankPolicyCode = currentPolicy.RankPolicyCode,
                     CardSourceCode = "UP",
                     DealPointType = "LOYALTY",
