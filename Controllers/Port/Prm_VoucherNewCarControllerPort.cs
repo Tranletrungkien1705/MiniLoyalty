@@ -591,4 +591,96 @@ public class Prm_VoucherNewCarControllerPort : ControllerBase
             }
         });
     }
+
+    // ===================== #271: CalcPrm =====================
+    // Gate Prm_VoucherNewCarController.cs:606-715 -> WA_Prm_VoucherNewCar_CalcPrm -> Promotion.Calc.cs:985-1436 (Prm_VoucherNewCar_CalcPrm) + :1437 (Prm_VoucherNewCar_CalcPrmX).
+    // Nguồn gọi dịch vụ NGOÀI DMS (DMSSales_DLS_DealerCustomer_Get) để kiểm tra giao dịch bán xe theo VIN; MiniLoyalty không có dữ liệu DMS
+    // => đi nhánh "DMS không có giao dịch" của nguồn (DLS_Deal rỗng => dblPointVoucherNewCarUpd = 0), giống GetCalcPointBuyCreta (#45).
+    public class Prm_VoucherNewCarCalcPrmReq
+    {
+        public string? MemberNo { get; set; }
+        public string? IDCardNo { get; set; }
+        public string? DealNo { get; set; }
+        public string? VIN { get; set; }
+        public string? ModelCode { get; set; }
+        public string? RegistrationDate { get; set; }
+    }
+
+    [HttpPost("calcprm")]
+    public async Task<IActionResult> CalcPrm([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Prm_VoucherNewCarCalcPrmReq? req)
+    {
+        string? strVIN = VcStdStr(req?.VIN);
+        string? strModelCode = VcStdStr(req?.ModelCode);
+        if (string.IsNullOrEmpty(strVIN))
+        {
+            return PortResult.Fail("invalid_VIN", "Check.VIN", strVIN);
+        }
+        if (string.IsNullOrEmpty(strModelCode))
+        {
+            return PortResult.Fail("invalid_ModelCode", "Check.ModelCode", strModelCode);
+        }
+
+        // Prm_VoucherNewCar_CalcPrmX: StdParam(ModelCode) + Mst_CarModel_CheckDB(FlagExist "1", FlagActive "1").
+        string modelUp = strModelCode.Trim().ToUpperInvariant();
+        var patModel = PortQuery.Equal(modelUp);
+        var model = await _db.Set<Mst_CarModel>().AsNoTracking()
+            .FirstOrDefaultAsync(m => EF.Functions.Like((m.ModelCode ?? "").ToLower(), patModel, PortQuery.Esc));
+        if (model == null)
+        {
+            return PortResult.Fail("Mst_CarModel_CheckDB_CarModelNotFound", "Check.ModelCode", modelUp);
+        }
+        if (!"1".Contains(model.FlagActive ?? ""))
+        {
+            return PortResult.Fail("Mst_CarModel_CheckDB_FlagActiveNotMatched",
+                "Check.ModelCode", modelUp, "Check.strFlagActiveListToCheck", "1", "DB.FlagActive", model.FlagActive);
+        }
+
+        // #tbl_Prm_VoucherNewCar_Active: FINISH, hiệu lực hôm nay (DateTime.Now), FlagAllModel = '1' hoặc FlagAllModel = '0' có Spec cho model; lấy 1 chương trình CreateDTimeUTC giảm dần.
+        var dateFilter = DateTime.Now.ToString("yyyy-MM-dd");
+        var specCodes = _db.Set<Prm_VoucherNewCarSpec>().Where(s => s.ModelCode == modelUp).Select(s => s.PrmVoucherCode);
+        var pcn = await _db.Set<Prm_VoucherNewCar>().AsNoTracking()
+            .Where(t => t.PrmVoucherStatus == "FINISH"
+                     && string.Compare(t.EffDateStart, dateFilter) <= 0 && string.Compare(t.EffDateEnd, dateFilter) >= 0
+                     && (t.FlagAllModel == "1" || (t.FlagAllModel == "0" && specCodes.Contains(t.PrmVoucherCode))))
+            .OrderByDescending(t => t.CreateDTimeUTC)
+            .FirstOrDefaultAsync();
+
+        if (pcn == null)
+        {
+            return Ok(new { Success = true, Data = new { Prm_VoucherNewCar = (object?)null, PointVal = 0 } });
+        }
+
+        // Dtl của chương trình chọn: join Spec (đúng ModelCode) theo Idx.
+        var specIdx = await _db.Set<Prm_VoucherNewCarSpec>().AsNoTracking()
+            .Where(s => s.PrmVoucherCode == pcn.PrmVoucherCode && s.ModelCode == modelUp).Select(s => s.Idx).ToListAsync();
+        var dtl = await _db.Set<Prm_VoucherNewCarDtl>().AsNoTracking()
+            .Where(d => d.PrmVoucherCode == pcn.PrmVoucherCode && specIdx.Contains(d.Idx)).ToListAsync();
+
+        // Không có giao dịch DMS => dblPointVoucherNewCarUpd = 0 (Promotion.Calc.cs:1332-1360, #Return).
+        double pointUpd = 0;
+        if (string.Equals(pcn.FlagAllModel, "0", StringComparison.OrdinalIgnoreCase))
+        {
+            if (dtl.Count > 0) dtl[0].PointVoucher = pointUpd;
+        }
+        else
+        {
+            pcn.PointVoucherAllModel = pointUpd;
+        }
+
+        // Gate :665-690: flagAllModel == 0 => PointVoucherCalc = Dtl[0].PointVoucher (Dtl rỗng => ArgumentOutOfRangeException); == 1 => PointVoucherAllModel.
+        int flagAllModel = int.TryParse(pcn.FlagAllModel, out var fa) ? fa : 0;
+        if (flagAllModel == 0)
+        {
+            if (dtl.Count < 1)
+            {
+                throw new ArgumentOutOfRangeException("index", "Index was out of range. Must be non-negative and less than the size of the collection.");
+            }
+            pcn.PointVoucherCalc = dtl[0].PointVoucher;
+        }
+        else if (flagAllModel == 1)
+        {
+            pcn.PointVoucherCalc = pcn.PointVoucherAllModel;
+        }
+        return Ok(new { Success = true, Data = new { Prm_VoucherNewCar = pcn } });
+    }
 }
