@@ -78,10 +78,12 @@ public class Prm_VoucherNewCarSearchReq
 public class Prm_VoucherNewCarControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly Microsoft.AspNetCore.Hosting.IWebHostEnvironment? _env;
 
-    public Prm_VoucherNewCarControllerPort(AppDbContext db)
+    public Prm_VoucherNewCarControllerPort(AppDbContext db, Microsoft.AspNetCore.Hosting.IWebHostEnvironment? env = null)
     {
         _db = db;
+        _env = env;
     }
 
     [HttpPost("search")]
@@ -682,5 +684,77 @@ public class Prm_VoucherNewCarControllerPort : ControllerBase
             pcn.PointVoucherCalc = pcn.PointVoucherAllModel;
         }
         return Ok(new { Success = true, Data = new { Prm_VoucherNewCar = pcn } });
+    }
+
+    // ===================== #272: Export =====================
+    // Gate Prm_VoucherNewCarController.cs:816-930 (Export) + GetImportDicColumsRpt: cùng bộ lọc/phân trang với Search (WA_Prm_VoucherNewCar_Get),
+    // đổi CreateDTimeUTC/FinishDTimeUTC sang giờ địa phương (utcOffset 7), EffDateEnd 2100-01-01 => "", FlagShow => "Active"/"InActive".
+    public class Prm_VoucherNewCarExportRow
+    {
+        public string? PrmVoucherCode { get; set; }
+        public string? PrmVoucherName { get; set; }
+        public string? CreateDTimeUTC { get; set; }
+        public string? EffDateStart { get; set; }
+        public string? EffDateEnd { get; set; }
+        public string? FlagShow { get; set; }
+        public string? PrmVoucherStatus { get; set; }
+        public string? FinishDTimeUTC { get; set; }
+        public string? FinishBy { get; set; }
+        public double? QtyDayLimitFDlvDate { get; set; }
+    }
+
+    [HttpPost("export")]
+    public async Task<IActionResult> Export([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Prm_VoucherNewCarSearchReq? req)
+    {
+        var res = await Search(req);
+        var dataObj = (res as OkObjectResult)?.Value?.GetType().GetProperty("Data")?.GetValue((res as OkObjectResult)!.Value);
+        var list = (dataObj as PageInfo<Prm_VoucherNewCar>)?.DataList;
+        if (list == null || list.Count == 0)
+        {
+            return PortResult.Fail("Prm_VoucherNewCar_Export", "Message", "Không có dữ liệu");
+        }
+
+        var rows = list.Select(item => new Prm_VoucherNewCarExportRow
+        {
+            PrmVoucherCode = item.PrmVoucherCode,
+            PrmVoucherName = item.PrmVoucherName,
+            CreateDTimeUTC = item.CreateDTimeUTC.AddHours(7).ToString("yyyy-MM-dd HH:mm:ss"),
+            EffDateStart = item.EffDateStart,
+            EffDateEnd = item.EffDateEnd == "2100-01-01" ? "" : item.EffDateEnd,
+            FlagShow = item.FlagShow == "1" ? "Active" : "InActive",
+            PrmVoucherStatus = item.PrmVoucherStatus,
+            FinishDTimeUTC = item.FinishDTimeUTC?.AddHours(7).ToString("yyyy-MM-dd HH:mm:ss"),
+            FinishBy = item.FinishBy,
+            QtyDayLimitFDlvDate = item.QtyDayLimitFDlvDate
+        }).ToList();
+
+        var webRoot = _env?.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = _env != null ? System.IO.Path.Combine(_env.ContentRootPath, "wwwroot") : System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "wwwroot");
+        }
+        var dic = new Dictionary<string, string>
+        {
+            { "PrmVoucherCode", "Mã chương trình" },
+            { "PrmVoucherName", "Tên chương trình" },
+            { "CreateDTimeUTC", "Ngày tạo" },
+            { "EffDateStart", "Ngày hiệu lực từ" },
+            { "EffDateEnd", "Ngày hiệu lực đến" },
+            { "FlagShow", "Trạng thái chương trình" },
+            { "PrmVoucherStatus", "Trạng thái phê duyệt" },
+            { "FinishDTimeUTC", "Ngày duyệt" },
+            { "FinishBy", "Người duyệt" },
+            { "QtyDayLimitFDlvDate", "Ngày giới hạn từ ngày giao xe" },
+        };
+        try
+        {
+            var (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Prm_VoucherNewCar");
+            PortExcel.ExportToExcelFromList(rows, dic, physicalPath, "Prm_VoucherNewCar");
+            return Ok(new { Success = true, Data = new { Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath } });
+        }
+        catch (Exception ex)
+        {
+            return PortResult.Fail("Prm_VoucherNewCar_Export", "Exception", ex.Message);
+        }
     }
 }
