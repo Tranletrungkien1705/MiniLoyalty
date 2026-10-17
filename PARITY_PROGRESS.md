@@ -4,7 +4,7 @@ Nguồn mẫu số: `D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.Web
 
 **Mẫu số (N)**: 337
 
-**Tiến độ hiện tại**: 307/337 (91.1%)
+**Tiến độ hiện tại**: 308/337 (91.39%)
 
 Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã có` (đã port từ trước, có bằng chứng) · `Bỏ` (scaffold/không nghiệp vụ, ghi lý do) · `Cần xem tay`.
 
@@ -300,7 +300,7 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 288 | Rpt_PeriodSummaryController/SearchTransactionExceptionally | Đã làm | 3da7de8 |
 | 289 | Rpt_PeriodSummaryController/SearchTransactionDetail | Đã làm | e37f2d6 |
 | 290 | Rpt_PeriodSummaryController/SearchRptPECrdTransationDeCreaseInstPeriodDtl | Đã làm | c69b6a3 |
-| 291 | Rpt_PeriodSummaryController/ExportExcelRpt | Chưa làm | - |
+| 291 | Rpt_PeriodSummaryController/ExportExcelRpt | Đã làm | eeac12d |
 | 292 | Rpt_PeriodSummaryController/ExportExcelRptDtl | Chưa làm | - |
 | 293 | Rpt_PeriodSummaryController/ExportExcelRptDtl_New20230317 | Chưa làm | - |
 | 294 | Rpt_PeriodSummaryController/ExportExcelTransaction | Chưa làm | - |
