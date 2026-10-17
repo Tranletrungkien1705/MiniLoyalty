@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
 using MiniLoyalty.Data;
+using MiniLoyalty.Models;
 using MiniLoyalty.Models.Port;
 
 namespace MiniLoyalty.Controllers.Port;
@@ -211,6 +212,84 @@ public class Rpt_PeriodSummaryControllerPort : ControllerBase
             Data = new
             {
                 Lst_Rpt_PeriodSummaryDtl_01 = list.Count > 0 ? list : null
+            }
+        });
+    }
+
+    /// <summary>
+    /// Port 1:1 action SearchTransaction — tìm kiếm giao dịch đối soát tổng hợp kỳ Rpt_PeriodSummary_Transaction (#287).
+    /// Nguồn tra cứu (chỉ đọc):
+    ///   - Gate:     13.ClientGate/V10/idn.Loyalty.WebAPI/Controllers/Rpt_PeriodSummaryController.cs:288-363 (SearchTransaction)
+    ///   - Filter:   Rpt_PeriodSummaryController.cs:667-700 (strWhereClause_Rpt_PeriodSummary_Transaction)
+    ///   - Service:  13.ClientGate/V10/idn.Loyalty.ClientService/Services/Loyalty/Rpt_PeriodSummaryService.cs:41-45 (WA_Rpt_PeriodSummary_Transaction_Get)
+    ///   - API:      11.BackEnd/V10/idn.Loyalty.Biz.Web/Controllers/ReportController.cs:725-789 (WA_Rpt_PeriodSummary_Transaction_Get)
+    ///   - Biz LIVE: 11.BackEnd/V10/idn.Loyalty.Biz/Report.cs:5785-5890 (WAS_Rpt_PeriodSummary_Transaction_Get),
+    ///               :6053-6275 (Rpt_PeriodSummary_Transaction_GetX)
+    ///
+    /// ĐẶC ĐIỂM NGHIỆP VỤ:
+    ///   - Gate SearchTransaction nhận: DLCPCode, PeriodMonth (:288).
+    ///   - strWhereClause_Rpt_PeriodSummary_Transaction (:667-700) lọc:
+    ///       + DLCode (map từ DLCPCode tại gate :312): toán tử '=' (nguyên chuỗi, không phân biệt hoa thường) trên cột DLCode (:674).
+    ///       + PeriodMonth (gate :313): toán tử '=' (nguyên chuỗi, không phân biệt hoa thường) trên cột PeriodMonth (:690).
+    ///       + KHÔNG lọc KeyWord, FlagActive hay OrgID.
+    ///   - Sắp xếp: order by rpst.LogLUDTimeUTC desc (Report.cs:6117, :6167).
+    ///   - Join: inner join Crd_CardTransaction cct on t.AutoID = cct.AutoID để lấy 2 cột CreateDTimeUTC và CardNo (:6164-6165).
+    ///   - Định dạng CreateDTimeUTC: chuỗi yyyy-MM-dd sau khi quy đổi giờ VN (UTC+7) qua StdDTimeVN và StdDate (Report.cs:5854-5861).
+    ///   - Phản hồi: khi không có bản ghi nào, Lst_Rpt_PeriodSummary_Transaction trả về null (gate :315, :340-343, :348).
+    /// </summary>
+    [HttpPost("searchtransaction")]
+    public async Task<IActionResult> SearchTransaction([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Rpt_PeriodSummarySearchReq? req)
+    {
+        var query = _db.Set<Rpt_PeriodSummary_Transaction>().AsNoTracking().AsQueryable();
+
+        // 1. Lọc DLCode (hoặc DLCPCode) với toán tử '=' (nguyên chuỗi, không phân biệt hoa thường) — gate :672-675
+        string? dlCode = req?.DLCPCode;
+        if (!string.IsNullOrWhiteSpace(dlCode))
+        {
+            var p_dlCode = PortQuery.Equal(dlCode);
+            query = query.Where(x => x.DLCode != null && EF.Functions.Like(x.DLCode.ToLower(), p_dlCode, PortQuery.Esc));
+        }
+
+        // 2. Lọc PeriodMonth với toán tử '=' (nguyên chuỗi, không phân biệt hoa thường) — gate :687-691
+        if (!string.IsNullOrWhiteSpace(req?.PeriodMonth))
+        {
+            var p_month = PortQuery.Equal(req.PeriodMonth);
+            query = query.Where(x => EF.Functions.Like(x.PeriodMonth.ToLower(), p_month, PortQuery.Esc));
+        }
+
+        // 3. Inner join với CrdCardTransaction trên AutoID, sắp xếp LogLUDTimeUTC desc — Report.cs:6154-6169
+        var joinedQuery = from rpst in query
+                          join cct in _db.Set<CrdCardTransaction>().AsNoTracking()
+                              on rpst.AutoID equals cct.AutoId
+                          orderby rpst.LogLUDTimeUTC descending
+                          select new
+                          {
+                              Item = rpst,
+                              CardNo = cct.CardNo,
+                              CreateDTimeUtc = cct.CreateDTimeUTC
+                          };
+
+        var rawList = await joinedQuery.ToListAsync();
+
+        // 4. Format CreateDTimeUTC quy đổi giờ VN (UTC+7) định dạng yyyy-MM-dd — Report.cs:5854-5861
+        var list = rawList.Select(x =>
+        {
+            var item = x.Item;
+            item.CardNo = x.CardNo;
+            if (x.CreateDTimeUtc.HasValue)
+            {
+                item.CreateDTimeUTC = x.CreateDTimeUtc.Value.ToString("yyyy-MM-dd HH:mm:ss");   // nguồn không đổi giờ (cct.CreateDTimeUTC trả nguyên)
+            }
+            return item;
+        }).ToList();
+
+        // 5. Định dạng trả về: Lst_Rpt_PeriodSummary_Transaction là null khi rỗng (gate :315, :340-343, :348)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Lst_Rpt_PeriodSummary_Transaction = list.Count > 0 ? list : null
             }
         });
     }
