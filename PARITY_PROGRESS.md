@@ -4,7 +4,7 @@ Nguồn mẫu số: `D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.Web
 
 **Mẫu số (N)**: 337
 
-**Tiến độ hiện tại**: 293/337 (86.94%)
+**Tiến độ hiện tại**: 296/337 (87.83%)
 
 Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã có` (đã port từ trước, có bằng chứng) · `Bỏ` (scaffold/không nghiệp vụ, ghi lý do) · `Cần xem tay`.
 
@@ -287,9 +287,9 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 275 | ReqMemberRegisterController/GetByReqMemberRegisterCode | Đã làm | e7cdab4 |
 | 276 | ReqMemberRegisterController/Export | Đã làm | 3ea284a |
 | 277 | ReqMemberRegisterController/Approve | Đã làm | 6ca4719 |
-| 278 | ReqMemberRegisterController/ApproveOld | Chưa làm | - |
-| 279 | ReqMemberRegisterController/Cancel | Chưa làm | - |
-| 280 | ReqMemberRegisterController/Reject | Chưa làm | - |
+| 278 | ReqMemberRegisterController/ApproveOld | Đã làm | 6ca4719 |
+| 279 | ReqMemberRegisterController/Cancel | Đã làm | 6ca4719 |
+| 280 | ReqMemberRegisterController/Reject | Đã làm | 6ca4719 |
 | 281 | ReqMemberRegisterController/SyncCarSV | Chưa làm | - |
 | 282 | Rpt_MasterDataController/Search | Chưa làm | - |
 | 283 | Rpt_MasterDataController/ExportExcel | Chưa làm | - |
