@@ -2313,6 +2313,62 @@ public class Crd_MemberControllerPort : ControllerBase
     [HttpPost("approvebydealer")]
     public Task<IActionResult> ApproveByDealer([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_MemberStatusReq? req)
         => CmApproveAsync(req, "Crd_Member_ApproveByDealer", "PENDING", "APPROVE1");
+
+    // ===================== #48: Update =====================
+    // Gate Crd_MemberController.cs:933 (Update): Ft_Cols_Upd cố định 12 cột -> WA_Crd_Member_Update -> Crd_Member_UpdateX_New20221227 (Card.cs:12522) với FlagIsRegisUpd = '1'.
+    public class Crd_MemberUpdateReq
+    {
+        public Crd_MemberUpdateInput? Crd_Member { get; set; }
+    }
+
+    public class Crd_MemberUpdateInput
+    {
+        public string? MemberNo { get; set; }
+        public string? MemberName { get; set; }
+        public string? MemberGender { get; set; }
+        public string? IDCardNo { get; set; }
+        public string? PhoneNo { get; set; }
+        public string? DateOfBirth { get; set; }
+        public string? MemAddress { get; set; }
+        public string? ProvinceCode { get; set; }
+        public string? DistrictCode { get; set; }
+        public string? MemberNoIntro { get; set; }
+        public string? CarNoIntro { get; set; }
+        public double? PointIntro { get; set; }
+        public string? Remark { get; set; }
+    }
+
+    [HttpPost("update")]
+    public async Task<IActionResult> Update([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_MemberUpdateReq? req)
+    {
+        if (req?.Crd_Member == null)
+        {
+            return PortResult.Fail("Crd_Member_Update", "Check.strJson", null);
+        }
+        var i = req.Crd_Member;
+        // FlagIsRegisUpd = '1' => chỉ cho cập nhật hội viên đang đăng ký (RegisStatus PENDING, MemberStatus PENDING).
+        var (m, err) = await CmCheckDbAsync(CmStdParam(i.MemberNo), "PENDING", "PENDING");
+        if (err != null) return err;
+
+        static string? StdStrU(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim().Normalize();
+        var now = DateTime.UtcNow;
+        var user = CmUser();
+        m!.MemberName = StdStrU(i.MemberName);
+        m.MemberGender = StdStrU(i.MemberGender);
+        m.IDCardNo = CmStdParam(i.IDCardNo);
+        m.PhoneNo = StdStrU(i.PhoneNo);
+        m.DateOfBirth = DateTime.TryParse(StdStrU(i.DateOfBirth), System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var dob) ? dob : null;
+        m.MemAddress = StdStrU(i.MemAddress);
+        m.ProvinceCode = CmStdParam(i.ProvinceCode);
+        m.DistrictCode = CmStdParam(i.DistrictCode);
+        m.MemberNoIntro = CmStdParam(i.MemberNoIntro);
+        m.CarNoIntro = CmStdParam(i.CarNoIntro);
+        m.PointIntro = i.PointIntro ?? 0.0;
+        m.Remark = StdStrU(i.Remark);
+        m.LogLUDTimeUTC = now; m.LogLUBy = user; m.LUDTimeUTC = now; m.LUBy = user;
+        await _db.SaveChangesAsync();
+        return Ok(new { Success = true, Data = (object?)null });
+    }
 }
 
 public class Crd_MemberGetByCarNoReq
