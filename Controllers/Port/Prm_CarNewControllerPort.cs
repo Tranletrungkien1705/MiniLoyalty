@@ -51,6 +51,13 @@ public class Prm_CarNewControllerPort : ControllerBase
         public List<Prm_CarNewSpec>? Lst_Prm_CarNewSpec { get; set; }
     }
 
+    public class Prm_CarNewApproveReq
+    {
+        public string? PRMCNCodeSys { get; set; }
+        public string? Remark { get; set; }
+        public string? WAUserCode { get; set; }
+    }
+
     [HttpPost("search")]
     public async Task<IActionResult> Search([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Prm_CarNewSearchReq? req)
     {
@@ -497,4 +504,187 @@ public class Prm_CarNewControllerPort : ControllerBase
             return PortResult.Fail("Prm_CarNew_Save", "Exception", ex.Message);
         }
     }
+
+    /// <summary>
+    /// Phê duyệt chương trình khuyến mãi xe mới — port 1:1 từ Prm_CarNewController.Approve (Gate :339-400, API :165-235, BIZ Promotion.cs:2530-2606, :1626-1745, :1484-1624, :29-115).
+    /// </summary>
+    [HttpPost("approve")]
+    public async Task<IActionResult> Approve([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Prm_CarNewApproveReq? req)
+    {
+        var codeSys = req?.PRMCNCodeSys;
+        if (string.IsNullOrWhiteSpace(codeSys))
+        {
+            // Gate Prm_CarNewController.cs:358, :386: PRMCNCodeSys rỗng hoặc null -> ném ServiceException("invalid_PRMCNCodeSys", "invalid_PRMCNCodeSys")
+            return PortResult.Fail("invalid_PRMCNCodeSys", "Check.PRMCNCodeSys", codeSys);
+        }
+
+        string? strPRMCNCodeSys = StdParam(codeSys);
+        string strRemark = (req?.Remark ?? "").Trim();
+
+        var waUserCodeHeader = Request.Headers["WAUserCode"].FirstOrDefault();
+        string strWAUserCode = !string.IsNullOrWhiteSpace(waUserCodeHeader)
+            ? waUserCodeHeader
+            : (!string.IsNullOrWhiteSpace(req?.WAUserCode) ? req.WAUserCode : "port");
+
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            var pat = PortQuery.Equal(strPRMCNCodeSys ?? "");
+            var existing = await _db.Set<Prm_CarNew>()
+                .FirstOrDefaultAsync(x => EF.Functions.Like((x.PRMCNCodeSys ?? "").ToLower(), pat, PortQuery.Esc));
+
+            // Promotion.cs:64-74 (Prm_CarNew_CheckDB strFlagExistToCheck="1"): không tìm thấy bản ghi -> Prm_CarNew_CheckDB_CarNewNotFound
+            if (existing == null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Prm_CarNew_CheckDB_CarNewNotFound", "Check.PRMCNCodeSys", strPRMCNCodeSys);
+            }
+
+            // Promotion.cs:88-99 (Prm_CarNew_CheckDB strStatusListToCheck="PENDING"): PRMCNStatus khác PENDING -> Prm_CarNew_CheckDB_StatusNotMatched
+            if (!string.Equals(existing.PRMCNStatus, "PENDING", StringComparison.OrdinalIgnoreCase))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Prm_CarNew_CheckDB_StatusNotMatched",
+                    "Check.PRMCNCodeSys", strPRMCNCodeSys,
+                    "Check.strStatusListToCheck", "PENDING",
+                    "DB.Status", existing.PRMCNStatus);
+            }
+
+            var dtimeSys = DateTime.UtcNow;
+
+            // Promotion.cs:1585-1606 (SaveDB):
+            // Cập nhật LogLUDTimeUTC, LogLUBy, Remark, ApprDTimeUTC, ApprBy, PRMCNStatus
+            existing.LogLUDTimeUTC = dtimeSys;
+            existing.LogLUBy = strWAUserCode;
+            existing.Remark = strRemark;
+            existing.ApprDTimeUTC = dtimeSys;
+            existing.ApprBy = strWAUserCode;
+            existing.PRMCNStatus = "APPROVE";
+
+            // LỖI NGUỒN GIỮ NGUYÊN dòng 1585-1592: Cột LUDTimeUTC và LUBy có trong bảng tạm #input_Prm_CarNew (:1555-1556)
+            // nhưng bị BỎ SÓT trong mệnh đề SET của lệnh UPDATE. Do đó LUDTimeUTC và LUBy giữ nguyên giá trị cũ.
+            // Các bảng chi tiết Prm_CarNewDtl và Prm_CarNewSpec KHÔNG bị cập nhật (giữ nguyên trạng thái cũ).
+
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return PortResult.Fail("Prm_CarNew_Appr", "Exception", ex.Message);
+        }
+    }
 }
+
+public class Prm_CarNewApproveSeeder : IPortSeeder
+{
+    public int Order => 79;
+
+    public async Task SeedAsync(AppDbContext db)
+    {
+        if (!await db.Set<Prm_CarNew>().AnyAsync(x => x.PRMCNCodeSys == "PCN_APP_01"))
+        {
+            var seedDTime1 = new DateTime(2026, 10, 1, 8, 0, 0, DateTimeKind.Utc);
+            var seedDTime2 = new DateTime(2026, 10, 2, 8, 0, 0, DateTimeKind.Utc);
+            var seedDTime3 = new DateTime(2026, 10, 3, 8, 0, 0, DateTimeKind.Utc);
+            var seedDTime4 = new DateTime(2026, 10, 4, 8, 0, 0, DateTimeKind.Utc);
+
+            db.Set<Prm_CarNew>().AddRange(
+                new Prm_CarNew
+                {
+                    PRMCNCodeSys = "PCN_APP_01",
+                    NetworkID = "1001",
+                    OrgID = "1001",
+                    DLCPCode = "DL01",
+                    PRMCNCode = "PCN_CODE_01",
+                    PRMCNName = "Chuong trinh khuyen mai 01",
+                    EffDateStart = "2026-01-01",
+                    EffDateEnd = "2026-12-31",
+                    PRMCNStatus = "PENDING",
+                    Remark = "Ghi chu goc PCN_APP_01",
+                    CreateDTimeUTC = seedDTime1,
+                    CreateBy = "seed",
+                    LUDTimeUTC = seedDTime1,
+                    LUBy = "seed"
+                },
+                new Prm_CarNew
+                {
+                    PRMCNCodeSys = "PCN_APP_02",
+                    NetworkID = "1001",
+                    OrgID = "1001",
+                    DLCPCode = "DL01",
+                    PRMCNCode = "PCN_CODE_02",
+                    PRMCNName = "Chuong trinh khuyen mai 02",
+                    EffDateStart = "2026-02-01",
+                    EffDateEnd = "2026-12-31",
+                    PRMCNStatus = "PENDING",
+                    Remark = "Ghi chu goc PCN_APP_02",
+                    CreateDTimeUTC = seedDTime2,
+                    CreateBy = "seed",
+                    LUDTimeUTC = seedDTime2,
+                    LUBy = "seed"
+                },
+                new Prm_CarNew
+                {
+                    PRMCNCodeSys = "PCN_APP_STATUS_ERR",
+                    NetworkID = "1001",
+                    OrgID = "1001",
+                    DLCPCode = "DL01",
+                    PRMCNCode = "PCN_CODE_ERR",
+                    PRMCNName = "Chuong trinh da approve",
+                    EffDateStart = "2026-03-01",
+                    EffDateEnd = "2026-12-31",
+                    PRMCNStatus = "APPROVE",
+                    Remark = "Da approve truoc do",
+                    CreateDTimeUTC = seedDTime3,
+                    CreateBy = "seed",
+                    LUDTimeUTC = seedDTime3,
+                    LUBy = "seed"
+                },
+                new Prm_CarNew
+                {
+                    PRMCNCodeSys = "PCN_APP_FINISH_ERR",
+                    NetworkID = "1001",
+                    OrgID = "1001",
+                    DLCPCode = "DL01",
+                    PRMCNCode = "PCN_CODE_FINISH",
+                    PRMCNName = "Chuong trinh da finish",
+                    EffDateStart = "2026-04-01",
+                    EffDateEnd = "2026-12-31",
+                    PRMCNStatus = "FINISH",
+                    Remark = "Da finish truoc do",
+                    CreateDTimeUTC = seedDTime4,
+                    CreateBy = "seed",
+                    LUDTimeUTC = seedDTime4,
+                    LUBy = "seed"
+                }
+            );
+
+            db.Set<Prm_CarNewDtl>().Add(new Prm_CarNewDtl
+            {
+                PRMCNCodeSys = "PCN_APP_01",
+                Idx = 1,
+                NetworkID = "1001",
+                OrgID = "1001",
+                PointVal = 100,
+                PRMCNStatusDtl = "PENDING",
+                Remark = "Chi tiet 01 goc"
+            });
+
+            db.Set<Prm_CarNewSpec>().Add(new Prm_CarNewSpec
+            {
+                PRMCNCodeSys = "PCN_APP_01",
+                Idx = 1,
+                ModelCode = "MODEL_01",
+                NetworkID = "1001",
+                OrgID = "1001",
+                PRMCNStatusSpec = "PENDING"
+            });
+
+            await db.SaveChangesAsync();
+        }
+    }
+}
+
