@@ -53,6 +53,19 @@ public class Rpt_PeriodSummarySearchTransactionExceptionallyReq
     public string? DLCodeExceptionally { get; set; }
 }
 
+/// <summary>
+/// DTO yêu cầu tìm kiếm báo cáo chi tiết giao dịch thẻ đối soát tổng hợp kỳ Rpt_PeriodSummary (#289).
+/// Nguồn: Rpt_PeriodSummaryController.cs:445-530.
+/// </summary>
+public class Rpt_PeriodSummarySearchTransactionDetailReq
+{
+    public string? PeriodMonth { get; set; }
+    public string? DLCode { get; set; }
+    public string? DealPointType { get; set; }
+    public string? CreateDTimeUTCFrom { get; set; }
+    public string? CreateDTimeUTCTo { get; set; }
+}
+
 [ApiController]
 [Route("api/rpt_periodsummary")]
 public class Rpt_PeriodSummaryControllerPort : ControllerBase
@@ -412,6 +425,299 @@ public class Rpt_PeriodSummaryControllerPort : ControllerBase
             Data = new
             {
                 Lst_Rpt_PeriodSummary_TransactionExceptionally = list.Count > 0 ? (object)list : null
+            }
+        });
+    }
+
+    /// <summary>
+    /// Port 1:1 action SearchTransactionDetail — báo cáo chi tiết giao dịch thẻ (#289).
+    /// Nguồn tra cứu (chỉ đọc):
+    ///   - Gate:     13.ClientGate/V10/idn.Loyalty.WebAPI/Controllers/Rpt_PeriodSummaryController.cs:445-530 (SearchTransactionDetail)
+    ///   - Filter:   Rpt_PeriodSummaryController.cs:737-774 (strWhereClause_Crd_CardTransaction)
+    ///   - Service:  13.ClientGate/V10/idn.Loyalty.ClientService/Services/Loyalty/Crd_CardTransactionService.cs:25-34 (WA_Crd_CardTransaction_Get)
+    ///   - API:      11.BackEnd/V10/idn.Loyalty.Biz.Web/Controllers/CrdCardTransactionController.cs:24-60 (WA_Crd_CardTransaction_Get)
+    ///   - Biz LIVE: 11.BackEnd/V10/idn.Loyalty.Biz/Master.Loyalty.cs:21144-21250 (WAS_Crd_CardTransaction_Get),
+    ///               :21254-21408 (Crd_CardTransaction_Get), :21409-21817 (Crd_CardTransaction_GetX)
+    ///
+    /// ĐẶC ĐIỂM NGHIỆP VỤ:
+    ///   - Gate SearchTransactionDetail nhận: PeriodMonth, DLCode, DealPointType, CreateDTimeUTCFrom, CreateDTimeUTCTo (:445).
+    ///   - strWhereClause_Crd_CardTransaction (:737-774) lọc:
+    ///       + DLCode: toán tử '=' trên cột DLCode (:744).
+    ///       + DealPointType: tách dấu phẩy, bọc nháy từng phần tử, toán tử 'in' (:749-754).
+    ///       + CreateDTimeUTCFrom: StdDTimeBeginDay (00:00:00 VN) -> StdDTimeUTC (-7h), toán tử '>=' (:759-762).
+    ///       + CreateDTimeUTCTo: StdDTimeEndDay (23:59:59 VN) -> StdDTimeUTC (-7h), toán tử '<=' (:766-769).
+    ///       + PeriodMonth: nhận ở gate nhưng KHÔNG truyền vào hàm lọc và KHÔNG lọc (:467-475, :737-774).
+    ///       + KHÔNG có tham số KeyWord.
+    ///       + OrgID: nhận từ header gán vào WARQBase nhưng strWhereClause_Crd_CardTransaction KHÔNG lọc OrgID (:21487-21488 comment join NNT).
+    ///   - Xử lý nghiệp vụ sau khi lấy danh sách (:503-509):
+    ///       + Nếu DealPointType == "POINTINCREASE", ghi đè: AmountChTotal = PointChRankTotal.
+    ///   - Sắp xếp: order by cct.LogLUDTimeUTC desc (:21493, :21618).
+    ///   - Union DISCOUNTRO (:21664-21791): Nếu DealPointType có chứa "DISCOUNTRO", UNION ALL với Crd_MemberDiscountTransaction inner join Crd_Member.
+    ///       Dòng chiết khấu: DealPointType = 'DISCOUNTRO', các cột điểm-hạng = 0,
+    ///       DiscountRate = mvt.PolicyDiscountRate, DiscountAmount = mvt.PointChTotal, DiscountRevenue = mvt.AmountForDC.
+    ///   - Định dạng ngày: CreateDTimeUTC quy đổi giờ VN StdDate(StdDTimeVN(...)) thành chuỗi yyyy-MM-dd; PointExpiryDTime thành yyyy-MM-dd (:21211-21223).
+    ///   - Phản hồi: khi không có bản ghi nào, Lst_Crd_CardTransaction là null (KHÔNG phải []) (:476, :500, :515).
+    /// </summary>
+    [HttpPost("searchtransactiondetail")]
+    public async Task<IActionResult> SearchTransactionDetail([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Rpt_PeriodSummarySearchTransactionDetailReq? req)
+    {
+        var normalQuery = from cct in _db.Set<CrdCardTransaction>().AsNoTracking()
+                          join cm in _db.Set<CrdMember>().AsNoTracking() on cct.MemberNo equals cm.MemberNo
+                          join cc in _db.Set<CrdCard>().AsNoTracking() on new { cct.MemberNo, cct.CardNo } equals new { cc.MemberNo, cc.CardNo }
+                          select new { cct, cm, cc };
+
+        // 1. DLCode: toán tử '=' trên cột DLCode — gate :744
+        if (!string.IsNullOrWhiteSpace(req?.DLCode))
+        {
+            var p_dlCode = PortQuery.Equal(req.DLCode);
+            normalQuery = normalQuery.Where(x => x.cct.DLCode != null && EF.Functions.Like(x.cct.DLCode.ToLower(), p_dlCode, PortQuery.Esc));
+        }
+
+        // 2. DealPointType: tách dấu phẩy, bọc nháy từng phần tử, toán tử 'in' — gate :749-754
+        List<string> dealTypes = new();
+        bool wantDiscount = false;
+        if (!string.IsNullOrWhiteSpace(req?.DealPointType))
+        {
+            dealTypes = req.DealPointType.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                                         .Select(s => s.ToLowerInvariant())
+                                         .ToList();
+            if (dealTypes.Count > 0)
+            {
+                normalQuery = normalQuery.Where(x => x.cct.DealPointType != null && dealTypes.Contains(x.cct.DealPointType.ToLower()));
+            }
+            if (req.DealPointType.ToUpperInvariant().Contains(LoyaltyConst.DealPointType.DiscountRO))
+            {
+                wantDiscount = true;
+            }
+        }
+
+        // 3. CreateDTimeUTCFrom: StdDTimeBeginDay -> StdDTimeUTC -> '>=' trên CreateDTimeUTC — gate :759-762
+        DateTime? utcFrom = null;
+        if (!string.IsNullOrWhiteSpace(req?.CreateDTimeUTCFrom) && DateTime.TryParse(req.CreateDTimeUTCFrom, out var dFrom))
+        {
+            utcFrom = dFrom.Date.AddHours(-7); // Bắt đầu ngày Việt Nam (UTC+7) chuyển sang UTC
+            normalQuery = normalQuery.Where(x => x.cct.CreateDTimeUTC >= utcFrom);
+        }
+
+        // 4. CreateDTimeUTCTo: StdDTimeEndDay -> StdDTimeUTC -> '<=' trên CreateDTimeUTC — gate :766-769
+        DateTime? utcTo = null;
+        if (!string.IsNullOrWhiteSpace(req?.CreateDTimeUTCTo) && DateTime.TryParse(req.CreateDTimeUTCTo, out var dTo))
+        {
+            utcTo = dTo.Date.AddDays(1).AddSeconds(-1).AddHours(-7); // Cuối ngày Việt Nam (UTC+7) chuyển sang UTC
+            normalQuery = normalQuery.Where(x => x.cct.CreateDTimeUTC <= utcTo);
+        }
+
+        // 5. PeriodMonth: nhận ở gate nhưng KHÔNG truyền vào hàm lọc và KHÔNG lọc — gate :467-475, :737-774
+
+        var normalList = await normalQuery.Select(x => new Crd_CardTransactionSearchResult
+        {
+            AutoId = x.cct.AutoId,
+            RefNo = x.cct.RefNo,
+            ProjectCode = x.cct.ProjectCode,
+            NetworkID = x.cct.NetworkID,
+            OrgID = x.cct.OrgID,
+            DLCode = x.cct.DLCode,
+            MemberNo = x.cct.MemberNo,
+            CardNo = x.cct.CardNo,
+            CardSourceCode = x.cct.CardSourceCode,
+            CardTypeUse = x.cct.CardTypeUse,
+            CardTypeInit = x.cct.CardTypeInit,
+            DealPointType = x.cct.DealPointType,
+            PrProgramCode = x.cct.PrProgramCode,
+            EffDateStart = x.cct.EffDateStart,
+            EffDateEnd = x.cct.EffDateEnd,
+            UsePrmDTime = x.cct.UsePrmDTime,
+            PointChTotal = x.cct.PointChTotal,
+            PointChBlock = x.cct.PointChBlock,
+            AmountChTotal = x.cct.AmountChTotal,
+            AmountChBlock = x.cct.AmountChBlock,
+            QtyVisitChTotal = x.cct.QtyVisitChTotal,
+            QtyVisitChBlock = x.cct.QtyVisitChBlock,
+            QtyPrChTotal = x.cct.QtyPrChTotal,
+            QtyPrChBlock = x.cct.QtyPrChBlock,
+            QtyPrUsed = x.cct.QtyPrUsed,
+            PointRef = x.cct.PointRef,
+            AmountRef = x.cct.AmountRef,
+            PolicyPointUnit = x.cct.PolicyPointUnit,
+            PolicyAmountUnit = x.cct.PolicyAmountUnit,
+            PolicyCode = x.cct.PolicyCode,
+            ParamPointUnit = x.cct.ParamPointUnit,
+            ParamAmountUnit = x.cct.ParamAmountUnit,
+            ParamCode = x.cct.ParamCode,
+            FlagViewUI = x.cct.FlagViewUI,
+            FlagPoint = x.cct.FlagPoint,
+            FlagAmount = x.cct.FlagAmount,
+            FlagPr = x.cct.FlagPr,
+            FunctionName = x.cct.FunctionName,
+            FunctionActionType = x.cct.FunctionActionType,
+            FunctionRemark = x.cct.FunctionRemark,
+            RefType = x.cct.RefType,
+            PointChRankTotal = x.cct.PointChRankTotal,
+            RefCode00 = x.cct.RefCode00,
+            RefCode01 = x.cct.RefCode01,
+            RefCode02 = x.cct.RefCode02,
+            RefCode03 = x.cct.RefCode03,
+            RefCode04 = x.cct.RefCode04,
+            RefCode05 = x.cct.RefCode05,
+            RefCode06 = x.cct.RefCode06,
+            RefCode07 = x.cct.RefCode07,
+            RefCode08 = x.cct.RefCode08,
+            RefCode09 = x.cct.RefCode09,
+            CreateDTimeUTC = x.cct.CreateDTimeUTC.HasValue ? x.cct.CreateDTimeUTC.Value.ToString("yyyy-MM-dd HH:mm:ss") : null,   // gate :503-509 không đổi giờ
+            CreateBy = x.cct.CreateBy,
+            LUDTimeUTC = x.cct.LUDTimeUTC,
+            LUBy = x.cct.LUBy,
+            LogLUDTimeUTC = x.cct.LogLUDTimeUTC,
+            LogLUBy = x.cct.LogLUBy,
+            PointExpiryDTime = x.cct.PointExpiryDTime.HasValue ? x.cct.PointExpiryDTime.Value.ToString("yyyy-MM-dd") : null,
+            AmountChTotalInit = x.cct.AmountChTotalInit,
+            AmountChTotalDiffer = x.cct.AmountChTotalDiffer,
+            AmountAvailPrevious = x.cct.AmountAvailPrevious,
+            PointExpiryDTimeSync = x.cct.PointExpiryDTimeSync,
+            PointChTotalInit = x.cct.PointChTotalInit,
+            PointChTotalDiffer = x.cct.PointChTotalDiffer,
+            PrProgramName = null,
+            Remark = null,
+            Unit = null,
+            CarNo = x.cm.CarNo,
+            PhoneNo = x.cm.PhoneNo,
+            MemberName = x.cm.MemberName,
+            DLCodeExceptionally = x.cc.DLCodeExceptionally,
+            DiscountRate = 0d,
+            DiscountAmount = 0d,
+            DiscountRevenue = 0d
+        }).ToListAsync();
+
+        // 6. Union DISCOUNTRO khi DealPointType có chứa DISCOUNTRO — Master.Loyalty.cs:21664-21791
+        var discountList = new List<Crd_CardTransactionSearchResult>();
+        if (wantDiscount)
+        {
+            var discountQuery = from mvt in _db.Set<CrdMemberDiscountTransaction>().AsNoTracking()
+                                join cm in _db.Set<CrdMember>().AsNoTracking() on mvt.MemberNo equals cm.MemberNo
+                                select new { mvt, cm };
+
+            if (!string.IsNullOrWhiteSpace(req?.DLCode))
+            {
+                var p_dlCode = PortQuery.Equal(req.DLCode);
+                discountQuery = discountQuery.Where(x => x.mvt.DLCode != null && EF.Functions.Like(x.mvt.DLCode.ToLower(), p_dlCode, PortQuery.Esc));
+            }
+
+            if (dealTypes.Count > 0)
+            {
+                discountQuery = discountQuery.Where(x => x.mvt.DealPointType != null && dealTypes.Contains(x.mvt.DealPointType.ToLower()));
+            }
+
+            if (utcFrom.HasValue)
+            {
+                discountQuery = discountQuery.Where(x => x.mvt.CreateDTimeUTC >= utcFrom.Value);
+            }
+
+            if (utcTo.HasValue)
+            {
+                discountQuery = discountQuery.Where(x => x.mvt.CreateDTimeUTC <= utcTo.Value);
+            }
+
+            discountList = await discountQuery.Select(x => new Crd_CardTransactionSearchResult
+            {
+                AutoId = x.mvt.AutoId,
+                RefNo = x.mvt.RefNo,
+                ProjectCode = null,
+                NetworkID = x.mvt.NetworkID,
+                OrgID = x.mvt.OrgID,
+                DLCode = x.mvt.DLCode,
+                MemberNo = x.mvt.MemberNo,
+                CardNo = x.mvt.CardNo,
+                CardSourceCode = null,
+                CardTypeUse = x.mvt.CardTypeUse,
+                CardTypeInit = x.mvt.CardTypeInit,
+                DealPointType = LoyaltyConst.DealPointType.DiscountRO,
+                PrProgramCode = null,
+                EffDateStart = x.mvt.EffDateStart,
+                EffDateEnd = x.mvt.EffDateEnd,
+                UsePrmDTime = null,
+                PointChTotal = 0d,
+                PointChBlock = 0d,
+                AmountChTotal = 0d,
+                AmountChBlock = 0d,
+                QtyVisitChTotal = 0d,
+                QtyVisitChBlock = 0d,
+                QtyPrChTotal = 0d,
+                QtyPrChBlock = 0d,
+                QtyPrUsed = 0d,
+                PointRef = 0d,
+                AmountRef = 0d,
+                PolicyPointUnit = null,
+                PolicyAmountUnit = null,
+                PolicyCode = x.mvt.PolicyCode,
+                ParamPointUnit = null,
+                ParamAmountUnit = null,
+                ParamCode = null,
+                FlagViewUI = null,
+                FlagPoint = null,
+                FlagAmount = null,
+                FlagPr = null,
+                FunctionName = null,
+                FunctionActionType = null,
+                FunctionRemark = null,
+                RefType = null,
+                PointChRankTotal = 0d,
+                RefCode00 = x.mvt.RefCode00,
+                RefCode01 = x.mvt.RefCode01,
+                RefCode02 = x.mvt.RefCode02,
+                RefCode03 = x.mvt.RefCode03,
+                RefCode04 = x.mvt.RefCode04,
+                RefCode05 = x.mvt.RefCode05,
+                RefCode06 = null,
+                RefCode07 = null,
+                RefCode08 = null,
+                RefCode09 = null,
+                CreateDTimeUTC = x.mvt.CreateDTimeUTC.HasValue ? x.mvt.CreateDTimeUTC.Value.AddHours(7).ToString("yyyy-MM-dd") : null,
+                CreateBy = x.mvt.CreateBy,
+                LUDTimeUTC = x.mvt.LUDTimeUTC,
+                LUBy = x.mvt.LUBy,
+                LogLUDTimeUTC = x.mvt.LogLUDTimeUTC,
+                LogLUBy = x.mvt.LogLUBy,
+                PointExpiryDTime = null,
+                AmountChTotalInit = 0d,
+                AmountChTotalDiffer = 0d,
+                AmountAvailPrevious = 0d,
+                PointExpiryDTimeSync = null,
+                PointChTotalInit = 0d,
+                PointChTotalDiffer = 0d,
+                PrProgramName = null,
+                Remark = null,
+                Unit = null,
+                CarNo = x.cm.CarNo,
+                PhoneNo = x.cm.PhoneNo,
+                MemberName = x.cm.MemberName,
+                DLCodeExceptionally = x.mvt.DLCodeExceptionally,
+                DiscountRate = x.mvt.PolicyDiscountRate ?? 0d,
+                DiscountAmount = x.mvt.PointChTotal ?? 0d,
+                DiscountRevenue = x.mvt.AmountForDC ?? 0d
+            }).ToListAsync();
+        }
+
+        // 7. Sắp xếp: order by LogLUDTimeUTC desc — Master.Loyalty.cs:21493, :21618
+        var allList = normalList.Concat(discountList)
+                                .OrderByDescending(x => x.LogLUDTimeUTC)
+                                .ToList();
+
+        // 8. Xử lý nghiệp vụ tại Gate: nếu DealPointType == "POINTINCREASE", AmountChTotal = PointChRankTotal — gate :503-509
+        foreach (var item in allList)
+        {
+            if (string.Equals(item.DealPointType, LoyaltyConst.DealPointType.PointIncrease, StringComparison.OrdinalIgnoreCase))
+            {
+                item.AmountChTotal = item.PointChRankTotal;
+            }
+        }
+
+        // 9. Định dạng trả về: Lst_Crd_CardTransaction là null khi rỗng — gate :476, :500, :515
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Lst_Crd_CardTransaction = allList.Count > 0 ? (object)allList : null
             }
         });
     }
