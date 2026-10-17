@@ -1568,6 +1568,134 @@ public class Rpt_PeriodSummaryControllerPort : ControllerBase
         });
     }
 
+    /// <summary>
+    /// Port 1:1 action ExportExcelTransactionExceptionally — xuất Excel giao dịch đặc cách đối soát tổng hợp kỳ Rpt_PeriodSummary_TransactionExceptionally (#296).
+    /// Nguồn tra cứu (chỉ đọc):
+    ///   - Gate:     13.ClientGate/V10/idn.Loyalty.WebAPI/Controllers/Rpt_PeriodSummaryController.cs:1429-1514 (ExportExcelTransactionExceptionally)
+    ///   - Filter:   Rpt_PeriodSummaryController.cs:667-700 (strWhereClause_Rpt_PeriodSummary_Transaction)
+    ///               + PeriodMonth: toán tử '=' nguyên chuỗi (:690)
+    ///               + DLCodeExceptionally: toán tử '=' nguyên chuỗi (:696)
+    ///   - Service:  13.ClientGate/V10/idn.Loyalty.ClientService/Services/Loyalty/Rpt_PeriodSummaryService.cs:41-45 (WA_Rpt_PeriodSummary_Transaction_Get)
+    ///   - API:      11.BackEnd/V10/idn.Loyalty.Biz.Web/Controllers/ReportController.cs:725-789 (WA_Rpt_PeriodSummary_Transaction_Get)
+    ///   - Biz LIVE: 11.BackEnd/V10/idn.Loyalty.Biz/Report.cs:5785-5909 (WAS_Rpt_PeriodSummary_Transaction_Get),
+    ///               :5910-6052 (Rpt_PeriodSummary_Transaction_Get),
+    ///               :6053-6275 (Rpt_PeriodSummary_Transaction_GetX)
+    ///               + Lọc bảng draft Rpt_PeriodSummary_Transaction rpst theo PeriodMonth và DLCodeExceptionally (:6103-6145)
+    ///               + Inner join Rpt_PeriodSummary_TransactionExceptionally rpste trên (PeriodMonth, DLCodeExceptionally, AutoID) (:6206-6208)
+    ///               + Left join Crd_CardTransaction cct trên AutoID để lấy CreateDTimeUTC và CardNo (:6209-6210)
+    ///               + Điều kiện lọc rpste: rpste.DLCode != rpste.DLCodeExceptionally (:6212) và rpste.DealPointType == "CONSUMPTION" (:6213)
+    ///               + Sắp xếp: order by rpste.LogLUDTimeUTC desc (:6215)
+    ///               + Che 3 cột thành 'N/A': AutoID = 'N/A' (:6184), RefNo = 'N/A' (:6185), DLCode = 'N/A' (:6189)
+    ///   - Columns:  Rpt_PeriodSummaryController.cs:1518-1537 (GetImportDicColumsTransaction - 14 cột)
+    ///   - Sheet:    "Rpt_PeriodSummary_TransactionExceptionally" (:1487, :1489)
+    ///   - Khi rỗng: throw new ServiceException("Không có dữ liệu") (:1500) -> HTTP 400 PortResult.Fail("Rpt_PeriodSummary_ExportExcelTransactionExceptionally", "Message", "Không có dữ liệu")
+    ///   - Khi thành công: Success = true, Data = { Url = ... } (:1491-1495)
+    /// </summary>
+    [HttpPost("exportexceltransactionexceptionally")]
+    public async Task<IActionResult> ExportExcelTransactionExceptionally([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Rpt_PeriodSummarySearchTransactionExceptionallyReq? req)
+    {
+        var draftQuery = _db.Set<Rpt_PeriodSummary_Transaction>().AsNoTracking().AsQueryable();
+
+        // 1. Lọc bảng draft Rpt_PeriodSummary_Transaction theo PeriodMonth và DLCodeExceptionally bằng PortQuery.Equal (toán tử '=', không phân biệt hoa thường)
+        if (!string.IsNullOrWhiteSpace(req?.PeriodMonth))
+        {
+            var p_month = PortQuery.Equal(req.PeriodMonth);
+            draftQuery = draftQuery.Where(x => EF.Functions.Like(x.PeriodMonth.ToLower(), p_month, PortQuery.Esc));
+        }
+
+        if (!string.IsNullOrWhiteSpace(req?.DLCodeExceptionally))
+        {
+            var p_dlExc = PortQuery.Equal(req.DLCodeExceptionally);
+            draftQuery = draftQuery.Where(x => x.DLCodeExceptionally != null && EF.Functions.Like(x.DLCodeExceptionally.ToLower(), p_dlExc, PortQuery.Esc));
+        }
+
+        // 2. Inner join với Rpt_PeriodSummary_TransactionExceptionally trên (PeriodMonth, DLCodeExceptionally, AutoID)
+        //    Left join với CrdCardTransaction trên AutoID để lấy CreateDTimeUTC
+        //    Lọc trên rpste: rpste.DLCode != rpste.DLCodeExceptionally và rpste.DealPointType == "CONSUMPTION"
+        //    Sắp xếp: orderby rpste.LogLUDTimeUTC descending
+        var joinedQuery = from t in draftQuery
+                          join rpste in _db.Set<Rpt_PeriodSummary_TransactionExceptionally>().AsNoTracking()
+                              on new { t.PeriodMonth, t.DLCodeExceptionally, t.AutoID }
+                              equals new { rpste.PeriodMonth, rpste.DLCodeExceptionally, rpste.AutoID }
+                          join cct in _db.Set<CrdCardTransaction>().AsNoTracking()
+                              on t.AutoID equals cct.AutoId into cctGroup
+                          from cct in cctGroup.DefaultIfEmpty()
+                          where rpste.DLCode != rpste.DLCodeExceptionally
+                             && rpste.DealPointType == "CONSUMPTION"
+                          orderby rpste.LogLUDTimeUTC descending
+                          select new
+                          {
+                              Item = rpste,
+                              CardNo = cct != null ? cct.CardNo : null,
+                              CreateDTimeUtc = cct != null ? cct.CreateDTimeUTC : null
+                          };
+
+        var rawList = await joinedQuery.ToListAsync();
+
+        // 3. Chiếu DTO: gán 3 cột AutoID = "N/A", RefNo = "N/A", DLCode = "N/A" theo đúng câu SQL nguồn (:6184, :6185, :6189). Cột CreateDTimeUTC định dạng yyyy-MM-dd HH:mm:ss
+        var list = rawList.Select(x => new
+        {
+            AutoID = "N/A",
+            DLCode = "N/A",
+            RefNo = "N/A",
+            MemberNo = x.Item.MemberNo,
+            MemberName = x.Item.MemberName,
+            CardTypeUse = x.Item.CardTypeUse,
+            CardTypeInit = x.Item.CardTypeInit,
+            DealPointType = x.Item.DealPointType,
+            DLCodeExceptionally = x.Item.DLCodeExceptionally,
+            AmountChTotal = x.Item.AmountChTotal,
+            AmountChTotalInit = x.Item.AmountChTotalInit,
+            AmountChTotalDiffer = x.Item.AmountChTotalDiffer,
+            PointExpiryDTime = x.Item.PointExpiryDTime,
+            CreateDTimeUTC = x.CreateDTimeUtc.HasValue ? x.CreateDTimeUtc.Value.ToString("yyyy-MM-dd HH:mm:ss") : null
+        }).ToList();
+
+        // 4. Kiểm tra danh sách rỗng — gate :1500, :1506
+        // Khi không có dữ liệu: throw ServiceException("Không có dữ liệu") -> gate catch :1506
+        // Trên port trả HTTP 400: PortResult.Fail("Rpt_PeriodSummary_ExportExcelTransactionExceptionally", "Message", "Không có dữ liệu")
+        if (list == null || list.Count == 0)
+        {
+            return PortResult.Fail("Rpt_PeriodSummary_ExportExcelTransactionExceptionally", "Message", "Không có dữ liệu");
+        }
+
+        // 5. Chuẩn bị đường dẫn thư mục xuất file Excel — gate :1487
+        var webRoot = _env?.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = _env != null
+                ? Path.Combine(_env.ContentRootPath, "wwwroot")
+                : Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+        }
+
+        string virtualPath;
+        try
+        {
+            // 6. Lấy từ điển 14 cột từ GetImportDicColumsTransaction(), sinh file và xuất Excel — gate :1484, :1487, :1489
+            var dicColNames = GetImportDicColumsTransaction();
+            var (physicalPath, vPath) = PortExcel.GenExcelExportFilePath(webRoot, "Rpt_PeriodSummary_TransactionExceptionally");
+            virtualPath = vPath;
+            using var wb = new XLWorkbook();
+            AddWorksheetFromList(wb, list, dicColNames, "Rpt_PeriodSummary_TransactionExceptionally");
+            wb.SaveAs(physicalPath);
+        }
+        catch (Exception ex)
+        {
+            // Bắt ngoại lệ nếu ghi file lỗi -> trả Fail (gate :1506)
+            return PortResult.Fail("Rpt_PeriodSummary_ExportExcelTransactionExceptionally", "Exception", ex.Message);
+        }
+
+        // 7. Trả URL tải file với Success = true — gate :1491-1495
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+            }
+        });
+    }
+
     private static void AddWorksheetFromList<T>(XLWorkbook wb, IEnumerable<T> rows, IReadOnlyDictionary<string, string> dicColNames, string sheetName)
     {
         var safeName = string.IsNullOrWhiteSpace(sheetName) ? "Sheet1" : (sheetName.Length > 31 ? sheetName[..31] : sheetName);
