@@ -1241,3 +1241,23 @@ public class Crd_MemberGetCalcPointBuyCretaSeeder : IPortSeeder
 
 
 
+
+/// <summary>Seeder cho Crd_Member Delete/Cancel/Approve/ApproveByDealer (Order => 71).</summary>
+public class Crd_MemberStatusSeeder : IPortSeeder
+{
+    public int Order => 71;
+
+    public async Task SeedAsync(AppDbContext db)
+    {
+        if (await db.Set<CrdMember>().AnyAsync(x => x.MemberNo == "MB_S1")) return;
+        var now = new DateTime(2026, 10, 1, 8, 0, 0, DateTimeKind.Utc);
+        CrdMember Mk(string no, string regis, string use, string init) => new CrdMember
+        {
+            MemberNo = no, NetworkID = "DEMO", OrgID = "ORG01", DLCodeRegis = "DL01", MemberName = "Seed " + no, VIN = "VIN" + no, CarNo = "CAR" + no,
+            RegisStatus = regis, MemberStatus = "PENDING", CardTypeUse = use, CardTypeInit = init,
+            CreateDTimeUTC = now, CreateBy = "seed", LUDTimeUTC = now, LUBy = "seed", LogLUDTimeUTC = now, LogLUBy = "seed"
+        };
+        db.Set<CrdMember>().AddRange(Mk("MB_S1", "PENDING", "N", "N"), Mk("MB_S2", "APPROVE1", "N", "P"), Mk("MB_S3", "APPROVE1", "N", "N"), Mk("MB_S4", "APPROVE2", "N", "P"));
+        await db.SaveChangesAsync();
+    }
+}

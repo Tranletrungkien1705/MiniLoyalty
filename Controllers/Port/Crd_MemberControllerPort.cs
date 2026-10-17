@@ -2202,6 +2202,117 @@ public class Crd_MemberControllerPort : ControllerBase
     /// Chuẩn hoá chuỗi văn bản theo CUtils.StdStr (Card.cs:20960): Trim, Normalize, giữ nguyên hoa/thường, rỗng -> null.
     /// </summary>
     private static string? StdStr(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim().Normalize();
+
+    // ===================== #49-#52: Delete / Cancel / Approve / ApproveByDealer =====================
+    // Gate Crd_MemberController.cs:1015 (Delete), :1082 (Cancel), :1149 (Approve), :1213 (ApproveByDealer): strJson => RQ_Crd_Member { Crd_Member }.
+    // Biz Card.cs: Crd_Member_DeleteX :13612, Crd_Member_CancelX :13873, Crd_Member_ApproveX :14870, Crd_Member_ApproveByDealerX :14523; Crd_Member_CheckDB.
+
+    public class Crd_MemberStatusReq
+    {
+        public Crd_MemberStatusInput? Crd_Member { get; set; }
+    }
+
+    public class Crd_MemberStatusInput
+    {
+        public string? MemberNo { get; set; }
+        public string? Remark { get; set; }
+    }
+
+    private string CmUser() => Request.Headers.TryGetValue("WAUserCode", out var h) && !string.IsNullOrWhiteSpace(h) ? h.ToString().Trim() : "port";
+
+    // Crd_Member_CheckDB (Card.cs): tồn tại, RegisStatus/MemberStatus phải nằm trong danh sách (so khớp kiểu Contains của nguồn).
+    private async Task<(CrdMember? Member, IActionResult? Error)> CmCheckDbAsync(string? strMemberNo, string regisList, string memberList)
+    {
+        var p = PortQuery.Equal(strMemberNo ?? "");
+        var m = await _db.Set<CrdMember>().FirstOrDefaultAsync(x => EF.Functions.Like((x.MemberNo ?? "").ToLower(), p, PortQuery.Esc));
+        if (m == null)
+        {
+            return (null, PortResult.Fail("Crd_Member_CheckDB_MemberNotFound", "Check.MemberNo", strMemberNo));
+        }
+        if (regisList.Length > 0 && !regisList.Contains(m.RegisStatus ?? ""))
+        {
+            return (null, PortResult.Fail("Crd_Member_CheckDB_RegisStatusNotMatched",
+                "Check.MemberNo", strMemberNo, "Check.strRegisStatusListToCheck", regisList, "DB.RegisStatus", m.RegisStatus));
+        }
+        if (memberList.Length > 0 && !memberList.Contains(m.MemberStatus ?? ""))
+        {
+            return (null, PortResult.Fail("Crd_Member_CheckDB_MemberStatusNotMatched",
+                "Check.MemberNo", strMemberNo, "Check.strMemberStatusListToCheck", memberList, "DB.MemberStatus", m.MemberStatus));
+        }
+        return (m, null);
+    }
+
+    private static string? CmStdParam(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim().ToUpperInvariant();
+
+    [HttpPost("delete")]
+    public async Task<IActionResult> Delete([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_MemberStatusReq? req)
+    {
+        if (req?.Crd_Member == null)
+        {
+            return PortResult.Fail("Crd_Member_Delete", "Check.strJson", null);
+        }
+        var (m, err) = await CmCheckDbAsync(CmStdParam(req.Crd_Member.MemberNo), "PENDING, CANCEL", "PENDING");
+        if (err != null) return err;
+        _db.Set<CrdMember>().Remove(m!);
+        await _db.SaveChangesAsync();
+        return Ok(new { Success = true, Data = (object?)null });
+    }
+
+    [HttpPost("cancel")]
+    public async Task<IActionResult> Cancel([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_MemberStatusReq? req)
+    {
+        if (req?.Crd_Member == null)
+        {
+            return PortResult.Fail("Crd_Member_Cancel", "Check.strJson", null);
+        }
+        string? strMemberNo = CmStdParam(req.Crd_Member.MemberNo);
+        var (m, err) = await CmCheckDbAsync(strMemberNo, "APPROVE1, APPROVE2", "PENDING");
+        if (err != null) return err;
+        string? strCardTypeUse = CmStdParam(m!.CardTypeUse);
+        string? strCardTypeInit = CmStdParam(m.CardTypeInit);
+        // Nguồn (Card.cs:13873+): ném lỗi khi CardTypeUse == CardTypeInit (thông báo ConditionRaise ghi "CardTypeUse <> CardTypeInit").
+        if (string.Equals(strCardTypeUse ?? "", strCardTypeInit ?? "", StringComparison.Ordinal))
+        {
+            return PortResult.Fail("Crd_Member_CancelX_InvalidCardType",
+                "Check.MemberNo", strMemberNo, "Check.CardTypeUse_DB", strCardTypeUse, "Check.CardTypeInit_DB", strCardTypeInit,
+                "ConditionRaise", "CardTypeUse <> CardTypeInit");
+        }
+        var now = DateTime.UtcNow;
+        var user = CmUser();
+        m.LogLUDTimeUTC = now; m.LogLUBy = user; m.LUDTimeUTC = now; m.LUBy = user;
+        m.Remark = (req.Crd_Member.Remark ?? "").Trim();
+        m.RegisCancelDTimeUTC = now; m.RegisCancelBy = user;
+        m.RegisStatus = "CANCEL"; m.MemberStatus = "PENDING";
+        await _db.SaveChangesAsync();
+        return Ok(new { Success = true, Data = (object?)null });
+    }
+
+    // Approve (Approve1 -> Approve2) và ApproveByDealer (Pending -> Approve1): Remark KHÔNG được cập nhật (dòng set bị comment trong nguồn).
+    private async Task<IActionResult> CmApproveAsync(Crd_MemberStatusReq? req, string errCode, string fromRegis, string toRegis)
+    {
+        if (req?.Crd_Member == null)
+        {
+            return PortResult.Fail(errCode, "Check.strJson", null);
+        }
+        var (m, err) = await CmCheckDbAsync(CmStdParam(req.Crd_Member.MemberNo), fromRegis, "PENDING");
+        if (err != null) return err;
+        var now = DateTime.UtcNow;
+        var user = CmUser();
+        m!.LogLUDTimeUTC = now; m.LogLUBy = user; m.LUDTimeUTC = now; m.LUBy = user;
+        if (toRegis == "APPROVE2") { m.RegisAppr2DTimeUTC = now; m.RegisAppr2By = user; }
+        else { m.RegisAppr1DTimeUTC = now; m.RegisAppr1By = user; }
+        m.RegisStatus = toRegis;
+        await _db.SaveChangesAsync();
+        return Ok(new { Success = true, Data = (object?)null });
+    }
+
+    [HttpPost("approve")]
+    public Task<IActionResult> Approve([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_MemberStatusReq? req)
+        => CmApproveAsync(req, "Crd_Member_Approve", "APPROVE1", "APPROVE2");
+
+    [HttpPost("approvebydealer")]
+    public Task<IActionResult> ApproveByDealer([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_MemberStatusReq? req)
+        => CmApproveAsync(req, "Crd_Member_ApproveByDealer", "PENDING", "APPROVE1");
 }
 
 public class Crd_MemberGetByCarNoReq
