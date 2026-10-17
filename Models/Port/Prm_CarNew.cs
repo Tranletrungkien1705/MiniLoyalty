@@ -108,6 +108,25 @@ public class Prm_CarNewDtlConfig : IEntityTypeConfiguration<Prm_CarNewDtl>
     }
 }
 
+/// <summary>
+/// Bảng sinh sequence cho PRMCNCodeSys — port 1:1 Seq_PRMCNCodeSys (Seq.cs:142, SeqType.PRMCNCodeSys; PK AutoId tự tăng).
+/// </summary>
+public class Seq_PRMCNCodeSys
+{
+    public long AutoId { get; set; }
+    public string? Remark { get; set; }
+}
+
+public class Seq_PRMCNCodeSysConfig : IEntityTypeConfiguration<Seq_PRMCNCodeSys>
+{
+    public void Configure(EntityTypeBuilder<Seq_PRMCNCodeSys> b)
+    {
+        b.ToTable("Seq_PRMCNCodeSys");
+        b.HasKey(x => x.AutoId);
+        b.Property(x => x.AutoId).ValueGeneratedOnAdd();
+    }
+}
+
 public class Prm_CarNewSeeder : IPortSeeder
 {
     public int Order => 51;
