@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
@@ -83,10 +85,12 @@ public class Rpt_PeriodSummarySearchRptPECrdTransationDeCreaseInstPeriodDtlReq
 public class Rpt_PeriodSummaryControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly IWebHostEnvironment? _env;
 
-    public Rpt_PeriodSummaryControllerPort(AppDbContext db)
+    public Rpt_PeriodSummaryControllerPort(AppDbContext db, IWebHostEnvironment? env = null)
     {
         _db = db;
+        _env = env;
     }
 
     /// <summary>
@@ -847,6 +851,124 @@ public class Rpt_PeriodSummaryControllerPort : ControllerBase
             }
         });
     }
+
+    /// <summary>
+    /// Từ điển 10 cột xuất Excel báo cáo đối soát tổng hợp kỳ Rpt_PeriodSummary.
+    /// Nguồn: Rpt_PeriodSummaryController.cs:1568-1587 (GetImportDicColumsRpt).
+    /// </summary>
+    private static Dictionary<string, string> GetImportDicColumsRpt()
+    {
+        return new Dictionary<string, string>
+        {
+            { nameof(Rpt_PeriodSummary.DLCPCode), "Đại lý" },
+            { nameof(Rpt_PeriodSummary.ACol), "Số điểm HV tích tại  ĐL trong kỳ" }, // Nguồn có 2 khoảng trắng giữa "tại" và "ĐL"
+            { nameof(Rpt_PeriodSummary.BCol), "Số điểm HV sử dụng tại ĐL trong kỳ" },
+            { nameof(Rpt_PeriodSummary.CCol), "Số điểm ĐL chuyển vào quỹ HV vì đặc cách HV" },
+            { nameof(Rpt_PeriodSummary.DCol), "Số điểm ĐL được nhận từ quỹ HV theo HV đặc cách của ĐL khác" },
+            { nameof(Rpt_PeriodSummary.ECol), "Điểm ĐL chuyển vào quỹ chung tích từ HTV" },
+            { nameof(Rpt_PeriodSummary.FCol), "Tổng số điểm ĐL chuyển vào quỹ chung" },
+            { nameof(Rpt_PeriodSummary.HCol), "Tổng số điểm hết hiệu lực của tháng đối soát" },
+            { nameof(Rpt_PeriodSummary.JCol), "Tổng số điểm hết hiệu lực lũy kế năm tính đến tháng đối soát" },
+            { nameof(Rpt_PeriodSummary.KCol), "Điểm tiêu dùng của hội viên hủy trong tháng đối soát" }
+        };
+    }
+
+    /// <summary>
+    /// Port 1:1 action ExportExcelRpt — xuất Excel báo cáo đối soát tổng hợp kỳ Rpt_PeriodSummary (#291).
+    /// Nguồn tra cứu (chỉ đọc):
+    ///   - Gate:     13.ClientGate/V10/idn.Loyalty.WebAPI/Controllers/Rpt_PeriodSummaryController.cs:794-879 (ExportExcelRpt)
+    ///   - Filter:   Rpt_PeriodSummaryController.cs:613-630 (strWhereClause_Rpt_PeriodSummary)
+    ///   - Service:  13.ClientGate/V10/idn.Loyalty.ClientService/Services/Loyalty/Rpt_PeriodSummaryService.cs:21-33 (WA_Rpt_PeriodSummary_Get)
+    ///   - API:      11.BackEnd/V10/idn.Loyalty.Biz.Web/Controllers/ReportController.cs:516-565 (WA_Rpt_PeriodSummary_Get)
+    ///   - Biz LIVE: 11.BackEnd/V10/idn.Loyalty.Biz/Report.cs:4340-4464 (WAS_Rpt_PeriodSummary_Get),
+    ///               :4465-4613 (Rpt_PeriodSummary_Get), :4614-4941 (Rpt_PeriodSummary_GetX)
+    ///   - Columns:  Rpt_PeriodSummaryController.cs:1568-1587 (GetImportDicColumsRpt)
+    ///
+    /// ĐẶC ĐIỂM NGHIỆP VỤ:
+    ///   - Gate ExportExcelRpt nhận: DLCPCode, PeriodMonth (:794).
+    ///   - strWhereClause_Rpt_PeriodSummary (:613-630) lọc:
+    ///       + DLCode (map từ DLCPCode tại gate :818): toán tử '=' (nguyên chuỗi, không phân biệt hoa thường) trên cột DLCPCode.
+    ///       + PeriodMonth (gate :819): toán tử '=' (nguyên chuỗi, không phân biệt hoa thường) trên cột PeriodMonth.
+    ///       + KHÔNG lọc KeyWord, FlagActive, OrgID.
+    ///   - Sắp xếp: order by rps.LogLUDTimeUTC desc (Report.cs:4695, :4765).
+    ///   - Tính toán nghiệp vụ cột HCol: HCol = (rps.HCol ?? 0) + (rps.LCol ?? 0) (Report.cs:4754).
+    ///   - Guard khi danh sách rỗng: ném ServiceException("Không có dữ liệu") -> trả HTTP 400 ErridnLoyalty.Rpt_PeriodSummary_ExportExcelRpt (gate :865, :868-872).
+    ///   - Xuất file: GenExcelExportFilePath("Rpt_PeriodSummary") và ExportToExcelFromList với 10 cột từ GetImportDicColumsRpt() (:852-854).
+    ///   - Trả về: Success = true, Url = baseAddress + virtualPath (:856-860).
+    /// </summary>
+    [HttpPost("exportexcelrpt")]
+    public async Task<IActionResult> ExportExcelRpt([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Rpt_PeriodSummarySearchReq? req)
+    {
+        var query = _db.Set<Rpt_PeriodSummary>().AsNoTracking().AsQueryable();
+
+        // 1. Lọc DLCPCode (hoặc DLCode) với toán tử '=' (nguyên chuỗi, không phân biệt hoa thường) — gate :618-621, :818
+        string? dlCode = req?.DLCPCode;
+        if (!string.IsNullOrWhiteSpace(dlCode))
+        {
+            var p_dlCode = PortQuery.Equal(dlCode);
+            query = query.Where(x => EF.Functions.Like(x.DLCPCode.ToLower(), p_dlCode, PortQuery.Esc));
+        }
+
+        // 2. Lọc PeriodMonth với toán tử '=' (nguyên chuỗi, không phân biệt hoa thường) — gate :623-627, :819
+        if (!string.IsNullOrWhiteSpace(req?.PeriodMonth))
+        {
+            var p_month = PortQuery.Equal(req.PeriodMonth);
+            query = query.Where(x => EF.Functions.Like(x.PeriodMonth.ToLower(), p_month, PortQuery.Esc));
+        }
+
+        // 3. Sắp xếp: order by rps.LogLUDTimeUTC desc — Report.cs:4695, :4765
+        var list = await query.OrderByDescending(x => x.LogLUDTimeUTC).ToListAsync();
+
+        // 4. Kiểm tra danh sách rỗng — gate :845, :863-866
+        // Khi không có dữ liệu: throw ServiceException("Không có dữ liệu") -> gate catch :868-872
+        // Ở port trả HTTP 400: PortResult.Fail("Rpt_PeriodSummary_ExportExcelRpt", "Message", "Không có dữ liệu")
+        if (list == null || list.Count == 0)
+        {
+            return PortResult.Fail("Rpt_PeriodSummary_ExportExcelRpt", "Message", "Không có dữ liệu");
+        }
+
+        // 5. Tính toán nghiệp vụ lại cho cột HCol: (rps.HCol + rps.LCol) — Report.cs:4754
+        // "Tổng số điểm hết hạn của tháng đối soát = Điểm hết hạn của tháng + Điểm hủy của tháng"
+        foreach (var item in list)
+        {
+            item.HCol = (item.HCol ?? 0) + (item.LCol ?? 0);
+        }
+
+        // 6. Chuẩn bị đường dẫn thư mục xuất file Excel — gate :851-852
+        var webRoot = _env?.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = _env != null
+                ? Path.Combine(_env.ContentRootPath, "wwwroot")
+                : Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+        }
+
+        string virtualPath;
+        try
+        {
+            // 7. Lấy từ điển 10 cột từ GetImportDicColumsRpt(), sinh file và xuất Excel — gate :849, :852, :854
+            var dicColNames = GetImportDicColumsRpt();
+            var (physicalPath, vPath) = PortExcel.GenExcelExportFilePath(webRoot, "Rpt_PeriodSummary");
+            virtualPath = vPath;
+            PortExcel.ExportToExcelFromList(list, dicColNames, physicalPath, "Rpt_PeriodSummary");
+        }
+        catch (Exception ex)
+        {
+            // Bắt ngoại lệ nếu ghi file lỗi -> trả Fail (gate :868-872)
+            return PortResult.Fail("Rpt_PeriodSummary_ExportExcelRpt", "Exception", ex.Message);
+        }
+
+        // 8. Trả URL tải file với Success = true — gate :856-860
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+            }
+        });
+    }
 }
+
 
 
