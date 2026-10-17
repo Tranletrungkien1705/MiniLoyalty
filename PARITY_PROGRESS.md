@@ -4,7 +4,7 @@ Nguồn mẫu số: `D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.Web
 
 **Mẫu số (N)**: 337
 
-**Tiến độ hiện tại**: 270/337 (80.12%)
+**Tiến độ hiện tại**: 271/337 (80.42%)
 
 Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã có` (đã port từ trước, có bằng chứng) · `Bỏ` (scaffold/không nghiệp vụ, ghi lý do) · `Cần xem tay`.
 
@@ -267,7 +267,7 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 255 | Prm_CarNewController/CalcPrm | Chưa làm | - |
 | 256 | Prm_CarRecommendController/Search | Đã làm | f55a618 |
 | 257 | Prm_CarRecommendController/GetByPRMCRCodeSys | Đã làm | cc162b6 |
-| 258 | Prm_CarRecommendController/Save | Chưa làm | - |
+| 258 | Prm_CarRecommendController/Save | Đã làm | 58d1dd4 |
 | 259 | Prm_CarRecommendController/Approve | Chưa làm | - |
 | 260 | Prm_CarRecommendController/Finish | Chưa làm | - |
 | 261 | Prm_CarRecommendController/Delete | Chưa làm | - |
