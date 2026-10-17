@@ -26,10 +26,10 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 14 | Crd_CardTransactionController/Export | Đã làm | 75d4ee0 |
 | 15 | Crd_CardTransactionInCreaseController/Search | Đã làm | 9d65ffb |
 | 16 | Crd_CardTransactionInCreaseController/Export | Đã làm | d4a9c50 |
-| 17 | Crd_CardTransactionServiceTurnController/Search | Cần xem tay | Phu thuoc Crd_DealSerRO/Dtl chua port |
-| 18 | Crd_CardTransactionServiceTurnController/Export | Cần xem tay | Phu thuoc #17 |
+| 17 | Crd_CardTransactionServiceTurnController/Search | Chưa làm |  |
+| 18 | Crd_CardTransactionServiceTurnController/Export | Chưa làm |  |
 | 19 | Crd_DealSerROController/Search | Đã làm | 2c23b83 |
-| 20 | Crd_DealSerROController/Calc | Cần xem tay | Crd_DealSerRO_AddX ~2400 dong |
+| 20 | Crd_DealSerROController/Calc | Chưa làm |  |
 | 21 | Crd_DealSerROController/Add | Đã làm | c9e7f99 |
 | 22 | Crd_DealUsePromotionController/Save | Đã làm | cb05505 |
 | 23 | Crd_DealUsePromotionController/Search | Đã làm | f31e3e1 |
