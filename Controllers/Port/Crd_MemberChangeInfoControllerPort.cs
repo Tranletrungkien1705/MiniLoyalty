@@ -138,11 +138,13 @@ public class Crd_MemberChangeInfoControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly IConfiguration? _config;
+    private readonly Microsoft.AspNetCore.Hosting.IWebHostEnvironment? _env;
 
-    public Crd_MemberChangeInfoControllerPort(AppDbContext db, IConfiguration? config = null)
+    public Crd_MemberChangeInfoControllerPort(AppDbContext db, IConfiguration? config = null, Microsoft.AspNetCore.Hosting.IWebHostEnvironment? env = null)
     {
         _db = db;
         _config = config;
+        _env = env;
     }
 
     /// <summary>
@@ -339,6 +341,57 @@ public class Crd_MemberChangeInfoControllerPort : ControllerBase
                 Lst_Crd_MemberChangeInfo = resultList.Count > 0 ? resultList : null
             }
         });
+    }
+
+    /// <summary>
+    /// Export (#038): Gate Crd_MemberChangeInfoController.cs (Export) — cùng bộ lọc với Search, Ft_RecordStart = "0", lấy toàn bộ;
+    /// rỗng => ServiceException("Không có dữ liệu"); có dữ liệu => GetImportDicColums() (14 cột), sheet/tiền tố file "Crd_MemberChangeInfo", Data = { Url }.
+    /// Lưu ý nguồn: từ điển dùng khoá MemberName/CarNo/PhoneNo trong khi model chỉ có cm_MemberName/cm_CarNo/cm_PhoneNo => 3 cột này không có dữ liệu.
+    /// </summary>
+    [HttpPost("export")]
+    public async Task<IActionResult> Export([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_MemberChangeInfoSearchReq? req)
+    {
+        var res = await Search(req);
+        var okVal = (res as OkObjectResult)?.Value;
+        var dataObj = okVal?.GetType().GetProperty("Data")?.GetValue(okVal);
+        var rows = dataObj?.GetType().GetProperty("Lst_Crd_MemberChangeInfo")?.GetValue(dataObj) as List<Crd_MemberChangeInfo>;
+        if (rows == null || rows.Count == 0)
+        {
+            return PortResult.Fail("Crd_MemberChangeInfo_Export", "Message", "Không có dữ liệu");
+        }
+
+        var webRoot = _env?.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = _env != null ? System.IO.Path.Combine(_env.ContentRootPath, "wwwroot") : System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "wwwroot");
+        }
+        var dic = new Dictionary<string, string>
+        {
+            { "RequestNo", "Mã Đề nghị (*)" },
+            { "MemberNo", "Mã thẻ hội viên" },
+            { "MemberName", "Tên hội viên" },
+            { "DLCodeRequest", "Đại lý đề nghị" },
+            { "RequestType", "Loại đề nghị" },
+            { "RequestStatus", "Trạng thái" },
+            { "Remark", "Ghi chú" },
+            { "CreateDTimeUTC", "Ngày tạo" },
+            { "CarNo", "Biển số xe" },
+            { "PhoneNo", "Số điện thoại" },
+            { "ApproveDTimeUTC", "Ngày duyệt" },
+            { "ApproveBy", "Người duyệt" },
+            { "FinishDTimeUTC", "Ngày hoàn thành" },
+            { "FinishBy", "Người hoàn thành" },
+        };
+        try
+        {
+            var (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Crd_MemberChangeInfo");
+            PortExcel.ExportToExcelFromList(rows, dic, physicalPath, "Crd_MemberChangeInfo");
+            return Ok(new { Success = true, Data = new { Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath } });
+        }
+        catch (Exception ex)
+        {
+            return PortResult.Fail("Crd_MemberChangeInfo_Export", "Exception", ex.Message);
+        }
     }
 
     /// <summary>
