@@ -113,6 +113,20 @@ public class Crd_MemberChangeInfoRejectReq
 }
 
 /// <summary>
+/// DTO nhận tham số cho Crd_MemberChangeInfoController/Approve (#036).
+/// Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Crd_MemberChangeInfoController.cs:840-904
+/// API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\CrdMemberChangeInfoController.cs:242-312
+/// Biz: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\Card.cs:30215-30306 (WAS_), 30071-30213 (Approve), 29667-30005 (ApproveX)
+/// </summary>
+public class Crd_MemberChangeInfoApproveReq
+{
+    public Crd_MemberChangeInfo? Crd_MemberChangeInfo { get; set; }
+    public List<Crd_MemberChangeInfoDtl>? Lst_Crd_MemberChangeInfoDtl { get; set; }
+    public string? DLCPCode { get; set; }
+    public string? WAUserCode { get; set; }
+}
+
+/// <summary>
 /// Port 1:1 Crd_MemberChangeInfoController — Crd_MemberChangeInfo (#027).
 /// Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Crd_MemberChangeInfoController.cs:33-144
 /// API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\CrdMemberChangeInfoController.cs:23-93
@@ -1037,6 +1051,165 @@ public class Crd_MemberChangeInfoControllerPort : ControllerBase
     }
 
     /// <summary>
+    /// Duyệt đề nghị thay đổi thông tin hội viên (Action Approve, #036).
+    /// Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Crd_MemberChangeInfoController.cs:840-904
+    /// API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\CrdMemberChangeInfoController.cs:242-312
+    /// Biz: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\Card.cs:30215-30306 (WAS_), 30071-30213 (Approve), 29667-30005 (ApproveX)
+    /// </summary>
+    [HttpPost("approve")]
+    public async Task<IActionResult> Approve([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_MemberChangeInfoApproveReq? req)
+    {
+        // 1. Kiểm tra rỗng / null ở tầng Gate (Gate :849-856, Ca 1)
+        if (req == null || req.Crd_MemberChangeInfo == null)
+        {
+            return PortResult.Fail("Crd_MemberChangeInfo_Approve", "Check.strJson", null);
+        }
+
+        var headerInput = req.Crd_MemberChangeInfo;
+
+        // 2. Chuẩn hoá tham số đầu vào (Card.cs:29711-29719)
+        var strRequestNo = StdParam(headerInput.RequestNo);
+        var strRemarkHTV = StdStr(headerInput.RemarkHTV);
+
+        var dtimeSys = DateTime.UtcNow;
+        var strDTimeSys = dtimeSys.ToString("yyyy-MM-dd HH:mm:ss");
+
+        var strWAUserCode = !string.IsNullOrWhiteSpace(req.WAUserCode)
+            ? req.WAUserCode.Trim()
+            : (Request.Headers.TryGetValue("WAUserCode", out var hdrUser) && !string.IsNullOrWhiteSpace(hdrUser)
+                ? hdrUser.ToString().Trim()
+                : "port");
+
+        // Lấy DLCPCode của user hiện tại (Card.cs:30020-30021, P3, Ca 4)
+        var strDLCPCode = !string.IsNullOrWhiteSpace(req.DLCPCode)
+            ? req.DLCPCode.Trim()
+            : (Request.Headers.TryGetValue("DLCPCode", out var hdrDlcp) && !string.IsNullOrWhiteSpace(hdrDlcp)
+                ? hdrDlcp.ToString().Trim()
+                : "HTV");
+        strDLCPCode = StdParam(strDLCPCode) ?? "";
+
+        // 3. Khởi tạo transaction an toàn (Card.cs:30105)
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // 4. Kiểm tra DB qua Crd_MemberChangeInfo_CheckDB(strRequestNo, "1", "PENDING") (Card.cs:29722-29728, 27896-27965)
+            var p_RequestNo = PortQuery.Equal(strRequestNo ?? "");
+            var existingRecord = await _db.Set<Crd_MemberChangeInfo>()
+                .FirstOrDefaultAsync(x => EF.Functions.Like((x.RequestNo ?? "").ToLower(), p_RequestNo, PortQuery.Esc));
+
+            if (existingRecord == null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Crd_MemberChangeInfo_CheckDB_Crd_MemberChangeInfoNotFound",
+                    "Check.RequestNo", strRequestNo);
+            }
+
+            var currentStatus = existingRecord.RequestStatus ?? "";
+            if (!string.Equals(currentStatus, "PENDING", StringComparison.OrdinalIgnoreCase))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Crd_MemberChangeInfo_CheckDB_RequestStatusNotMatched",
+                    "Check.RequestNo", strRequestNo,
+                    "Check.strRequestStatusListToCheck", "PENDING",
+                    "DB.RequestStatus", existingRecord.RequestStatus);
+            }
+
+            // 5. Kiểm tra quyền duyệt qua Crd_MemberChangeInfo_CheckApproveRight (Card.cs:29736-29741, 30012-30070)
+            if (!string.Equals(strDLCPCode, "HTV", StringComparison.OrdinalIgnoreCase))
+            {
+                var strApproveDLCode = StdParam(existingRecord.ApproveDLCode) ?? "";
+                if (string.IsNullOrEmpty(strDLCPCode) || !string.Equals(strApproveDLCode, strDLCPCode, StringComparison.OrdinalIgnoreCase))
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Crd_MemberChangeInfo_Approve_InvalidApproveRight",
+                        "Check.DLCPCode", strDLCPCode,
+                        "Check.ApproveDLCode", strApproveDLCode,
+                        "Expect", "User phai la HTV hoac dai ly da khoa trong Don vi duyet (ApproveDLCode) luc tao de nghi");
+                }
+            }
+
+            // 6. Cập nhật dữ liệu DB (Card.cs:29859-29921)
+            // LỖI NGUỒN GIỮ NGUYÊN: Cột Remark được đưa vào #input_Crd_MemberChangeInfo (:554) nhưng bị BỎ SÓT trong mệnh đề SET của lệnh UPDATE Crd_MemberChangeInfo (:29860-29868). Do đó cột Remark của Crd_MemberChangeInfo KHÔNG ĐƯỢC CẬP NHẬT (giữ nguyên giá trị cũ trong DB).
+            existingRecord.RequestStatus = "APPROVE";
+            existingRecord.ApproveDTimeUTC = strDTimeSys;
+            existingRecord.ApproveBy = strWAUserCode;
+            existingRecord.RemarkHTV = strRemarkHTV;
+            existingRecord.LUDTimeUTC = strDTimeSys;
+            existingRecord.LUBy = strWAUserCode;
+            existingRecord.LogLUDTimeUTC = strDTimeSys;
+            existingRecord.LogLUBy = strWAUserCode;
+
+            // Cập nhật bảng con Crd_MemberChangeInfoDtl (Card.cs:29891-29904)
+            if (req.Lst_Crd_MemberChangeInfoDtl != null && req.Lst_Crd_MemberChangeInfoDtl.Count > 0)
+            {
+                var dtlList = await _db.Set<Crd_MemberChangeInfoDtl>()
+                    .Where(x => EF.Functions.Like((x.RequestNo ?? "").ToLower(), p_RequestNo, PortQuery.Esc))
+                    .ToListAsync();
+
+                foreach (var dtlInput in req.Lst_Crd_MemberChangeInfoDtl)
+                {
+                    var colCode = StdParam(dtlInput.ColumnCode);
+                    if (string.IsNullOrEmpty(colCode)) continue;
+
+                    var existingDtl = dtlList.FirstOrDefault(x => string.Equals(x.ColumnCode, colCode, StringComparison.OrdinalIgnoreCase));
+                    if (existingDtl != null)
+                    {
+                        existingDtl.RequestDtlStatus = "APPROVE";
+                        existingDtl.Remark = dtlInput.Remark;
+                        existingDtl.LogLUDTimeUTC = strDTimeSys;
+                        existingDtl.LogLUBy = strWAUserCode;
+                    }
+                }
+            }
+
+            // Lưu thay đổi trước khi kiểm tra ràng buộc sau duyệt (Card.cs:29918-29921)
+            await _db.SaveChangesAsync();
+
+            // 7. Kiểm tra sau khi duyệt (Check After Approved, Card.cs:29924-30001)
+            var strRequestType = existingRecord.RequestType ?? "";
+            if (string.Equals(strRequestType, "CANCELMEMBER", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(strRequestType, "CANCELMEMBERNOTQUERY", StringComparison.OrdinalIgnoreCase))
+            {
+                var strMemberNo = existingRecord.MemberNo ?? "";
+                var p_MemberNo = PortQuery.Equal(strMemberNo);
+                var p_RequestType = PortQuery.Equal(strRequestType);
+                var p_RequestStatus = PortQuery.Equal("APPROVE");
+
+                var approvedCancelList = await _db.Set<Crd_MemberChangeInfo>()
+                    .Where(t => EF.Functions.Like((t.MemberNo ?? "").ToLower(), p_MemberNo, PortQuery.Esc) &&
+                                EF.Functions.Like((t.RequestType ?? "").ToLower(), p_RequestType, PortQuery.Esc) &&
+                                EF.Functions.Like((t.RequestStatus ?? "").ToLower(), p_RequestStatus, PortQuery.Esc))
+                    .ToListAsync();
+
+                if (approvedCancelList.Count > 1)
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Crd_MemberChangeInfo_ApproveX_InvalidRequestStatus_RequestType",
+                        "Check.MemberNo", approvedCancelList[0].MemberNo,
+                        "Check.RequestType", approvedCancelList[0].RequestType,
+                        "Check.RequestStatus", approvedCancelList[0].RequestStatus,
+                        "Expect", "Only 1 RequestStatus P, A in Crd_MemberChangeInfo with Type CancelMember");
+                }
+            }
+
+            // Commit transaction an toàn (Card.cs:30176)
+            await tx.CommitAsync();
+
+            // Trả về Success = true, Data = null (Gate :890-891)
+            return Ok(new
+            {
+                Success = true,
+                Data = (object?)null
+            });
+        }
+        catch (Exception)
+        {
+            await tx.RollbackAsync();
+            throw;
+        }
+    }
+
+    /// <summary>
     /// Nghiệp vụ lưu cốt lõi dùng chung giữa Save (#032) và Add (#033) (Card.cs:28667-29397 Crd_MemberChangeInfo_SaveX).
     /// </summary>
     private async Task<IActionResult> SaveCoreAsync(Crd_MemberChangeInfo headerInput, List<Crd_MemberChangeInfoDtl>? reqDtl, bool bIsDelete)
@@ -1811,5 +1984,329 @@ public class Crd_MemberChangeInfoRejectSeeder : IPortSeeder
         await db.SaveChangesAsync();
     }
 }
+
+/// <summary>
+/// Seeder bổ sung cho Crd_MemberChangeInfoController/Approve (#036).
+/// Order => 78 (dải 10-99 chưa dùng theo P3).
+/// Idempotent. Cung cấp dữ liệu mẫu kiểm thử duyệt đề nghị trạng thái PENDING (REQ_APP_01, REQ_APP_02, REQ_APP_03, REQ_APP_OK01, REQ_APP_OK02, REQ_APP_OK03),
+/// trạng thái APPROVE (REQ_APP_STATUS_ERR), sai quyền duyệt (REQ_APP_RIGHT_ERR), và trùng đề nghị CancelMember (REQ_CANCEL_EXIST, REQ_CANCEL_NEW).
+/// </summary>
+public class Crd_MemberChangeInfoApproveSeeder : IPortSeeder
+{
+    public int Order => 78;
+
+    public async Task SeedAsync(AppDbContext db)
+    {
+        // 1. Đảm bảo hội viên MB001 và MB_CANCEL_01 tồn tại trong CrdMembers
+        var now = DateTime.UtcNow;
+        const string net = "DEMO";
+
+        if (!await db.CrdMembers.AnyAsync(m => m.MemberNo == "MB001"))
+        {
+            db.CrdMembers.Add(new CrdMember
+            {
+                MemberNo = "MB001",
+                NetworkID = net,
+                OrgID = net,
+                DLCodeRegis = "VN040",
+                RegistrationDate = now.AddMonths(-6),
+                CustomerCode = "KH001",
+                ProvinceCode = "HN",
+                DistrictCode = "HN01",
+                MemberName = "Nguyen Van MB001",
+                MemberGender = "1",
+                IDCardNo = "001090001001",
+                PhoneNo = "0901234567",
+                DateOfBirth = new DateTime(1990, 1, 1),
+                MemAddress = "Ha Noi",
+                CarNo = "30A-99001",
+                VIN = "VINMB000000000001",
+                ModelCode = "ACC",
+                ModelName = "Accent",
+                TradeMarkCode = "HYU",
+                EffDateStart = now.AddMonths(-6),
+                EffDateEnd = now.AddMonths(6),
+                PointTotal = 1000,
+                PointAvail = 1000,
+                PointBegin = 0,
+                PointEnd = 1000,
+                AmountTotal = 10000000,
+                AmountAvail = 10000000,
+                AmountBegin = 0,
+                AmountEnd = 10000000,
+                QtyVisitTotal = 1,
+                QtyVisitAvail = 1,
+                PointCardRank = 1000,
+                AmountCardRank = 10000000,
+                CardTypeUse = "P",
+                CardTypeInit = "P",
+                MemberActiveDate = now.AddMonths(-6),
+                FlagExceptionally = "0",
+                FlagExceptionCard = "0",
+                PointVoucher = 0,
+                MemberStatus = "APPROVE",
+                CardStatus = "APPROVE",
+                CardSourceCode = "NEW",
+                PurchaseType = "BUYNEW",
+                CreateDTimeUTC = now.AddMonths(-6),
+                CreateBy = "seed",
+                LUDTimeUTC = now,
+                LUBy = "seed",
+                LogLUDTimeUTC = now,
+                LogLUBy = "seed"
+            });
+            await db.SaveChangesAsync();
+        }
+
+        if (!await db.CrdMembers.AnyAsync(m => m.MemberNo == "MB_CANCEL_01"))
+        {
+            db.CrdMembers.Add(new CrdMember
+            {
+                MemberNo = "MB_CANCEL_01",
+                NetworkID = net,
+                OrgID = net,
+                DLCodeRegis = "VN040",
+                RegistrationDate = now.AddMonths(-6),
+                CustomerCode = "KH_CANCEL_01",
+                ProvinceCode = "HN",
+                DistrictCode = "HN01",
+                MemberName = "Nguyen Van Cancel",
+                MemberGender = "1",
+                IDCardNo = "001090009999",
+                PhoneNo = "0988999999",
+                DateOfBirth = new DateTime(1990, 1, 1),
+                MemAddress = "Ha Noi",
+                CarNo = "30A-99999",
+                VIN = "VINCANCEL00000001",
+                ModelCode = "ACC",
+                ModelName = "Accent",
+                TradeMarkCode = "HYU",
+                EffDateStart = now.AddMonths(-6),
+                EffDateEnd = now.AddMonths(6),
+                PointTotal = 1000,
+                PointAvail = 1000,
+                PointBegin = 0,
+                PointEnd = 1000,
+                AmountTotal = 10000000,
+                AmountAvail = 10000000,
+                AmountBegin = 0,
+                AmountEnd = 10000000,
+                QtyVisitTotal = 1,
+                QtyVisitAvail = 1,
+                PointCardRank = 1000,
+                AmountCardRank = 10000000,
+                CardTypeUse = "P",
+                CardTypeInit = "P",
+                MemberActiveDate = now.AddMonths(-6),
+                FlagExceptionally = "0",
+                FlagExceptionCard = "0",
+                PointVoucher = 0,
+                MemberStatus = "APPROVE",
+                CardStatus = "APPROVE",
+                CardSourceCode = "NEW",
+                PurchaseType = "BUYNEW",
+                CreateDTimeUTC = now.AddMonths(-6),
+                CreateBy = "seed",
+                LUDTimeUTC = now,
+                LUBy = "seed",
+                LogLUDTimeUTC = now,
+                LogLUBy = "seed"
+            });
+            await db.SaveChangesAsync();
+        }
+
+        // 2. Seed các đề nghị và chi tiết
+        // REQ_APP_01 & REQ_APP_OK01
+        foreach (var reqNo in new[] { "REQ_APP_01", "REQ_APP_OK01" })
+        {
+            if (!await db.Set<Crd_MemberChangeInfo>().AnyAsync(r => r.RequestNo == reqNo))
+            {
+                db.Set<Crd_MemberChangeInfo>().Add(new Crd_MemberChangeInfo
+                {
+                    RequestNo = reqNo,
+                    MemberNo = "MB001",
+                    NetworkID = "1001",
+                    OrgID = "ORG01",
+                    DLCodeRequest = "VN040",
+                    ApproveDLCode = "VN040",
+                    RequestType = "CHANGEINFO",
+                    RequestStatus = "PENDING",
+                    Remark = "Ghi chu goc REQ_APP_01",
+                    RemarkHTV = null,
+                    CreateDTimeUTC = "2026-08-01 08:00:00",
+                    LogLUDTimeUTC = "2026-08-01 08:00:00",
+                    CreateBy = "seed",
+                    LUBy = "seed"
+                });
+            }
+
+            if (!await db.Set<Crd_MemberChangeInfoDtl>().AnyAsync(d => d.RequestNo == reqNo && d.ColumnCode == "PhoneNo"))
+            {
+                db.Set<Crd_MemberChangeInfoDtl>().Add(new Crd_MemberChangeInfoDtl
+                {
+                    RequestNo = reqNo,
+                    ColumnCode = "PhoneNo",
+                    ColumnValueOld = "0901234567",
+                    ColumnValueNew = "0912345678",
+                    Remark = "Chi tiet PhoneNo goc",
+                    RequestDtlStatus = "PENDING",
+                    NetworkID = "1001",
+                    OrgID = "ORG01",
+                    LogLUBy = "seed",
+                    LogLUDTimeUTC = "2026-08-01 08:00:00"
+                });
+            }
+        }
+
+        // REQ_APP_02 & REQ_APP_OK02
+        foreach (var reqNo in new[] { "REQ_APP_02", "REQ_APP_OK02" })
+        {
+            if (!await db.Set<Crd_MemberChangeInfo>().AnyAsync(r => r.RequestNo == reqNo))
+            {
+                db.Set<Crd_MemberChangeInfo>().Add(new Crd_MemberChangeInfo
+                {
+                    RequestNo = reqNo,
+                    MemberNo = "MB001",
+                    NetworkID = "1001",
+                    OrgID = "ORG01",
+                    DLCodeRequest = "VN040",
+                    ApproveDLCode = "VN040",
+                    RequestType = "CHANGEINFO",
+                    RequestStatus = "PENDING",
+                    Remark = "Ghi chu goc REQ_APP_02",
+                    RemarkHTV = null,
+                    CreateDTimeUTC = "2026-08-02 08:00:00",
+                    LogLUDTimeUTC = "2026-08-02 08:00:00",
+                    CreateBy = "seed",
+                    LUBy = "seed"
+                });
+            }
+
+            if (!await db.Set<Crd_MemberChangeInfoDtl>().AnyAsync(d => d.RequestNo == reqNo && d.ColumnCode == "MemAddress"))
+            {
+                db.Set<Crd_MemberChangeInfoDtl>().Add(new Crd_MemberChangeInfoDtl
+                {
+                    RequestNo = reqNo,
+                    ColumnCode = "MemAddress",
+                    ColumnValueOld = "Ha Noi",
+                    ColumnValueNew = "Hai Phong",
+                    Remark = "Chi tiet Dia chi goc",
+                    RequestDtlStatus = "PENDING",
+                    NetworkID = "1001",
+                    OrgID = "ORG01",
+                    LogLUBy = "seed",
+                    LogLUDTimeUTC = "2026-08-02 08:00:00"
+                });
+            }
+        }
+
+        // REQ_APP_03 & REQ_APP_OK03
+        foreach (var reqNo in new[] { "REQ_APP_03", "REQ_APP_OK03" })
+        {
+            if (!await db.Set<Crd_MemberChangeInfo>().AnyAsync(r => r.RequestNo == reqNo))
+            {
+                db.Set<Crd_MemberChangeInfo>().Add(new Crd_MemberChangeInfo
+                {
+                    RequestNo = reqNo,
+                    MemberNo = "MB001",
+                    NetworkID = "1001",
+                    OrgID = "ORG01",
+                    DLCodeRequest = "VN040",
+                    ApproveDLCode = "VN040",
+                    RequestType = "CHANGEINFO",
+                    RequestStatus = "PENDING",
+                    Remark = "Ghi chu goc REQ_APP_03",
+                    RemarkHTV = null,
+                    CreateDTimeUTC = "2026-08-03 08:00:00",
+                    LogLUDTimeUTC = "2026-08-03 08:00:00",
+                    CreateBy = "seed",
+                    LUBy = "seed"
+                });
+            }
+        }
+
+        // 4. REQ_APP_STATUS_ERR
+        if (!await db.Set<Crd_MemberChangeInfo>().AnyAsync(r => r.RequestNo == "REQ_APP_STATUS_ERR"))
+        {
+            db.Set<Crd_MemberChangeInfo>().Add(new Crd_MemberChangeInfo
+            {
+                RequestNo = "REQ_APP_STATUS_ERR",
+                MemberNo = "MB001",
+                NetworkID = "1001",
+                OrgID = "ORG01",
+                DLCodeRequest = "VN040",
+                ApproveDLCode = "VN040",
+                RequestType = "CHANGEINFO",
+                RequestStatus = "APPROVE",
+                CreateDTimeUTC = "2026-08-04 08:00:00",
+                LogLUDTimeUTC = "2026-08-04 08:00:00",
+                CreateBy = "seed",
+                LUBy = "seed"
+            });
+        }
+
+        // 5. REQ_APP_RIGHT_ERR
+        if (!await db.Set<Crd_MemberChangeInfo>().AnyAsync(r => r.RequestNo == "REQ_APP_RIGHT_ERR"))
+        {
+            db.Set<Crd_MemberChangeInfo>().Add(new Crd_MemberChangeInfo
+            {
+                RequestNo = "REQ_APP_RIGHT_ERR",
+                MemberNo = "MB001",
+                NetworkID = "1001",
+                OrgID = "ORG01",
+                DLCodeRequest = "VN040",
+                ApproveDLCode = "VN040",
+                RequestType = "CHANGEINFO",
+                RequestStatus = "PENDING",
+                CreateDTimeUTC = "2026-08-05 08:00:00",
+                LogLUDTimeUTC = "2026-08-05 08:00:00",
+                CreateBy = "seed",
+                LUBy = "seed"
+            });
+        }
+
+        // 6. REQ_CANCEL_EXIST & REQ_CANCEL_NEW
+        if (!await db.Set<Crd_MemberChangeInfo>().AnyAsync(r => r.RequestNo == "REQ_CANCEL_EXIST"))
+        {
+            db.Set<Crd_MemberChangeInfo>().Add(new Crd_MemberChangeInfo
+            {
+                RequestNo = "REQ_CANCEL_EXIST",
+                MemberNo = "MB_CANCEL_01",
+                NetworkID = "1001",
+                OrgID = "ORG01",
+                DLCodeRequest = "VN040",
+                ApproveDLCode = "",
+                RequestType = "CANCELMEMBER",
+                RequestStatus = "APPROVE",
+                CreateDTimeUTC = "2026-08-06 08:00:00",
+                LogLUDTimeUTC = "2026-08-06 08:00:00",
+                CreateBy = "seed",
+                LUBy = "seed"
+            });
+        }
+
+        if (!await db.Set<Crd_MemberChangeInfo>().AnyAsync(r => r.RequestNo == "REQ_CANCEL_NEW"))
+        {
+            db.Set<Crd_MemberChangeInfo>().Add(new Crd_MemberChangeInfo
+            {
+                RequestNo = "REQ_CANCEL_NEW",
+                MemberNo = "MB_CANCEL_01",
+                NetworkID = "1001",
+                OrgID = "ORG01",
+                DLCodeRequest = "VN040",
+                ApproveDLCode = "",
+                RequestType = "CANCELMEMBER",
+                RequestStatus = "PENDING",
+                CreateDTimeUTC = "2026-08-07 08:00:00",
+                LogLUDTimeUTC = "2026-08-07 08:00:00",
+                CreateBy = "seed",
+                LUBy = "seed"
+            });
+        }
+
+        await db.SaveChangesAsync();
+    }
+}
+
 
 
