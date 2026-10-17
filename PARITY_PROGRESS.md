@@ -62,7 +62,7 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 50 | Crd_MemberController/Cancel | Đã làm | f8ef5b6 |
 | 51 | Crd_MemberController/Approve | Đã làm | f8ef5b6 |
 | 52 | Crd_MemberController/ApproveByDealer | Đã làm | f8ef5b6 |
-| 53 | Crd_MemberController/Finish | Cần xem tay | Chuoi Perform* + Crd_CardTransaction_Perform chua port |
+| 53 | Crd_MemberController/Finish | Chưa làm | - |
 | 54 | Crd_MemberController/Export | Đã làm | 6968ad3 |
 | 55 | Crd_MemberDiscountTransactionController/Search | Đã làm | e152a91 |
 | 56 | Crd_MemberVoucherTransactionController/Search | Đã làm | 5a0c9ba |
