@@ -292,3 +292,24 @@ public class Req_MemberRegisterSeeder : IPortSeeder
         await db.SaveChangesAsync();
     }
 }
+
+/// <summary>Seeder cho ReqMemberRegister Approve/ApproveOld/Cancel/Reject (Order => 80).</summary>
+public class Req_MemberRegisterStatusSeeder : IPortSeeder
+{
+    public int Order => 80;
+
+    public async Task SeedAsync(AppDbContext db)
+    {
+        if (await db.Set<Req_MemberRegister>().AnyAsync(x => x.ReqMemberRegisterCodeSys == "REG_S1")) return;
+        Req_MemberRegister Mk(string sys, string status, string vin, string car) => new Req_MemberRegister
+        {
+            ReqMemberRegisterCodeSys = sys, NetworkID = "1001", OrgID = "1001", ReqMemberRegisterCode = sys, ReqMemberRegisterCodeOS = "OS_" + sys,
+            DLCodeRegis = "DL01", RegisterDate = "2026-10-17 08:00:00", VIN = vin, CarNo = car, CustomerName = "Seed " + sys, CustomerPhoneNo = "0900000000",
+            CreateDTimeUTC = "2026-10-17 01:00:00", CreateBy = "seed", LUDTimeUTC = "2026-10-17 01:00:00", LUBy = "seed",
+            ReqMemberRegisterStatus = status, LogLUDTimeUTC = "2026-10-17 01:00:00", LogLUBy = "seed"
+        };
+        db.Set<Req_MemberRegister>().AddRange(Mk("REG_S1", "PENDING", "VINS1", "CARS1"), Mk("REG_S2", "PENDING", "VINS2", "CARS2"),
+            Mk("REG_S3", "PENDING", "VINS3", "CARS3"), Mk("REG_S4", "APPROVE", "VINS4", "CARS4"), Mk("REG_S5", "PENDING", "VIN4301", "CARS5"));
+        await db.SaveChangesAsync();
+    }
+}

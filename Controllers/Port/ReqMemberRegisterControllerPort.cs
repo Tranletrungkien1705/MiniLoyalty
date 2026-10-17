@@ -373,4 +373,136 @@ public class ReqMemberRegisterControllerPort : ControllerBase
             return PortResult.Fail("Req_MemberRegister_Export", "Exception", ex.Message);
         }
     }
+
+    // ===================== #277-#280: Approve / ApproveOld / Cancel / Reject =====================
+    // Gate ReqMemberRegisterController.cs:645 (Approve), :712 (ApproveOld), :778 (Cancel), :848 (Reject).
+    // Biz Member.cs: ApprX :2214 (Approve + ApproveOld cùng gọi WA_Req_MemberRegister_Appr), CancelX :3099, RejectX :5556; Req_MemberRegister_CheckDB.
+    // Nguồn còn gọi dịch vụ NGOÀI HTC TV Mobile App (ReqMemberRegisterUpdStatus) chỉ khi Mst_Param HTC_TV_Mobile_App_Url có giá trị; MiniLoyalty không có tham số này => bỏ qua.
+    public class Req_MemberRegisterStatusReq
+    {
+        public Req_MemberRegisterStatusHeader? Req_MemberRegister { get; set; }
+        public List<Req_MemberRegisterAttachFile>? Lst_Req_MemberRegisterAttachFile { get; set; }
+    }
+
+    public class Req_MemberRegisterStatusHeader
+    {
+        public string? ReqMemberRegisterCodeSys { get; set; }
+        public string? Remark { get; set; }
+    }
+
+    public class Req_MemberRegisterApproveOldReq
+    {
+        public string? ReqMemberRegisterCodeSys { get; set; }
+        public string? Remark { get; set; }
+    }
+
+    private static string? RmrStdParam(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim().ToUpperInvariant();
+
+    private string RmrUser() => Request.Headers.TryGetValue("WAUserCode", out var h) && !string.IsNullOrWhiteSpace(h) ? h.ToString().Trim() : "port";
+
+    // Req_MemberRegister_CheckDB(codeSys, FlagExist "1", statusList) — so khớp trạng thái kiểu Contains của nguồn.
+    private async Task<(Req_MemberRegister? Row, IActionResult? Error)> RmrCheckDbAsync(string? codeSys, string statusList)
+    {
+        var p = PortQuery.Equal(codeSys ?? "");
+        var r = await _db.Set<Req_MemberRegister>().FirstOrDefaultAsync(x => EF.Functions.Like((x.ReqMemberRegisterCodeSys ?? "").ToLower(), p, PortQuery.Esc));
+        if (r == null)
+        {
+            return (null, PortResult.Fail("Req_MemberRegister_CheckDB_MemberRegisterNotFound", "Check.ReqMemberRegisterCodeSys", codeSys));
+        }
+        if (statusList.Length > 0 && !statusList.Contains(r.ReqMemberRegisterStatus ?? ""))
+        {
+            return (null, PortResult.Fail("Req_MemberRegister_CheckDB_ReqMemberRegisterStatusNotMatched",
+                "Check.ReqMemberRegisterCodeSys", codeSys, "Check.strReqMemberRegisterStatusListToCheck", statusList, "DB.ReqMemberRegisterStatus", r.ReqMemberRegisterStatus));
+        }
+        return (r, null);
+    }
+
+    // Lưu Req_MemberRegisterAttachFile: chỉ INSERT (không xoá bản cũ), FileName giữ nguyên giá trị client gửi (nguồn tính strFileName nhưng không gán).
+    private void RmrInsertAttach(string codeSys, List<Req_MemberRegisterAttachFile>? files, string now, string user)
+    {
+        foreach (var f in files ?? new List<Req_MemberRegisterAttachFile>())
+        {
+            _db.Set<Req_MemberRegisterAttachFile>().Add(new Req_MemberRegisterAttachFile
+            {
+                ReqMemberRegisterCodeSys = codeSys, Idx = f.Idx, NetworkID = "1001", OrgID = "1001",
+                FileType = f.FileType, FileName = f.FileName, FilePath = f.FilePath, LogLUDTimeUTC = now, LogLUBy = user
+            });
+        }
+    }
+
+    private async Task<IActionResult> RmrChangeAsync(string? codeSysRaw, string? remarkRaw, List<Req_MemberRegisterAttachFile>? files,
+        string action, string statusList, string newStatus, bool remarkRequired)
+    {
+        string? codeSys = RmrStdParam(codeSysRaw);
+        string strRemark = (remarkRaw ?? "").Trim();
+        string user = RmrUser();
+        string now = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
+
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            var (r, err) = await RmrCheckDbAsync(codeSys, statusList);
+            if (err != null) { await tx.RollbackAsync(); return err; }
+            if (remarkRequired && string.IsNullOrEmpty(strRemark))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Req_MemberRegister_" + action + "_InvalidRemark", "Check.strRemark", strRemark);
+            }
+            if (action == "Appr")
+            {
+                // Req_MemberRegister_ApprX: không được có hội viên APPROVE trùng biển số/số khung.
+                var pCar = PortQuery.Equal((r!.CarNo ?? "").Trim());
+                var pVin = PortQuery.Equal((r.VIN ?? "").Trim());
+                var dup = await _db.Set<CrdMember>().AsNoTracking()
+                    .FirstOrDefaultAsync(t => (EF.Functions.Like((t.CarNo ?? "").ToLower(), pCar, PortQuery.Esc) || EF.Functions.Like((t.VIN ?? "").ToLower(), pVin, PortQuery.Esc))
+                                           && t.MemberStatus == "APPROVE");
+                if (dup != null)
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Req_MemberRegister_Appr_InvalidMemberExist",
+                        "Check.strReqMemberRegisterCodeSys", codeSys, "Check.MemberNo.DB", dup.MemberNo, "Check.CarNo.DB", r.CarNo?.Trim(), "Check.VIN.DB", r.VIN?.Trim());
+                }
+            }
+
+            r!.LUDTimeUTC = now; r.LUBy = user; r.LogLUDTimeUTC = now; r.LogLUBy = user;
+            r.Remark = strRemark;
+            r.ReqMemberRegisterStatus = newStatus;
+            if (newStatus == "APPROVE") { r.ApproveDTimeUTC = now; r.ApproveBy = user; }
+            else if (newStatus == "CANCEL") { r.CancelDTimeUTC = now; r.CancelBy = user; }
+            else { r.RejectDTimeUTC = now; r.RejectBy = user; }
+            RmrInsertAttach(r.ReqMemberRegisterCodeSys, files, now, user);
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return PortResult.Fail("Req_MemberRegister_" + action, "Exception", ex.Message);
+        }
+    }
+
+    [HttpPost("approve")]
+    public Task<IActionResult> Approve([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Req_MemberRegisterStatusReq? req)
+        => req?.Req_MemberRegister == null
+            ? Task.FromResult<IActionResult>(PortResult.Fail("Req_MemberRegister_Appr", "Check.strJson", null))
+            : RmrChangeAsync(req.Req_MemberRegister.ReqMemberRegisterCodeSys, req.Req_MemberRegister.Remark, req.Lst_Req_MemberRegisterAttachFile, "Appr", "PENDING", "APPROVE", false);
+
+    [HttpPost("approveold")]
+    public Task<IActionResult> ApproveOld([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Req_MemberRegisterApproveOldReq? req)
+        => string.IsNullOrEmpty(req?.ReqMemberRegisterCodeSys)
+            ? Task.FromResult<IActionResult>(PortResult.Fail("invalid_ReqMemberRegisterCodeSys", "Check.ReqMemberRegisterCodeSys", req?.ReqMemberRegisterCodeSys))
+            : RmrChangeAsync(req.ReqMemberRegisterCodeSys, req.Remark, null, "Appr", "PENDING", "APPROVE", false);
+
+    [HttpPost("cancel")]
+    public Task<IActionResult> Cancel([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Req_MemberRegisterStatusReq? req)
+        => req?.Req_MemberRegister == null
+            ? Task.FromResult<IActionResult>(PortResult.Fail("Req_MemberRegister_Cancel", "Check.strJson", null))
+            : RmrChangeAsync(req.Req_MemberRegister.ReqMemberRegisterCodeSys, req.Req_MemberRegister.Remark, req.Lst_Req_MemberRegisterAttachFile, "Cancel", "PENDING", "CANCEL", true);
+
+    [HttpPost("reject")]
+    public Task<IActionResult> Reject([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Req_MemberRegisterStatusReq? req)
+        => req?.Req_MemberRegister == null
+            ? Task.FromResult<IActionResult>(PortResult.Fail("Req_MemberRegister_Reject", "Check.strJson", null))
+            : RmrChangeAsync(req.Req_MemberRegister.ReqMemberRegisterCodeSys, req.Req_MemberRegister.Remark, req.Lst_Req_MemberRegisterAttachFile, "Reject", "APPROVE", "REJECT", true);
 }
