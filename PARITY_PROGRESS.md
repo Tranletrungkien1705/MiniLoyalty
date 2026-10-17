@@ -30,7 +30,7 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 18 | Crd_CardTransactionServiceTurnController/Export | Cần xem tay | Phu thuoc #17 |
 | 19 | Crd_DealSerROController/Search | Đã làm | 2c23b83 |
 | 20 | Crd_DealSerROController/Calc | Cần xem tay | Crd_DealSerRO_AddX ~2400 dong |
-| 21 | Crd_DealSerROController/Add | Cần xem tay | Crd_DealSerRO_AddX ~2400 dong |
+| 21 | Crd_DealSerROController/Add | Chưa làm |  |
 | 22 | Crd_DealUsePromotionController/Save | Đã làm | cb05505 |
 | 23 | Crd_DealUsePromotionController/Search | Đã làm | f31e3e1 |
 | 24 | Crd_DealUsePromotionController/GetForMemberNo | Đã làm | e741824 |
@@ -124,7 +124,7 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 112 | Mst_DealerCPController/GetByDLCPCode | Đã làm | 2dc6a66 |
 | 113 | Mst_DealerCPController/GetByOrgID | Đã làm | 35489ef |
 | 114 | Mst_DealerCPController/CreateOld | Đã làm | 03e9623 |
-| 115 | Mst_DealerCPController/Create | Cần xem tay | Phu thuoc Mst_NNT/Sys_User ability |
+| 115 | Mst_DealerCPController/Create | Chưa làm |  |
 | 116 | Mst_DealerCPController/Update | Đã làm | 578ef34 |
 | 117 | Mst_DealerCPController/Delete | Đã làm | f46f3d7 |
 | 118 | Mst_DealerCPController/DeleteMultiple | Đã làm | ccda090 |
