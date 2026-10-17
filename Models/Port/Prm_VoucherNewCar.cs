@@ -43,9 +43,7 @@ public class Prm_VoucherNewCar
     public long? MyIdxSeq { get; set; }
     [NotMapped]
     public string? FlagShow { get; set; } // Trạng thái chương trình (1/0)
-    [NotMapped]
     public double? PointActualVCAllModel { get; set; }
-    [NotMapped]
     public double? QtyUseLimitAllModel { get; set; }
     [NotMapped]
     public double? PointVoucherCalc { get; set; }

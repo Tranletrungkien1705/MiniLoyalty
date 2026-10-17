@@ -527,4 +527,68 @@ public class Prm_VoucherNewCarControllerPort : ControllerBase
             return PortResult.Fail("Prm_VoucherNewCar_Save", "Exception", ex.Message);
         }
     }
+
+    // ===================== #265: GetByPrmVoucherCode =====================
+    // Gate Prm_VoucherNewCarController.cs:148-244 -> WA_Prm_VoucherNewCar_Get (Promotion.cs:6028-6273, Ft_RecordCount = "1").
+    public class Prm_VoucherNewCarGetByCodeReq
+    {
+        public string? PrmVoucherCode { get; set; }
+    }
+
+    [HttpPost("getbyprmvouchercode")]
+    public async Task<IActionResult> GetByPrmVoucherCode([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Prm_VoucherNewCarGetByCodeReq? req)
+    {
+        var code = req?.PrmVoucherCode;
+        if (string.IsNullOrEmpty(code))
+        {
+            return Ok(new { Success = true, Data = new { Prm_VoucherNewCar = (object?)null, Lst_Prm_VoucherNewCarDtl = (object?)null, Lst_Prm_VoucherNewCarSpec = (object?)null } });
+        }
+
+        var pat = PortQuery.Equal(code);
+        var pcn = await _db.Set<Prm_VoucherNewCar>().AsNoTracking()
+            .Where(x => EF.Functions.Like((x.PrmVoucherCode ?? "").ToLower(), pat, PortQuery.Esc))
+            .OrderByDescending(x => x.CreateDTimeUTC)
+            .FirstOrDefaultAsync();
+
+        object? header = null;
+        if (pcn != null)
+        {
+            var dateSys = DateTime.UtcNow.AddHours(7).ToString("yyyy-MM-dd");
+            var activeProgram = await _db.Set<Prm_VoucherNewCar>().AsNoTracking()
+                .Where(t => t.PrmVoucherStatus == "FINISH" && string.Compare(t.EffDateStart, dateSys) <= 0 && string.Compare(dateSys, t.EffDateEnd) <= 0)
+                .OrderByDescending(t => t.EffDateStart)
+                .Select(t => t.PrmVoucherCode)
+                .FirstOrDefaultAsync();
+            header = new
+            {
+                MyIdxSeq = 0,
+                pcn.PrmVoucherCode, pcn.NetworkID, pcn.OrgID, pcn.PrmVoucherName, pcn.EffDateStart,
+                EffDateEnd = pcn.EffDateEnd == "2100-01-01" ? "" : pcn.EffDateEnd,
+                pcn.QtyDayLimitFDlvDate, pcn.ValidityPeriod, pcn.FlagAllModel, pcn.PointVoucherAllModel, pcn.PointUseLimitAllModel,
+                pcn.PointActualVCAllModel, pcn.QtyUseLimitAllModel,
+                // Gate :203-208: ApprDTimeUTC/CreateDTimeUTC đổi sang giờ địa phương (utcOffset mặc định 7).
+                CreateDTimeUTC = pcn.CreateDTimeUTC.AddHours(7).ToString("yyyy-MM-dd HH:mm:ss"),
+                pcn.CreateBy, pcn.LUDTimeUTC, pcn.LUBy,
+                ApprDTimeUTC = pcn.ApprDTimeUTC?.AddHours(7).ToString("yyyy-MM-dd HH:mm:ss"),
+                pcn.ApprBy, pcn.FinishDTimeUTC, pcn.FinishBy, pcn.CancelDTimeUTC, pcn.CancelBy, pcn.PrmVoucherStatus, pcn.Remark, pcn.LogLUDTimeUTC, pcn.LogLUBy,
+                FlagShow = (!string.IsNullOrEmpty(activeProgram) && pcn.PrmVoucherCode == activeProgram) ? "1" : "0"
+            };
+        }
+
+        var dtl = pcn == null ? new List<Prm_VoucherNewCarDtl>() : await _db.Set<Prm_VoucherNewCarDtl>().AsNoTracking()
+            .Where(x => x.PrmVoucherCode == pcn.PrmVoucherCode).OrderBy(x => x.Idx).ToListAsync();
+        var spec = pcn == null ? new List<Prm_VoucherNewCarSpec>() : await _db.Set<Prm_VoucherNewCarSpec>().AsNoTracking()
+            .Where(x => x.PrmVoucherCode == pcn.PrmVoucherCode).OrderBy(x => x.Idx).ToListAsync();
+
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Prm_VoucherNewCar = header,
+                Lst_Prm_VoucherNewCarDtl = dtl.Count > 0 ? dtl : null,
+                Lst_Prm_VoucherNewCarSpec = spec.Count > 0 ? spec : null
+            }
+        });
+    }
 }
