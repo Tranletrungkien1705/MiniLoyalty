@@ -179,3 +179,41 @@ public class Prm_CarRecommendSpecConfig : IEntityTypeConfiguration<Prm_CarRecomm
         b.Property(x => x.OrgID).IsRequired();
     }
 }
+
+/// <summary>
+/// Bảng sinh sequence cho PRMCRCodeSys — port 1:1 Seq_PRMCRCodeSys (Seq.cs:143, SeqType.PRMCRCodeSys; PK AutoId tự tăng).
+/// </summary>
+public class Seq_PRMCRCodeSys
+{
+    public long AutoId { get; set; }
+    public string? Remark { get; set; }
+}
+
+public class Seq_PRMCRCodeSysConfig : IEntityTypeConfiguration<Seq_PRMCRCodeSys>
+{
+    public void Configure(EntityTypeBuilder<Seq_PRMCRCodeSys> b)
+    {
+        b.ToTable("Seq_PRMCRCodeSys");
+        b.HasKey(x => x.AutoId);
+        b.Property(x => x.AutoId).ValueGeneratedOnAdd();
+    }
+}
+
+/// <summary>
+/// Seeder bổ sung cho Prm_CarRecommend Save/Approve/Finish/Delete/Cancel (Order => 69).
+/// </summary>
+public class Prm_CarRecommendStatusSeeder : IPortSeeder
+{
+    public int Order => 69;
+
+    public async Task SeedAsync(AppDbContext db)
+    {
+        if (await db.Set<Prm_CarRecommend>().AnyAsync(x => x.PRMCRCodeSys == "PCR_P1")) return;
+        var now = new DateTime(2026, 10, 1, 8, 0, 0, DateTimeKind.Utc);
+        db.Set<Prm_CarRecommend>().AddRange(
+            new Prm_CarRecommend { PRMCRCodeSys = "PCR_P1", NetworkID = "DEMO", OrgID = "ORG01", DLCPCode = "HTV", PRMCRCode = "PCR_P1", PRMCRName = "Cho duyet 1", EffDateStart = "2030-01-01", EffDateEnd = "2100-01-01", PRMCRStatus = "PENDING", CreateDTimeUTC = now, CreateBy = "seed", LUDTimeUTC = now, LUBy = "seed", LogLUDTimeUTC = now, LogLUBy = "seed" },
+            new Prm_CarRecommend { PRMCRCodeSys = "PCR_P2", NetworkID = "DEMO", OrgID = "ORG01", DLCPCode = "HTV", PRMCRCode = "PCR_P2", PRMCRName = "Cho duyet 2", EffDateStart = "2030-02-01", EffDateEnd = "2100-01-01", PRMCRStatus = "PENDING", CreateDTimeUTC = now, CreateBy = "seed", LUDTimeUTC = now, LUBy = "seed", LogLUDTimeUTC = now, LogLUBy = "seed" },
+            new Prm_CarRecommend { PRMCRCodeSys = "PCR_A1", NetworkID = "DEMO", OrgID = "ORG01", DLCPCode = "HTV", PRMCRCode = "PCR_A1", PRMCRName = "Da duyet 1", EffDateStart = "2030-03-01", EffDateEnd = "2100-01-01", PRMCRStatus = "APPROVE", CreateDTimeUTC = now, CreateBy = "seed", LUDTimeUTC = now, LUBy = "seed", LogLUDTimeUTC = now, LogLUBy = "seed" });
+        await db.SaveChangesAsync();
+    }
+}
