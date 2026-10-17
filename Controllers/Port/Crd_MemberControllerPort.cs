@@ -1543,6 +1543,69 @@ public class Crd_MemberControllerPort : ControllerBase
 
         return Ok(new { Success = true, Data = new { Crd_Member = item } });
     }
+
+    /// <summary>
+    /// Tính điểm khuyến mại mua xe Creta — port 1:1 từ Crd_MemberController/GetCalcPointBuyCreta (#045).
+    /// Nguồn Gate: Crd_MemberController.cs:659-737 (GetCalcPointBuyCreta)
+    /// Nguồn API: CrdMemberController.cs:171-240 (WA_Crd_MemberRegis_CalcPointBuyCreta)
+    /// Nguồn Biz: Card.cs:20602-20696 (WAS_Crd_MemberRegis_CalcPointBuyCreta) -> Card.cs:20701-20889 (Crd_MemberRegis_CalcPointBuyCreta) -> Card.cs:20899-21225 (Crd_MemberRegis_CalcPointBuyCretaX - bản LIVE)
+    /// </summary>
+    [HttpPost("getcalcpointbuycreta")]
+    public IActionResult GetCalcPointBuyCreta([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_MemberGetCalcPointBuyCretaReq? req)
+    {
+        // 1. Chuẩn hoá tham số đầu vào theo nguồn Biz Card.cs:20956-20967:
+        // - StdParam: Trim + ToUpper, rỗng -> null (MemberNo :20956, CardTypeUse :20957, CarNo :20958, VIN :20959, IDCardNo :20961)
+        // - StdStr: Trim + Normalize, giữ nguyên hoa/thường, rỗng -> null (PhoneNo :20960)
+        // - DLCodeRegis: Trong nguồn lấy từ quyền người dùng drAbilityOfUser["DLCPCode"] (:20967). Ở MiniLoyalty, phân quyền người dùng là GAP, nhận trực tiếp từ req.DLCodeRegis qua StdParam.
+        var strMemberNo = StdParam(req?.MemberNo);
+        var strCardTypeUse = StdParam(req?.CardTypeUse);
+        var strDLCodeRegis = StdParam(req?.DLCodeRegis);
+        var strCarNo = StdParam(req?.CarNo);
+        var strVIN = StdParam(req?.VIN);
+        var strPhoneNo = StdStr(req?.PhoneNo);
+        var strIDCardNo = StdParam(req?.IDCardNo);
+
+        // 2. Nghiệp vụ tính điểm Creta:
+        // Trong nguồn Biz Card.cs:20962 khởi tạo dblPointBuyCreta = 3000000, sau đó gọi dịch vụ ngoài WSDMS (DMSSales_DLS_DealerCustomer_Get :21031).
+        // - GAP 1: Hệ thống MiniLoyalty không có WSDMS và không có bảng DLS_* (bỏ qua theo Bài học LESSONS_AGENTS.md A.16).
+        // - GAP 2: Mốc thời gian chiến dịch Creta "2025-07-31" (:21076, :21092) đã qua trong thực tế -> dblPointBuyCretaUpd = 0.
+        // Do đó, PointBuyCreta cuối cùng = 0.0 (Card.cs:21182-21220).
+        double dblPointBuyCreta = 0.0;
+
+        // 3. Khởi tạo đối tượng kết quả đúng 8 thuộc tính (Crd_MemberRegisCalcPoint.cs:9-19, Card.cs:20973-20998):
+        var item = new Crd_MemberRegisCalcPointItem
+        {
+            MemberNo = strMemberNo,
+            CardTypeUse = strCardTypeUse,
+            DLCodeRegis = strDLCodeRegis,
+            CarNo = strCarNo,
+            VIN = strVIN,
+            PhoneNo = strPhoneNo,
+            IDCardNo = strIDCardNo,
+            PointBuyCreta = dblPointBuyCreta
+        };
+
+        // 4. Trả kết quả theo cấu trúc Gate Crd_MemberController.cs:720-724:
+        // Success = true, Data = { Crd_MemberRegisCalcPoint = item }
+        return Ok(new
+        {
+            Success = true,
+            Data = new Crd_MemberGetCalcPointBuyCretaRes
+            {
+                Crd_MemberRegisCalcPoint = item
+            }
+        });
+    }
+
+    /// <summary>
+    /// Chuẩn hoá chuỗi mã theo CUtils.StdParam (Card.cs:20956-20961): Trim, ToUpperInvariant, rỗng -> null.
+    /// </summary>
+    private static string? StdParam(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim().ToUpperInvariant();
+
+    /// <summary>
+    /// Chuẩn hoá chuỗi văn bản theo CUtils.StdStr (Card.cs:20960): Trim, Normalize, giữ nguyên hoa/thường, rỗng -> null.
+    /// </summary>
+    private static string? StdStr(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim().Normalize();
 }
 
 public class Crd_MemberGetByCarNoReq
@@ -1643,4 +1706,42 @@ public class Crd_MemberGetDetailForDMSItem
     public string? mdcpe_DLCPCodeExcep { get; set; }
     public string? mdcpe_DLCPNameExcep { get; set; }
     public int FlagIsDLQuery { get; set; }
+}
+
+/// <summary>
+/// Tham số request tính điểm khuyến mại mua xe Creta — port 1:1 từ Crd_MemberController.GetCalcPointBuyCreta (Gate Crd_MemberController.cs:659).
+/// </summary>
+public class Crd_MemberGetCalcPointBuyCretaReq
+{
+    public string? MemberNo { get; set; }
+    public string? CardTypeUse { get; set; }
+    public string? DLCodeRegis { get; set; }
+    public string? CarNo { get; set; }
+    public string? VIN { get; set; }
+    public string? PhoneNo { get; set; }
+    public string? IDCardNo { get; set; }
+}
+
+/// <summary>
+/// DTO chứa thông tin kết quả tính điểm khuyến mại mua xe Creta — port 1:1 từ model Crd_MemberRegisCalcPoint.cs:9-19
+/// và bảng tạm #input_Crd_MemberRegisCalcPoint (Card.cs:20973-20998). Đúng 8 trường.
+/// </summary>
+public class Crd_MemberRegisCalcPointItem
+{
+    public string? MemberNo { get; set; }
+    public string? CardTypeUse { get; set; }
+    public string? DLCodeRegis { get; set; }
+    public string? CarNo { get; set; }
+    public string? VIN { get; set; }
+    public string? PhoneNo { get; set; }
+    public string? IDCardNo { get; set; }
+    public double PointBuyCreta { get; set; } = 0.0;
+}
+
+/// <summary>
+/// DTO cấu trúc Data trả về của GetCalcPointBuyCreta — Gate Crd_MemberController.cs:721-724: Data = new { Crd_MemberRegisCalcPoint = ... }
+/// </summary>
+public class Crd_MemberGetCalcPointBuyCretaRes
+{
+    public Crd_MemberRegisCalcPointItem? Crd_MemberRegisCalcPoint { get; set; }
 }

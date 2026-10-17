@@ -1194,5 +1194,50 @@ public class Crd_MemberGetRegisterByMemberNoSeeder : IPortSeeder
     }
 }
 
+/// <summary>
+/// Seeder dữ liệu mẫu cho Crd_Member/GetCalcPointBuyCreta (#045).
+/// Idempotent, Order => 66 theo đúng đề bài #045.
+/// </summary>
+public class Crd_MemberGetCalcPointBuyCretaSeeder : IPortSeeder
+{
+    public int Order => 66;
+
+    public async Task SeedAsync(AppDbContext db)
+    {
+        if (await db.Set<CrdMember>().AnyAsync(x => x.MemberNo == "MB4501"))
+        {
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+
+        // MB4501: MemberNo = "MB4501", NetworkID = "DEMO", OrgID = "ORG01", DLCodeRegis = "DL4501", MemberName = "Tran Creta", PhoneNo = "0904500001", CarNo = "30A-45001", VIN = "VIN45000000000001", DealNo = "DEAL4501", PointBuyCreta = 3000000, MemberStatus = "APPROVE", RegisStatus = "F".
+        db.Set<CrdMember>().Add(new CrdMember
+        {
+            MemberNo = "MB4501",
+            NetworkID = "DEMO",
+            OrgID = "ORG01",
+            DLCodeRegis = "DL4501",
+            MemberName = "Tran Creta",
+            PhoneNo = "0904500001",
+            CarNo = "30A-45001",
+            VIN = "VIN45000000000001",
+            DealNo = "DEAL4501",
+            PointBuyCreta = 3000000,
+            MemberStatus = "APPROVE",
+            RegisStatus = "F",
+            RegistrationDate = new DateTime(2025, 6, 15, 0, 0, 0, DateTimeKind.Utc),
+            CreateDTimeUTC = now,
+            CreateBy = "seed",
+            LUDTimeUTC = now,
+            LUBy = "seed",
+            LogLUDTimeUTC = now,
+            LogLUBy = "seed"
+        });
+
+        await db.SaveChangesAsync();
+    }
+}
+
 
 
