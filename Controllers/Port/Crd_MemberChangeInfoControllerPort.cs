@@ -127,6 +127,19 @@ public class Crd_MemberChangeInfoApproveReq
 }
 
 /// <summary>
+/// DTO nhận tham số cho Crd_MemberChangeInfoController/Finish (#037).
+/// Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Crd_MemberChangeInfoController.cs:908-970
+/// API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\CrdMemberChangeInfoController.cs:315-385
+/// Biz: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\Card.cs:31095-31185 (WAS_), 30950-31093 (Finish), 30314-30948 (FinishX)
+/// </summary>
+public class Crd_MemberChangeInfoFinishReq
+{
+    public Crd_MemberChangeInfo? Crd_MemberChangeInfo { get; set; }
+    public string? DLCPCode { get; set; }
+    public string? WAUserCode { get; set; }
+}
+
+/// <summary>
 /// Port 1:1 Crd_MemberChangeInfoController — Crd_MemberChangeInfo (#027).
 /// Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Crd_MemberChangeInfoController.cs:33-144
 /// API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\CrdMemberChangeInfoController.cs:23-93
@@ -1263,6 +1276,437 @@ public class Crd_MemberChangeInfoControllerPort : ControllerBase
     }
 
     /// <summary>
+    /// Port 1:1 Crd_MemberChangeInfoController/Finish (#037).
+    /// Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Crd_MemberChangeInfoController.cs:908-970
+    /// API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\CrdMemberChangeInfoController.cs:315-385
+    /// Biz: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\Card.cs:31095-31185 (WAS_), 30950-31093 (Finish), 30314-30948 (FinishX)
+    /// </summary>
+    [HttpPost("finish")]
+    public async Task<IActionResult> Finish([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_MemberChangeInfoFinishReq? req)
+    {
+        // 1. Guard strJson null (Gate :924-927)
+        if (req == null || req.Crd_MemberChangeInfo == null)
+        {
+            return PortResult.Fail("Crd_MemberChangeInfo_Finish", "Check.strJson", null);
+        }
+
+        var headerInput = req.Crd_MemberChangeInfo;
+        var strRequestNo = StdParam(headerInput.RequestNo);
+        var strRemark = StdStr(headerInput.Remark);
+        var strRemarkHTV = StdStr(headerInput.RemarkHTV);
+        var dtimeSys = DateTime.UtcNow;
+        var strDTimeSys = dtimeSys.ToString("yyyy-MM-dd HH:mm:ss");
+
+        var strWAUserCode = !string.IsNullOrWhiteSpace(req.WAUserCode)
+            ? req.WAUserCode.Trim()
+            : (Request != null && Request.Headers.TryGetValue("WAUserCode", out var hdrUser) && !string.IsNullOrWhiteSpace(hdrUser)
+                ? hdrUser.ToString().Trim()
+                : "port");
+
+        var strDLCPCode = !string.IsNullOrWhiteSpace(req.DLCPCode)
+            ? req.DLCPCode.Trim()
+            : (Request != null && Request.Headers.TryGetValue("DLCPCode", out var hdrDlcp) && !string.IsNullOrWhiteSpace(hdrDlcp)
+                ? hdrDlcp.ToString().Trim()
+                : "HTV");
+        strDLCPCode = StdParam(strDLCPCode) ?? "";
+
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // 2. Guard 1: Crd_MemberChangeInfo_CheckDB(RequestNo, "1", "APPROVE") (Card.cs:30386-30392)
+            var p_RequestNo = PortQuery.Equal(strRequestNo ?? "");
+            var existingRecord = await _db.Set<Crd_MemberChangeInfo>()
+                .FirstOrDefaultAsync(x => EF.Functions.Like((x.RequestNo ?? "").ToLower(), p_RequestNo, PortQuery.Esc));
+
+            if (existingRecord == null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Crd_MemberChangeInfo_CheckDB_Crd_MemberChangeInfoNotFound",
+                    "Check.RequestNo", strRequestNo);
+            }
+
+            var currentStatus = existingRecord.RequestStatus ?? "";
+            if (!string.Equals(currentStatus, "APPROVE", StringComparison.OrdinalIgnoreCase))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Crd_MemberChangeInfo_CheckDB_RequestStatusNotMatched",
+                    "Check.RequestNo", strRequestNo,
+                    "Check.strRequestStatusListToCheck", "APPROVE",
+                    "DB.RequestStatus", existingRecord.RequestStatus);
+            }
+
+            var strMemberNo = StdParam(existingRecord.MemberNo);
+            var strDLCodeRequest = StdParam(existingRecord.DLCodeRequest);
+            var strRequestType = StdParam(existingRecord.RequestType) ?? "";
+
+            // 3. Guard 2: Crd_MemberChangeInfo_CheckApproveRight (Card.cs:30397-30402)
+            if (!string.Equals(strDLCPCode, "HTV", StringComparison.OrdinalIgnoreCase))
+            {
+                var strApproveDLCode = StdParam(existingRecord.ApproveDLCode) ?? "";
+                if (string.IsNullOrEmpty(strDLCPCode) || !string.Equals(strApproveDLCode, strDLCPCode, StringComparison.OrdinalIgnoreCase))
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Crd_MemberChangeInfo_Finish_InvalidApproveRight",
+                        "Check.DLCPCode", strDLCPCode,
+                        "Check.ApproveDLCode", strApproveDLCode,
+                        "Expect", "User phai la HTV hoac dai ly da khoa trong Don vi duyet (ApproveDLCode) luc tao de nghi");
+                }
+            }
+
+            // 4. Guard 3: Crd_Member_CheckDB(MemberNo, "1", "", "APPROVE") (Card.cs:30406-30413)
+            var member = await _db.Set<CrdMember>()
+                .FirstOrDefaultAsync(m => m.MemberNo == strMemberNo);
+
+            if (member == null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Crd_Member_CheckDB_MemberNotFound",
+                    "Check.MemberNo", strMemberNo);
+            }
+
+            if (!string.Equals(member.MemberStatus, "APPROVE", StringComparison.OrdinalIgnoreCase))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Crd_Member_CheckDB_MemberStatusNotMatched",
+                    "Check.MemberNo", strMemberNo,
+                    "Check.strMemberStatusListToCheck", "APPROVE",
+                    "DB.MemberStatus", member.MemberStatus);
+            }
+
+            // 5. Update Crd_MemberChangeInfo (Card.cs:30476-30505)
+            // LỖI NGUỒN GIỮ NGUYÊN: Cột Remark KHÔNG có trong ClauseSet nên Remark của header không đổi (Card.cs:30477-30485)
+            existingRecord.RequestStatus = "FINISH";
+            existingRecord.FinishDTimeUTC = strDTimeSys;
+            existingRecord.FinishBy = strWAUserCode;
+            existingRecord.RemarkHTV = strRemarkHTV;
+            existingRecord.LUDTimeUTC = strDTimeSys;
+            existingRecord.LUBy = strWAUserCode;
+            existingRecord.LogLUDTimeUTC = strDTimeSys;
+            existingRecord.LogLUBy = strWAUserCode;
+
+            // 6. Update Crd_MemberChangeInfoDtl WHERE RequestDtlStatus = 'APPROVE' (Card.cs:30487-30518)
+            var approvedDtls = await _db.Set<Crd_MemberChangeInfoDtl>()
+                .Where(x => EF.Functions.Like((x.RequestNo ?? "").ToLower(), p_RequestNo, PortQuery.Esc) &&
+                            x.RequestDtlStatus == "APPROVE")
+                .ToListAsync();
+
+            foreach (var dtl in approvedDtls)
+            {
+                dtl.Remark = strRemark;
+                dtl.LogLUDTimeUTC = strDTimeSys;
+                dtl.LogLUBy = strWAUserCode;
+            }
+
+            // 7. Xử lý theo RequestType: CHANGEINFO vs CANCELMEMBER / CANCELMEMBERNOTQUERY
+            if (string.Equals(strRequestType, "CHANGEINFO", StringComparison.OrdinalIgnoreCase))
+            {
+                // Port 1:1 Crd_MemberChangeInfo_FinishX (Card.cs:30541-30685)
+                // Đọc Crd_MemberChangeInfoDtl đã APPROVE inner join Crd_MemberColumnChange
+                var dtlQuery = await (
+                    from dtl in _db.Set<Crd_MemberChangeInfoDtl>()
+                    join col in _db.Set<Crd_MemberColumnChange>()
+                        on dtl.ColumnCode.ToLower() equals col.ColumnCode.ToLower()
+                    where EF.Functions.Like((dtl.RequestNo ?? "").ToLower(), p_RequestNo, PortQuery.Esc) &&
+                          dtl.RequestDtlStatus == "APPROVE"
+                    select new { dtl.ColumnCode, dtl.ColumnValueNew }
+                ).ToListAsync();
+
+                string? strMemberName = null;
+                string? strMemberGender = null;
+                string? strIDCardNo = null;
+                string? strPhoneNo = null;
+                string? strDateOfBirth = null;
+                string? strMemAddress = null;
+                string? strProvinceCode = null;
+                string? strDistrictCode = null;
+                string? strModelCode = null;
+                string? strModelName = null;
+                string? strCarNo = null;
+                string? strVIN = null;
+                string? strTradeMarkCode = null;
+                var ftColsList = new List<string>();
+
+                for (int nScan = 0; nScan < dtlQuery.Count; nScan++)
+                {
+                    var item = dtlQuery[nScan];
+                    var strColumnCode = StdStr(item.ColumnCode) ?? "";
+                    var strFt_Cols = $"Crd_Member.{strColumnCode}";
+                    var strColumnValue = StdStr(item.ColumnValueNew);
+
+                    if (string.Equals(strColumnCode, "MemberName", StringComparison.OrdinalIgnoreCase))
+                    {
+                        strMemberName = StdStr(strColumnValue);
+                    }
+                    if (string.Equals(strColumnCode, "MemberGender", StringComparison.OrdinalIgnoreCase))
+                    {
+                        strMemberGender = StdStr(strColumnValue);
+                    }
+                    if (string.Equals(strColumnCode, "IDCardNo", StringComparison.OrdinalIgnoreCase))
+                    {
+                        strIDCardNo = StdStr(strColumnValue);
+                    }
+                    if (string.Equals(strColumnCode, "PhoneNo", StringComparison.OrdinalIgnoreCase))
+                    {
+                        strPhoneNo = StdStr(strColumnValue);
+                    }
+                    if (string.Equals(strColumnCode, "DateOfBirth", StringComparison.OrdinalIgnoreCase))
+                    {
+                        strDateOfBirth = StdStr(strColumnValue);
+                    }
+                    if (string.Equals(strColumnCode, "MemAddress", StringComparison.OrdinalIgnoreCase))
+                    {
+                        strMemAddress = StdStr(strColumnValue);
+                    }
+                    if (string.Equals(strColumnCode, "ProvinceCode", StringComparison.OrdinalIgnoreCase))
+                    {
+                        strProvinceCode = StdParam(strColumnValue);
+                    }
+                    if (string.Equals(strColumnCode, "DistrictCode", StringComparison.OrdinalIgnoreCase))
+                    {
+                        strDistrictCode = StdParam(strColumnValue);
+                    }
+                    if (string.Equals(strColumnCode, "ModelCode", StringComparison.OrdinalIgnoreCase))
+                    {
+                        strModelCode = StdParam(strColumnValue);
+                        if (!string.IsNullOrEmpty(strModelCode))
+                        {
+                            // Mst_CarModel_CheckDB (Card.cs:30627-30633)
+                            var p_ModelCode = PortQuery.Equal(strModelCode);
+                            var carModel = await _db.Set<Mst_CarModel>()
+                                .FirstOrDefaultAsync(m => EF.Functions.Like((m.ModelCode ?? "").ToLower(), p_ModelCode, PortQuery.Esc));
+                            if (carModel == null)
+                            {
+                                await tx.RollbackAsync();
+                                return PortResult.Fail("Mst_CarModel_CheckDB_CarModelNotFound", "Check.ModelCode", strModelCode);
+                            }
+                            if (carModel.FlagActive != "1")
+                            {
+                                await tx.RollbackAsync();
+                                return PortResult.Fail("Mst_CarModel_CheckDB_FlagActiveNotMatched",
+                                    "Check.ModelCode", strModelCode,
+                                    "Check.strFlagActiveListToCheck", "1",
+                                    "DB.FlagActive", carModel.FlagActive);
+                            }
+                            strModelName = StdParam(carModel.ModelName);
+                        }
+                    }
+                    if (string.Equals(strColumnCode, "CarNo", StringComparison.OrdinalIgnoreCase))
+                    {
+                        strCarNo = StdParam(strColumnValue);
+                    }
+                    if (string.Equals(strColumnCode, "VIN", StringComparison.OrdinalIgnoreCase))
+                    {
+                        strVIN = StdParam(strColumnValue);
+                    }
+                    if (string.Equals(strColumnCode, "TradeMarkCode", StringComparison.OrdinalIgnoreCase))
+                    {
+                        strTradeMarkCode = StdParam(strColumnValue);
+                    }
+                    ftColsList.Add(strFt_Cols);
+                }
+
+                var strFt_Cols_Upd = string.Join(", ", ftColsList);
+
+                // Port 1:1 gọi Crd_Member_UpdateX_New20230104 (Card.cs:30659, 12781-13028)
+                // GAP: bỏ qua gọi WS ngoài WSDMS / WSCarSv (Card.cs:30690-30915)
+                var errUpdate = await Crd_Member_UpdateX_New20230104Async(
+                    strWAUserCode,
+                    dtimeSys,
+                    strMemberNo ?? "",
+                    strMemberName,
+                    strMemberGender,
+                    strIDCardNo,
+                    strPhoneNo,
+                    strDateOfBirth,
+                    strMemAddress,
+                    strProvinceCode,
+                    strDistrictCode,
+                    strModelCode,
+                    strModelName,
+                    strCarNo,
+                    strVIN,
+                    strTradeMarkCode,
+                    strRemark,
+                    strFt_Cols_Upd);
+
+                if (errUpdate != null)
+                {
+                    await tx.RollbackAsync();
+                    return errUpdate;
+                }
+            }
+            else if (string.Equals(strRequestType, "CANCELMEMBER", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(strRequestType, "CANCELMEMBERNOTQUERY", StringComparison.OrdinalIgnoreCase))
+            {
+                // Port 1:1 Crd_Member_InActiveX (Card.cs:14085-14259, :30918-30943)
+                // Crd_Member_CheckDB(strMemberNo, "1", "FINISH", "APPROVE") (Card.cs:14125-14132)
+                if (!string.Equals(member.RegisStatus, "FINISH", StringComparison.OrdinalIgnoreCase))
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Crd_Member_CheckDB_RegisStatusNotMatched",
+                        "Check.MemberNo", strMemberNo,
+                        "Check.strRegisStatusListToCheck", "FINISH",
+                        "DB.RegisStatus", member.RegisStatus);
+                }
+
+                member.MemberStatus = "CANCEL";
+                member.InactiveDTimeUTC = dtimeSys;
+                member.InactiveBy = strWAUserCode;
+                member.Remark = strRemark;
+                member.LUDTimeUTC = dtimeSys;
+                member.LUBy = strWAUserCode;
+                member.LogLUDTimeUTC = dtimeSys;
+                member.LogLUBy = strWAUserCode;
+
+                var activeCard = await _db.Set<CrdCard>()
+                    .Where(c => c.MemberNo == strMemberNo && c.CardStatus == "APPROVE")
+                    .OrderByDescending(c => c.CreateDTimeUTC)
+                    .FirstOrDefaultAsync();
+
+                if (activeCard != null)
+                {
+                    activeCard.CardStatus = "CANCEL";
+                    activeCard.CancelDTimeUTC = dtimeSys;
+                    activeCard.CancelBy = strWAUserCode;
+                    activeCard.Remark = null;
+                    activeCard.LUDTimeUTC = dtimeSys;
+                    activeCard.LUBy = strWAUserCode;
+                    activeCard.LogLUDTimeUTC = dtimeSys;
+                    activeCard.LogLUBy = strWAUserCode;
+                    member.CardStatus = "CANCEL";
+                }
+            }
+
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+        catch (Exception)
+        {
+            await tx.RollbackAsync();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Port 1:1 Crd_Member_UpdateX_New20230104 (Card.cs:12781-13028).
+    /// Cập nhật Crd_Member theo danh sách cột được duyệt trong strFt_Cols_Upd.
+    /// Kiểm tra Crd_Member_CheckDB(MemberNo, "1", "FINISH", "APPROVE").
+    /// </summary>
+    private async Task<IActionResult?> Crd_Member_UpdateX_New20230104Async(
+        string strWAUserCode,
+        DateTime dtimeSys,
+        string strMemberNo,
+        string? strMemberName,
+        string? strMemberGender,
+        string? strIDCardNo,
+        string? strPhoneNo,
+        string? strDateOfBirth,
+        string? strMemAddress,
+        string? strProvinceCode,
+        string? strDistrictCode,
+        string? strModelCode,
+        string? strModelName,
+        string? strCarNo,
+        string? strVIN,
+        string? strTradeMarkCode,
+        string? strRemark,
+        string strFt_Cols_Upd)
+    {
+        strFt_Cols_Upd = StdParam(strFt_Cols_Upd) ?? "";
+        strMemberNo = StdParam(strMemberNo) ?? "";
+        strMemberName = StdStr(strMemberName);
+        strMemberGender = StdStr(strMemberGender);
+        strIDCardNo = StdParam(strIDCardNo);
+        strPhoneNo = StdStr(strPhoneNo);
+        strDateOfBirth = StdStr(strDateOfBirth);
+        strMemAddress = StdStr(strMemAddress);
+        strProvinceCode = StdParam(strProvinceCode);
+        strDistrictCode = StdParam(strDistrictCode);
+        strModelCode = StdParam(strModelCode);
+        strModelName = StdParam(strModelName);
+        strCarNo = StdParam(strCarNo);
+        strVIN = StdParam(strVIN);
+        strTradeMarkCode = StdParam(strTradeMarkCode);
+        strRemark = StdStr(strRemark);
+
+        var strFtColsUpper = strFt_Cols_Upd.ToUpper();
+        bool bUpd_MemberName = strFtColsUpper.Contains("CRD_MEMBER.MEMBERNAME");
+        bool bUpd_MemberGender = strFtColsUpper.Contains("CRD_MEMBER.MEMBERGENDER");
+        bool bUpd_IDCardNo = strFtColsUpper.Contains("CRD_MEMBER.IDCARDNO");
+        bool bUpd_PhoneNo = strFtColsUpper.Contains("CRD_MEMBER.PHONENO");
+        bool bUpd_DateOfBirth = strFtColsUpper.Contains("CRD_MEMBER.DATEOFBIRTH");
+        bool bUpd_MemAddress = strFtColsUpper.Contains("CRD_MEMBER.MEMADDRESS");
+        bool bUpd_ProvinceCode = strFtColsUpper.Contains("CRD_MEMBER.PROVINCECODE");
+        bool bUpd_DistrictCode = strFtColsUpper.Contains("CRD_MEMBER.DISTRICTCODE");
+        bool bUpd_ModelCode = strFtColsUpper.Contains("CRD_MEMBER.MODELCODE");
+        bool bUpd_ModelName = strFtColsUpper.Contains("CRD_MEMBER.MODELCODE"); // Card.cs:12901 kiểm tra Crd_Member.ModelCode
+        bool bUpd_CarNo = strFtColsUpper.Contains("CRD_MEMBER.CARNO");
+        bool bUpd_VIN = strFtColsUpper.Contains("CRD_MEMBER.VIN");
+        bool bUpd_TradeMarkCode = strFtColsUpper.Contains("CRD_MEMBER.TRADEMARKCODE");
+        bool bUpd_Remark = strFtColsUpper.Contains("CRD_MEMBER.REMARK");
+
+        // Crd_Member_CheckDB(alParamsCoupleError, strMemberNo, "1", "FINISH", "APPROVE", out dtDB_Crd_Member) (Card.cs:12950-12957)
+        var p_MemberNo = PortQuery.Equal(strMemberNo);
+        var member = await _db.Set<CrdMember>()
+            .FirstOrDefaultAsync(m => EF.Functions.Like((m.MemberNo ?? "").ToLower(), p_MemberNo, PortQuery.Esc));
+
+        if (member == null)
+        {
+            return PortResult.Fail("Crd_Member_CheckDB_MemberNotFound",
+                "Check.MemberNo", strMemberNo);
+        }
+
+        // Kiểm tra RegisStatus = "FINISH" (Card.cs:12954)
+        if (!string.Equals(member.RegisStatus, "FINISH", StringComparison.OrdinalIgnoreCase))
+        {
+            return PortResult.Fail("Crd_Member_CheckDB_RegisStatusNotMatched",
+                "Check.MemberNo", strMemberNo,
+                "Check.strRegisStatusListToCheck", "FINISH",
+                "DB.RegisStatus", member.RegisStatus);
+        }
+
+        // Kiểm tra MemberStatus = "APPROVE" (Card.cs:12955)
+        if (!string.Equals(member.MemberStatus, "APPROVE", StringComparison.OrdinalIgnoreCase))
+        {
+            return PortResult.Fail("Crd_Member_CheckDB_MemberStatusNotMatched",
+                "Check.MemberNo", strMemberNo,
+                "Check.strMemberStatusListToCheck", "APPROVE",
+                "DB.MemberStatus", member.MemberStatus);
+        }
+
+        // Save Crd_Member (Card.cs:12992-13017)
+        if (bUpd_MemberName) member.MemberName = strMemberName;
+        if (bUpd_MemberGender) member.MemberGender = strMemberGender;
+        if (bUpd_IDCardNo) member.IDCardNo = strIDCardNo;
+        if (bUpd_PhoneNo) member.PhoneNo = strPhoneNo;
+        if (bUpd_DateOfBirth)
+        {
+            if (!string.IsNullOrWhiteSpace(strDateOfBirth) && DateTime.TryParse(strDateOfBirth, out var dob))
+            {
+                member.DateOfBirth = dob;
+            }
+        }
+        if (bUpd_MemAddress) member.MemAddress = strMemAddress;
+        if (bUpd_ProvinceCode) member.ProvinceCode = strProvinceCode;
+        if (bUpd_DistrictCode) member.DistrictCode = strDistrictCode;
+        if (bUpd_ModelCode) member.ModelCode = strModelCode;
+        if (bUpd_ModelName) member.ModelName = strModelName;
+        if (bUpd_CarNo) member.CarNo = strCarNo;
+        if (bUpd_VIN) member.VIN = strVIN;
+        if (bUpd_TradeMarkCode) member.TradeMarkCode = strTradeMarkCode;
+        if (bUpd_Remark) member.Remark = strRemark;
+
+        member.LUDTimeUTC = dtimeSys;
+        member.LUBy = strWAUserCode;
+        member.LogLUDTimeUTC = dtimeSys;
+        member.LogLUBy = strWAUserCode;
+
+        return null;
+    }
+
+    /// <summary>
     /// Nghiệp vụ lưu cốt lõi dùng chung giữa Save (#032) và Add (#033) (Card.cs:28667-29397 Crd_MemberChangeInfo_SaveX).
     /// </summary>
     private async Task<IActionResult> SaveCoreAsync(Crd_MemberChangeInfo headerInput, List<Crd_MemberChangeInfoDtl>? reqDtl, bool bIsDelete)
@@ -2066,7 +2510,7 @@ public class Crd_MemberChangeInfoApproveSeeder : IPortSeeder
                 CustomerCode = "KH001",
                 ProvinceCode = "HN",
                 DistrictCode = "HN01",
-                MemberName = "Nguyen Van MB001",
+                MemberName = "Nguyễn Văn MB001",
                 MemberGender = "1",
                 IDCardNo = "001090001001",
                 PhoneNo = "0901234567",
@@ -2360,6 +2804,383 @@ public class Crd_MemberChangeInfoApproveSeeder : IPortSeeder
         await db.SaveChangesAsync();
     }
 }
+
+/// <summary>
+/// Seeder bổ sung cho Crd_MemberChangeInfoController/Finish (#037).
+/// Order => 69 (theo P2 & P3 đề bài).
+/// Idempotent. Cung cấp dữ liệu mẫu kiểm thử kết thúc đề nghị trạng thái APPROVE (REQ_FIN_01, REQ_FIN_CANCEL_01),
+/// trạng thái PENDING (REQ_FIN_STATUS_ERR), sai quyền duyệt (REQ_FIN_RIGHT_ERR).
+/// </summary>
+public class Crd_MemberChangeInfoFinishSeeder : IPortSeeder
+{
+    public int Order => 93;
+
+    public async Task SeedAsync(AppDbContext db)
+    {
+        var now = DateTime.UtcNow;
+        const string net = "DEMO";
+
+        // 1. Đảm bảo MB001 tồn tại trong CrdMembers với RegisStatus="FINISH" và MemberStatus="APPROVE"
+        var mb001 = await db.CrdMembers.FirstOrDefaultAsync(m => m.MemberNo == "MB001");
+        if (mb001 == null)
+        {
+            db.CrdMembers.Add(new CrdMember
+            {
+                MemberNo = "MB001",
+                NetworkID = net,
+                OrgID = net,
+                DLCodeRegis = "VN040",
+                RegistrationDate = now.AddMonths(-6),
+                CustomerCode = "KH001",
+                ProvinceCode = "HN",
+                DistrictCode = "HN01",
+                MemberName = "Nguyễn Văn MB001",
+                MemberGender = "1",
+                IDCardNo = "001090001001",
+                PhoneNo = "0901234567",
+                DateOfBirth = new DateTime(1990, 1, 1),
+                MemAddress = "Ha Noi",
+                CarNo = "30A-99001",
+                VIN = "VINMB000000000001",
+                ModelCode = "ACC",
+                ModelName = "Accent",
+                TradeMarkCode = "HYU",
+                EffDateStart = now.AddMonths(-6),
+                EffDateEnd = now.AddMonths(6),
+                PointTotal = 1000,
+                PointAvail = 1000,
+                PointBegin = 0,
+                PointEnd = 1000,
+                AmountTotal = 10000000,
+                AmountAvail = 10000000,
+                AmountBegin = 0,
+                AmountEnd = 10000000,
+                QtyVisitTotal = 1,
+                QtyVisitAvail = 1,
+                PointCardRank = 1000,
+                AmountCardRank = 10000000,
+                CardTypeUse = "P",
+                CardTypeInit = "P",
+                MemberActiveDate = now.AddMonths(-6),
+                FlagExceptionally = "0",
+                FlagExceptionCard = "0",
+                PointVoucher = 0,
+                RegisStatus = "FINISH",
+                MemberStatus = "APPROVE",
+                CardStatus = "APPROVE",
+                CardSourceCode = "NEW",
+                PurchaseType = "BUYNEW",
+                CreateDTimeUTC = now.AddMonths(-6),
+                CreateBy = "seed",
+                LUDTimeUTC = now,
+                LUBy = "seed",
+                LogLUDTimeUTC = now,
+                LogLUBy = "seed"
+            });
+            await db.SaveChangesAsync();
+        }
+        else
+        {
+            mb001.RegisStatus = "FINISH";
+            mb001.MemberStatus = "APPROVE";
+            mb001.PhoneNo = "0901234567";
+            await db.SaveChangesAsync();
+        }
+
+        // 2. Đảm bảo thẻ CrdCard cho MB001 tồn tại để test huỷ thẻ trong CANCELMEMBER
+        if (!await db.Set<CrdCard>().AnyAsync(c => c.MemberNo == "MB001"))
+        {
+            db.Set<CrdCard>().Add(new CrdCard
+            {
+                CardNo = "CD001",
+                MemberNo = "MB001",
+                CardStatus = "APPROVE",
+                CreateDTimeUTC = now.AddMonths(-6),
+                CreateBy = "seed",
+                LUDTimeUTC = now,
+                LUBy = "seed"
+            });
+            await db.SaveChangesAsync();
+        }
+
+        // 3. Đảm bảo cấu hình cột thay đổi trong Crd_MemberColumnChange để inner join trong CHANGEINFO thành công
+        var colChanges = new[]
+        {
+            new { Col = "PhoneNo", Name = "Số điện thoại", Link = "0" },
+            new { Col = "ModelCode", Name = "Mẫu xe", Link = "1" },
+            new { Col = "VIN", Name = "Số khung", Link = "0" },
+            new { Col = "CarNo", Name = "Biển số xe", Link = "0" },
+            new { Col = "MemberName", Name = "Tên hội viên", Link = "0" },
+            new { Col = "MemAddress", Name = "Địa chỉ", Link = "0" }
+        };
+
+        foreach (var c in colChanges)
+        {
+            if (!await db.Set<Crd_MemberColumnChange>().AnyAsync(x => x.ColumnCode == c.Col))
+            {
+                db.Set<Crd_MemberColumnChange>().Add(new Crd_MemberColumnChange
+                {
+                    ColumnCode = c.Col,
+                    OrgID = "ORG01",
+                    NetworkID = "1001",
+                    ColumnName = c.Name,
+                    FlagLinkMst = c.Link,
+                    Remark = $"Cấu hình {c.Name}",
+                    LogLUBy = "seed",
+                    LogLUDTimeUTC = "2026-08-01 05:00:00"
+                });
+            }
+        }
+        await db.SaveChangesAsync();
+
+        // 4. Đảm bảo danh mục Mst_CarModel có mẫu xe ACC
+        if (!await db.Set<Mst_CarModel>().AnyAsync(m => m.ModelCode == "ACC"))
+        {
+            db.Set<Mst_CarModel>().Add(new Mst_CarModel
+            {
+                ModelCode = "ACC",
+                ModelName = "Accent",
+                FlagActive = "1"
+            });
+            await db.SaveChangesAsync();
+        }
+
+        // 5. REQ_FIN_01: MB001, RequestType="CHANGEINFO", RequestStatus="APPROVE", ApproveDLCode="VN040". Có 1 dtl (ColumnCode="PhoneNo", RequestDtlStatus="APPROVE").
+        if (!await db.Set<Crd_MemberChangeInfo>().AnyAsync(r => r.RequestNo == "REQ_FIN_01"))
+        {
+            db.Set<Crd_MemberChangeInfo>().Add(new Crd_MemberChangeInfo
+            {
+                RequestNo = "REQ_FIN_01",
+                MemberNo = "MB001",
+                NetworkID = "1001",
+                OrgID = "ORG01",
+                DLCodeRequest = "VN040",
+                ApproveDLCode = "VN040",
+                RequestType = "CHANGEINFO",
+                RequestStatus = "APPROVE",
+                Remark = "Ghi chu goc REQ_FIN_01",
+                RemarkHTV = null,
+                CreateDTimeUTC = "2026-08-01 08:00:00",
+                LogLUDTimeUTC = "2026-08-01 08:00:00",
+                CreateBy = "seed",
+                LUBy = "seed"
+            });
+        }
+        if (!await db.Set<Crd_MemberChangeInfoDtl>().AnyAsync(d => d.RequestNo == "REQ_FIN_01" && d.ColumnCode == "PhoneNo"))
+        {
+            db.Set<Crd_MemberChangeInfoDtl>().Add(new Crd_MemberChangeInfoDtl
+            {
+                RequestNo = "REQ_FIN_01",
+                ColumnCode = "PhoneNo",
+                ColumnValueOld = "0901234567",
+                ColumnValueNew = "0987654321",
+                Remark = "Chi tiet PhoneNo goc",
+                RequestDtlStatus = "APPROVE",
+                NetworkID = "1001",
+                OrgID = "ORG01",
+                LogLUBy = "seed",
+                LogLUDTimeUTC = "2026-08-01 08:00:00"
+            });
+        }
+
+        // 6. REQ_FIN_CANCEL_01: MB001, RequestType="CANCELMEMBER", RequestStatus="APPROVE", ApproveDLCode="".
+        if (!await db.Set<Crd_MemberChangeInfo>().AnyAsync(r => r.RequestNo == "REQ_FIN_CANCEL_01"))
+        {
+            db.Set<Crd_MemberChangeInfo>().Add(new Crd_MemberChangeInfo
+            {
+                RequestNo = "REQ_FIN_CANCEL_01",
+                MemberNo = "MB001",
+                NetworkID = "1001",
+                OrgID = "ORG01",
+                DLCodeRequest = "VN040",
+                ApproveDLCode = "",
+                RequestType = "CANCELMEMBER",
+                RequestStatus = "APPROVE",
+                Remark = "Ghi chu goc REQ_FIN_CANCEL_01",
+                RemarkHTV = null,
+                CreateDTimeUTC = "2026-08-02 08:00:00",
+                LogLUDTimeUTC = "2026-08-02 08:00:00",
+                CreateBy = "seed",
+                LUBy = "seed"
+            });
+        }
+
+        // 7. REQ_FIN_STATUS_ERR: MB001, RequestStatus="PENDING"
+        if (!await db.Set<Crd_MemberChangeInfo>().AnyAsync(r => r.RequestNo == "REQ_FIN_STATUS_ERR"))
+        {
+            db.Set<Crd_MemberChangeInfo>().Add(new Crd_MemberChangeInfo
+            {
+                RequestNo = "REQ_FIN_STATUS_ERR",
+                MemberNo = "MB001",
+                NetworkID = "1001",
+                OrgID = "ORG01",
+                DLCodeRequest = "VN040",
+                ApproveDLCode = "VN040",
+                RequestType = "CHANGEINFO",
+                RequestStatus = "PENDING",
+                CreateDTimeUTC = "2026-08-03 08:00:00",
+                LogLUDTimeUTC = "2026-08-03 08:00:00",
+                CreateBy = "seed",
+                LUBy = "seed"
+            });
+        }
+
+        // 8. REQ_FIN_RIGHT_ERR: MB001, RequestStatus="APPROVE", ApproveDLCode="VN999"
+        if (!await db.Set<Crd_MemberChangeInfo>().AnyAsync(r => r.RequestNo == "REQ_FIN_RIGHT_ERR"))
+        {
+            db.Set<Crd_MemberChangeInfo>().Add(new Crd_MemberChangeInfo
+            {
+                RequestNo = "REQ_FIN_RIGHT_ERR",
+                MemberNo = "MB001",
+                NetworkID = "1001",
+                OrgID = "ORG01",
+                DLCodeRequest = "VN040",
+                ApproveDLCode = "VN999",
+                RequestType = "CHANGEINFO",
+                RequestStatus = "APPROVE",
+                CreateDTimeUTC = "2026-08-04 08:00:00",
+                LogLUDTimeUTC = "2026-08-04 08:00:00",
+                CreateBy = "seed",
+                LUBy = "seed"
+            });
+        }
+
+        // 9. Ca vi phạm guard 1: Hội viên có RegisStatus="PENDING" vi phạm Crd_Member_CheckDB_RegisStatusNotMatched
+        if (!await db.CrdMembers.AnyAsync(m => m.MemberNo == "MB_REGIS_ERR"))
+        {
+            db.CrdMembers.Add(new CrdMember
+            {
+                MemberNo = "MB_REGIS_ERR",
+                NetworkID = net,
+                OrgID = net,
+                DLCodeRegis = "VN040",
+                RegistrationDate = now.AddMonths(-2),
+                CustomerCode = "KH_ERR01",
+                ProvinceCode = "HN",
+                DistrictCode = "HN01",
+                MemberName = "Nguyen Van Loi Regis",
+                MemberGender = "1",
+                IDCardNo = "001090009999",
+                PhoneNo = "0911000111",
+                DateOfBirth = new DateTime(1995, 5, 5),
+                MemAddress = "Ha Noi",
+                CarNo = "30A-88888",
+                VIN = "VINERR00000000001",
+                ModelCode = "ACC",
+                ModelName = "Accent",
+                TradeMarkCode = "HYU",
+                MemberStatus = "APPROVE",
+                CardStatus = "APPROVE",
+                RegisStatus = "PENDING", // Chưa FINISH
+                CreateBy = "seed",
+                LUBy = "seed"
+            });
+        }
+
+        if (!await db.Set<Crd_MemberChangeInfo>().AnyAsync(r => r.RequestNo == "REQ_FIN_REGIS_ERR"))
+        {
+            db.Set<Crd_MemberChangeInfo>().Add(new Crd_MemberChangeInfo
+            {
+                RequestNo = "REQ_FIN_REGIS_ERR",
+                MemberNo = "MB_REGIS_ERR",
+                NetworkID = "1001",
+                OrgID = "ORG01",
+                DLCodeRequest = "VN040",
+                ApproveDLCode = "VN040",
+                RequestType = "CHANGEINFO",
+                RequestStatus = "APPROVE",
+                CreateDTimeUTC = "2026-08-05 08:00:00",
+                LogLUDTimeUTC = "2026-08-05 08:00:00",
+                CreateBy = "seed",
+                LUBy = "seed"
+            });
+        }
+        if (!await db.Set<Crd_MemberChangeInfoDtl>().AnyAsync(d => d.RequestNo == "REQ_FIN_REGIS_ERR" && d.ColumnCode == "PhoneNo"))
+        {
+            db.Set<Crd_MemberChangeInfoDtl>().Add(new Crd_MemberChangeInfoDtl
+            {
+                RequestNo = "REQ_FIN_REGIS_ERR",
+                ColumnCode = "PhoneNo",
+                ColumnValueOld = "0911000111",
+                ColumnValueNew = "0911999999",
+                RequestDtlStatus = "APPROVE",
+                NetworkID = "1001",
+                OrgID = "ORG01",
+                LogLUBy = "seed",
+                LogLUDTimeUTC = "2026-08-05 08:00:00"
+            });
+        }
+
+        // 10. Ca vi phạm guard 2: Mẫu xe không tồn tại vi phạm Mst_CarModel_CheckDB_CarModelNotFound
+        if (!await db.CrdMembers.AnyAsync(m => m.MemberNo == "MB_MODEL_ERR"))
+        {
+            db.CrdMembers.Add(new CrdMember
+            {
+                MemberNo = "MB_MODEL_ERR",
+                NetworkID = net,
+                OrgID = net,
+                DLCodeRegis = "VN040",
+                RegistrationDate = now.AddMonths(-2),
+                CustomerCode = "KH_ERR02",
+                ProvinceCode = "HN",
+                DistrictCode = "HN01",
+                MemberName = "Nguyen Van Loi Model",
+                MemberGender = "1",
+                IDCardNo = "001090008888",
+                PhoneNo = "0911000222",
+                DateOfBirth = new DateTime(1995, 6, 6),
+                MemAddress = "Ha Noi",
+                CarNo = "30A-77777",
+                VIN = "VINERR00000000002",
+                ModelCode = "ACC",
+                ModelName = "Accent",
+                TradeMarkCode = "HYU",
+                MemberStatus = "APPROVE",
+                CardStatus = "APPROVE",
+                RegisStatus = "FINISH",
+                CreateBy = "seed",
+                LUBy = "seed"
+            });
+        }
+
+        if (!await db.Set<Crd_MemberChangeInfo>().AnyAsync(r => r.RequestNo == "REQ_FIN_MODEL_ERR"))
+        {
+            db.Set<Crd_MemberChangeInfo>().Add(new Crd_MemberChangeInfo
+            {
+                RequestNo = "REQ_FIN_MODEL_ERR",
+                MemberNo = "MB_MODEL_ERR",
+                NetworkID = "1001",
+                OrgID = "ORG01",
+                DLCodeRequest = "VN040",
+                ApproveDLCode = "VN040",
+                RequestType = "CHANGEINFO",
+                RequestStatus = "APPROVE",
+                CreateDTimeUTC = "2026-08-06 08:00:00",
+                LogLUDTimeUTC = "2026-08-06 08:00:00",
+                CreateBy = "seed",
+                LUBy = "seed"
+            });
+        }
+        if (!await db.Set<Crd_MemberChangeInfoDtl>().AnyAsync(d => d.RequestNo == "REQ_FIN_MODEL_ERR" && d.ColumnCode == "ModelCode"))
+        {
+            db.Set<Crd_MemberChangeInfoDtl>().Add(new Crd_MemberChangeInfoDtl
+            {
+                RequestNo = "REQ_FIN_MODEL_ERR",
+                ColumnCode = "ModelCode",
+                ColumnValueOld = "ACC",
+                ColumnValueNew = "MODEL_NOT_FOUND",
+                RequestDtlStatus = "APPROVE",
+                NetworkID = "1001",
+                OrgID = "ORG01",
+                LogLUBy = "seed",
+                LogLUDTimeUTC = "2026-08-06 08:00:00"
+            });
+        }
+
+        await db.SaveChangesAsync();
+    }
+}
+
 
 
 
