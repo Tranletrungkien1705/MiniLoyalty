@@ -142,3 +142,91 @@ public class Prm_VoucherNewCarSeeder : IPortSeeder
         }
     }
 }
+
+/// <summary>
+/// Port 1:1 bảng Prm_VoucherNewCarDtl — DDL 20250912.CreTb.Prm_VoucherNewCar.sql:31-47 (+ PointActualVoucher, QtyUseLimit theo Prm_VoucherNewCarDtl.cs). PK (PrmVoucherCode, Idx).
+/// </summary>
+public class Prm_VoucherNewCarDtl
+{
+    public string PrmVoucherCode { get; set; } = "";
+    public long Idx { get; set; }
+    public string NetworkID { get; set; } = "";
+    public double? PointVoucher { get; set; }
+    public double? PointUseLimit { get; set; }
+    public double? PointActualVoucher { get; set; }
+    public double? QtyUseLimit { get; set; }
+    public string? Remark { get; set; }
+    public DateTime? LogLUDTimeUTC { get; set; }
+    public string? LogLUBy { get; set; }
+}
+
+public class Prm_VoucherNewCarDtlConfig : IEntityTypeConfiguration<Prm_VoucherNewCarDtl>
+{
+    public void Configure(EntityTypeBuilder<Prm_VoucherNewCarDtl> b)
+    {
+        b.ToTable("Prm_VoucherNewCarDtl");
+        b.HasKey(x => new { x.PrmVoucherCode, x.Idx });
+    }
+}
+
+/// <summary>
+/// Port 1:1 bảng Prm_VoucherNewCarSpec — DDL 20250912.CreTb.Prm_VoucherNewCar.sql:11-25. PK (PrmVoucherCode, Idx, ModelCode).
+/// </summary>
+public class Prm_VoucherNewCarSpec
+{
+    public string PrmVoucherCode { get; set; } = "";
+    public long Idx { get; set; }
+    public string ModelCode { get; set; } = "";
+    public string NetworkID { get; set; } = "";
+    public DateTime? LogLUDTimeUTC { get; set; }
+    public string? LogLUBy { get; set; }
+}
+
+public class Prm_VoucherNewCarSpecConfig : IEntityTypeConfiguration<Prm_VoucherNewCarSpec>
+{
+    public void Configure(EntityTypeBuilder<Prm_VoucherNewCarSpec> b)
+    {
+        b.ToTable("Prm_VoucherNewCarSpec");
+        b.HasKey(x => new { x.PrmVoucherCode, x.Idx, x.ModelCode });
+    }
+}
+
+/// <summary>Bảng sinh sequence cho PrmVoucherCode — Seq.cs:144 (Seq_PrmVoucherCode, "{0}PRMVC.{3}.{1:00000}{2}").</summary>
+public class Seq_PrmVoucherCode
+{
+    public long AutoId { get; set; }
+    public string? Remark { get; set; }
+}
+
+public class Seq_PrmVoucherCodeConfig : IEntityTypeConfiguration<Seq_PrmVoucherCode>
+{
+    public void Configure(EntityTypeBuilder<Seq_PrmVoucherCode> b)
+    {
+        b.ToTable("Seq_PrmVoucherCode");
+        b.HasKey(x => x.AutoId);
+        b.Property(x => x.AutoId).ValueGeneratedOnAdd();
+    }
+}
+
+/// <summary>Seeder cho Save/Approve/Finish/Delete/Cancel của Prm_VoucherNewCar (Order => 70).</summary>
+public class Prm_VoucherNewCarStatusSeeder : IPortSeeder
+{
+    public int Order => 70;
+
+    public async Task SeedAsync(AppDbContext db)
+    {
+        if (await db.Set<Prm_VoucherNewCar>().AnyAsync(x => x.PrmVoucherCode == "PVC_P1")) return;
+        var now = new DateTime(2026, 10, 1, 8, 0, 0, DateTimeKind.Utc);
+        Prm_VoucherNewCar Mk(string code, string status, string start) => new Prm_VoucherNewCar
+        {
+            PrmVoucherCode = code, NetworkID = "DEMO", OrgID = "ORG01", PrmVoucherName = "Voucher " + code,
+            EffDateStart = start, EffDateEnd = "2100-01-01", QtyDayLimitFDlvDate = 30, ValidityPeriod = 90, FlagAllModel = "0",
+            PointVoucherAllModel = 100, PointUseLimitAllModel = 50, PointActualVCAllModel = 100, QtyUseLimitAllModel = 1,
+            PrmVoucherStatus = status, CreateDTimeUTC = now, CreateBy = "seed", LUDTimeUTC = now, LUBy = "seed", LogLUDTimeUTC = now, LogLUBy = "seed"
+        };
+        db.Set<Prm_VoucherNewCar>().AddRange(Mk("PVC_P1", "PENDING", "2030-01-01"), Mk("PVC_P2", "PENDING", "2030-02-01"), Mk("PVC_A1", "APPROVE", "2030-03-01"), Mk("PVC_F1", "FINISH", "2030-04-01"));
+        db.Set<Prm_VoucherNewCarDtl>().Add(new Prm_VoucherNewCarDtl { PrmVoucherCode = "PVC_P2", Idx = 1, NetworkID = "DEMO", PointVoucher = 100, PointUseLimit = 50, PointActualVoucher = 100, QtyUseLimit = 1, LogLUDTimeUTC = now, LogLUBy = "seed" });
+        db.Set<Prm_VoucherNewCarSpec>().Add(new Prm_VoucherNewCarSpec { PrmVoucherCode = "PVC_P2", Idx = 1, ModelCode = "M01", NetworkID = "DEMO", LogLUDTimeUTC = now, LogLUBy = "seed" });
+        await db.SaveChangesAsync();
+    }
+}

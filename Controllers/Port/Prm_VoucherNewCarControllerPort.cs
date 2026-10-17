@@ -197,4 +197,334 @@ public class Prm_VoucherNewCarControllerPort : ControllerBase
 
         return Ok(new { Success = true, Data = pageInfo });
     }
+
+    // ===================== #266-#270: Save / Approve / Finish / Delete / Cancel =====================
+    // Gate: Prm_VoucherNewCarController.cs:246 (Save), :340 (Approve), :406 (Finish), :471 (Delete), :541 (Cancel).
+    // Biz: Promotion.cs:6356-7319 (SaveX), :7320 (ApprX), :7592 (FinishX), :7967 (CancelX).
+
+    public class Prm_VoucherNewCarSaveReq
+    {
+        public Prm_VoucherNewCar? Prm_VoucherNewCar { get; set; }
+        public List<Prm_VoucherNewCarDtl>? Lst_Prm_VoucherNewCarDtl { get; set; }
+        public List<Prm_VoucherNewCarSpec>? Lst_Prm_VoucherNewCarSpec { get; set; }
+        public string? DLCPCode { get; set; }
+    }
+
+    public class Prm_VoucherNewCarStatusReq
+    {
+        public string? PrmVoucherCode { get; set; }
+        public string? Remark { get; set; }
+        public string? DLCPCode { get; set; }
+    }
+
+    private static string? VcStdParam(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim().ToUpperInvariant();
+    private static string? VcStdStr(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim().Normalize();
+    private static string? VcStdDate(string? s)
+        => !string.IsNullOrWhiteSpace(s) && DateTime.TryParse(s, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var d) ? d.ToString("yyyy-MM-dd") : null;
+
+    private string VcUser() => Request.Headers.TryGetValue("WAUserCode", out var h) && !string.IsNullOrWhiteSpace(h) ? h.ToString().Trim() : "port";
+
+    // Sys_User_ForCP_GetAbilityViewOfUser(...)["FlagRoot"]: đại lý của user (port chưa có xác thực => DLCPCode từ body/header, mặc định HTV).
+    private async Task<(string? FlagRoot, string? DlcpCode)> VcAbilityAsync(string? bodyDlcp)
+    {
+        var code = !string.IsNullOrWhiteSpace(bodyDlcp) ? bodyDlcp.Trim()
+            : (Request.Headers.TryGetValue("DLCPCode", out var h) && !string.IsNullOrWhiteSpace(h) ? h.ToString().Trim() : "HTV");
+        var p = PortQuery.Equal(code);
+        var dl = await _db.Set<Mst_DealerCP>().AsNoTracking().FirstOrDefaultAsync(d => EF.Functions.Like((d.DLCPCode ?? "").ToLower(), p, PortQuery.Esc));
+        return (dl?.FlagRoot, dl?.DLCPCode);
+    }
+
+    [HttpPost("save")]
+    public async Task<IActionResult> Save([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Prm_VoucherNewCarSaveReq? req)
+    {
+        if (req?.Prm_VoucherNewCar == null)
+        {
+            return PortResult.Fail("Prm_VoucherNewCar_Save", "Check.strJson", null);
+        }
+        var h = req.Prm_VoucherNewCar;
+        var dtimeSys = DateTime.UtcNow;
+        var todayStr = dtimeSys.ToString("yyyy-MM-dd");
+        var strWAUserCode = VcUser();
+        var nwHeader = Request.Headers["NetworkID"].FirstOrDefault();
+        var ogHeader = Request.Headers["OrgID"].FirstOrDefault();
+        var strNetworkID = !string.IsNullOrWhiteSpace(nwHeader) ? nwHeader : "1001";
+        var strOrgID = !string.IsNullOrWhiteSpace(ogHeader) ? ogHeader : "1001";
+
+        // Gate :35-55: luôn lấy mã mới từ Seq (SeqType.PrmVoucherCode), ghi đè PrmVoucherCode.
+        var seq = await PortSeq.NextAsync<Seq_PrmVoucherCode>(_db);
+        string strPrmVoucherCode = PortSeq.Build("{0}PRMVC.{3}.{1:00000}{2}", "", seq, 100000, "", dtimeSys).ToUpperInvariant();
+
+        string? strName = VcStdStr(h.PrmVoucherName);
+        double dQtyDay = h.QtyDayLimitFDlvDate ?? 0;
+        string? strEffStart = VcStdDate(h.EffDateStart);
+        string? strEffEnd = VcStdDate(h.EffDateEnd);
+        double dValidity = h.ValidityPeriod ?? 0;
+        string strFlagAllModel = h.FlagAllModel == "1" ? "1" : "0";
+        double dPointVoucherAll = h.PointVoucherAllModel ?? 0;
+        double dPointUseLimitAll = h.PointUseLimitAllModel ?? 0;
+        string? strRemark = VcStdStr(h.Remark);
+
+        var ability = await VcAbilityAsync(req.DLCPCode);
+
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            if (!string.Equals(ability.FlagRoot, "1", StringComparison.OrdinalIgnoreCase))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Prm_VoucherNewCar_Save_InvalidPermission", "Check.DB.FlagRoot", ability.FlagRoot, "Check.FlagRoot.Expected", "1");
+            }
+            if (string.IsNullOrEmpty(strName))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Prm_VoucherNewCar_Save_InvalidPrmVoucherName", "Check.PrmVoucherName", strName);
+            }
+            if (string.IsNullOrEmpty(strEffStart))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Prm_VoucherNewCar_Save_InvalidEffDateStart", "Check.EffDateStart", strEffStart);
+            }
+            if (string.IsNullOrEmpty(strEffEnd))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Prm_VoucherNewCar_Save_InvalidEffDateEnd", "Check.EffDateEnd", strEffEnd);
+            }
+            if (string.Compare(strEffStart, todayStr, StringComparison.Ordinal) < 0)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Prm_VoucherNewCar_Save_InvalidEffDateStartBeforeEffSysDate", "Check.EffDateStart", strEffStart, "Check.SysDate", todayStr);
+            }
+            if (string.Compare(strEffStart, strEffEnd, StringComparison.Ordinal) > 0)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Prm_VoucherNewCar_Save_InvalidEffDateStartBeforeEffDateEnd", "Check.EffDateStart", strEffStart, "Check.EffDateEnd", strEffEnd);
+            }
+            if (dPointUseLimitAll > dPointVoucherAll)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("PointUseLimitAllModelLimitMustLessThanPointVoucherAllModel", "Check.PointUseLimitAllModel", dPointUseLimitAll, "Check.PointVoucherAllModel", dPointVoucherAll);
+            }
+
+            var prev = await _db.Set<Prm_VoucherNewCar>().AsNoTracking()
+                .Where(t => t.PrmVoucherCode != strPrmVoucherCode && t.PrmVoucherStatus == "FINISH"
+                         && string.Compare(t.EffDateStart, todayStr) <= 0 && string.Compare(t.EffDateEnd, todayStr) >= 0)
+                .OrderBy(t => t.EffDateStart).FirstOrDefaultAsync();
+            if (prev != null && string.Compare(strEffStart, prev.EffDateStart, StringComparison.Ordinal) <= 0)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Prm_VoucherNewCar_Save_InvalidEffDateStartBeforeEffDateStartPrevious",
+                    "Check.strEffDateStart", strEffStart, "Check.PrmVoucherCode_Previous", prev.PrmVoucherCode, "Check.strEffDateStart_Previous", prev.EffDateStart);
+            }
+            var dup = await _db.Set<Prm_VoucherNewCar>().AsNoTracking()
+                .Where(t => t.PrmVoucherCode != strPrmVoucherCode && t.PrmVoucherStatus == "FINISH" && t.EffDateStart == strEffStart)
+                .OrderBy(t => t.EffDateStart).FirstOrDefaultAsync();
+            if (dup != null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Prm_VoucherNewCar_Save_InvalidDuplicateEffDateStart", "Check.strEffDateStart", strEffStart, "Check.PrmVoucherCode_Previous", dup.PrmVoucherCode);
+            }
+
+            if (req.Lst_Prm_VoucherNewCarDtl == null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Prm_VoucherNewCar_Save_Input_Prm_VoucherNewCarDtlTblNotFound", "Check.TableName", "Prm_VoucherNewCarDtl");
+            }
+            foreach (var d in req.Lst_Prm_VoucherNewCarDtl)
+            {
+                double pv = d.PointVoucher ?? 0, pu = d.PointUseLimit ?? 0;
+                if (pv <= 0.0)
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Prm_VoucherNewCar_Save_Input_InvalidPointVoucher", "Check.objPointVoucher", pv);
+                }
+                if (pu <= 0.0)
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Prm_VoucherNewCar_Save_Input_InvalidPointUseLimit", "Check.objPointUseLimit", pu);
+                }
+                if (pu > pv)
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Prm_VoucherNewCar_Save_PointUseLimitMustLessThanPointVoucher", "Check.PointVoucher", pv, "Check.PointUseLimit", pu);
+                }
+            }
+            if (req.Lst_Prm_VoucherNewCarSpec == null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Prm_VoucherNewCar_Save_Input_Prm_VoucherNewCarSpecTblNotFound", "Check.TableName", "Prm_VoucherNewCarSpec");
+            }
+
+            // Insert Prm_VoucherNewCar + Dtl + Spec (Promotion.cs:~6990-7240); PointActual* = Point*, QtyUseLimit* = 1.
+            _db.Set<Prm_VoucherNewCar>().Add(new Prm_VoucherNewCar
+            {
+                PrmVoucherCode = strPrmVoucherCode, NetworkID = strNetworkID, OrgID = strOrgID, PrmVoucherName = strName,
+                EffDateStart = strEffStart, EffDateEnd = strEffEnd, QtyDayLimitFDlvDate = dQtyDay, ValidityPeriod = dValidity,
+                FlagAllModel = strFlagAllModel, PointVoucherAllModel = dPointVoucherAll, PointUseLimitAllModel = dPointUseLimitAll,
+                PointActualVCAllModel = dPointVoucherAll, QtyUseLimitAllModel = 1,
+                CreateDTimeUTC = dtimeSys, CreateBy = strWAUserCode, LUDTimeUTC = dtimeSys, LUBy = strWAUserCode,
+                PrmVoucherStatus = "PENDING", Remark = strRemark, LogLUDTimeUTC = dtimeSys, LogLUBy = strWAUserCode
+            });
+            foreach (var d in req.Lst_Prm_VoucherNewCarDtl)
+            {
+                _db.Set<Prm_VoucherNewCarDtl>().Add(new Prm_VoucherNewCarDtl
+                {
+                    PrmVoucherCode = strPrmVoucherCode, Idx = d.Idx, NetworkID = strNetworkID,
+                    PointVoucher = d.PointVoucher, PointUseLimit = d.PointUseLimit, PointActualVoucher = d.PointVoucher, QtyUseLimit = 1,
+                    Remark = d.Remark, LogLUDTimeUTC = dtimeSys, LogLUBy = strWAUserCode
+                });
+            }
+            foreach (var s in req.Lst_Prm_VoucherNewCarSpec)
+            {
+                _db.Set<Prm_VoucherNewCarSpec>().Add(new Prm_VoucherNewCarSpec
+                {
+                    PrmVoucherCode = strPrmVoucherCode, Idx = s.Idx, ModelCode = VcStdParam(s.ModelCode) ?? "", NetworkID = strNetworkID,
+                    LogLUDTimeUTC = dtimeSys, LogLUBy = strWAUserCode
+                });
+            }
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return PortResult.Fail("Prm_VoucherNewCar_Save", "Exception", ex.Message);
+        }
+    }
+
+    // Dùng chung cho Approve/Finish/Cancel (Promotion.cs:7320, 7592, 7967): CheckDB -> FlagRoot -> (Finish: trùng EffDateStart) -> cập nhật.
+    private async Task<IActionResult> VcChangeStatusAsync(Prm_VoucherNewCarStatusReq? req, string action, string statusListToCheck, string newStatus)
+    {
+        if (string.IsNullOrWhiteSpace(req?.PrmVoucherCode))
+        {
+            return PortResult.Fail("invalid_PrmVoucherCode", "Check.PrmVoucherCode", req?.PrmVoucherCode);
+        }
+        string? code = VcStdParam(req.PrmVoucherCode);
+        string strRemark = (req.Remark ?? "").Trim();
+        var strWAUserCode = VcUser();
+        var ability = await VcAbilityAsync(req.DLCPCode);
+
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            var p = PortQuery.Equal(code ?? "");
+            var existing = await _db.Set<Prm_VoucherNewCar>().FirstOrDefaultAsync(x => EF.Functions.Like((x.PrmVoucherCode ?? "").ToLower(), p, PortQuery.Esc));
+            if (existing == null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Prm_VoucherNewCar_CheckDB_VoucherNewCarNotFound", "Check.PrmVoucherCode", code);
+            }
+            if (!statusListToCheck.Contains(existing.PrmVoucherStatus ?? ""))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Prm_VoucherNewCar_CheckDB_StatusNotMatched",
+                    "Check.PrmVoucherCode", code, "Check.strStatusListToCheck", statusListToCheck, "DB.Status", existing.PrmVoucherStatus);
+            }
+            if (!string.Equals(ability.FlagRoot, "1", StringComparison.OrdinalIgnoreCase))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Prm_VoucherNewCar_" + action + "_InvalidPermission", "Check.DB.FlagRoot", ability.FlagRoot, "Check.FlagRoot.Expected", "1");
+            }
+            var dtimeSys = DateTime.UtcNow;
+            var todayStr = dtimeSys.ToString("yyyy-MM-dd");
+            if (newStatus == "FINISH")
+            {
+                var dup = await _db.Set<Prm_VoucherNewCar>().AsNoTracking()
+                    .Where(t => t.PrmVoucherCode != existing.PrmVoucherCode && t.PrmVoucherStatus == "FINISH" && t.EffDateStart == existing.EffDateStart)
+                    .OrderBy(t => t.EffDateStart).FirstOrDefaultAsync();
+                if (dup != null)
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Prm_VoucherNewCar_Finish_InvalidDuplicateEffDateStart", "Check.strEffDateStart", existing.EffDateStart, "Check.PrmVoucherCode_Previous", dup.PrmVoucherCode);
+                }
+            }
+
+            // LỖI NGUỒN GIỮ NGUYÊN: LUDTimeUTC/LUBy không nằm trong mệnh đề SET => không đổi.
+            existing.LogLUDTimeUTC = dtimeSys;
+            existing.LogLUBy = strWAUserCode;
+            existing.Remark = strRemark;
+            existing.PrmVoucherStatus = newStatus;
+            if (newStatus == "APPROVE") { existing.ApprDTimeUTC = dtimeSys; existing.ApprBy = strWAUserCode; }
+            else if (newStatus == "FINISH") { existing.FinishDTimeUTC = dtimeSys; existing.FinishBy = strWAUserCode; }
+            else { existing.CancelDTimeUTC = dtimeSys; existing.CancelBy = strWAUserCode; }
+            await _db.SaveChangesAsync();
+
+            if (newStatus == "FINISH")
+            {
+                // Promotion.cs:7790-7870 (Update EffDateEnd): chương trình FINISH đang hiệu lực hôm nay (EffDateStart giảm dần).
+                var prev = await _db.Set<Prm_VoucherNewCar>()
+                    .Where(t => t.PrmVoucherCode != existing.PrmVoucherCode && t.PrmVoucherStatus == "FINISH"
+                             && string.Compare(t.EffDateStart, todayStr) <= 0 && string.Compare(t.EffDateEnd, todayStr) >= 0)
+                    .OrderByDescending(t => t.EffDateStart).FirstOrDefaultAsync();
+                if (prev != null)
+                {
+                    var dateStart = DateTime.Parse(existing.EffDateStart, System.Globalization.CultureInfo.InvariantCulture);
+                    var dateToday = DateTime.Parse(todayStr, System.Globalization.CultureInfo.InvariantCulture);
+                    if (dateStart <= dateToday)
+                    {
+                        prev.EffDateEnd = dateToday.AddDays(-1).ToString("yyyy-MM-dd");
+                        await _db.SaveChangesAsync();
+                    }
+                }
+            }
+            await tx.CommitAsync();
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return PortResult.Fail("Prm_VoucherNewCar_" + action, "Exception", ex.Message);
+        }
+    }
+
+    [HttpPost("approve")]
+    public Task<IActionResult> Approve([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Prm_VoucherNewCarStatusReq? req)
+        => VcChangeStatusAsync(req, "Appr", "PENDING", "APPROVE");
+
+    [HttpPost("finish")]
+    public Task<IActionResult> Finish([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Prm_VoucherNewCarStatusReq? req)
+        => VcChangeStatusAsync(req, "Finish", "APPROVE", "FINISH");
+
+    [HttpPost("cancel")]
+    public Task<IActionResult> Cancel([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Prm_VoucherNewCarStatusReq? req)
+        => VcChangeStatusAsync(req, "Cancel", "PENDING, APPROVE", "CANCEL");
+
+    // Gate Delete(strJson) :471 => WA_Prm_VoucherNewCar_Save với FlagIsDelete = "1" (mã do client gửi).
+    [HttpPost("delete")]
+    public async Task<IActionResult> Delete([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Prm_VoucherNewCarSaveReq? req)
+    {
+        if (req?.Prm_VoucherNewCar == null)
+        {
+            return PortResult.Fail("Prm_VoucherNewCar_Save", "Check.strJson", null);
+        }
+        string? code = VcStdParam(req.Prm_VoucherNewCar.PrmVoucherCode);
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            var p = PortQuery.Equal(code ?? "");
+            var existing = await _db.Set<Prm_VoucherNewCar>().FirstOrDefaultAsync(x => EF.Functions.Like((x.PrmVoucherCode ?? "").ToLower(), p, PortQuery.Esc));
+            if (existing == null)
+            {
+                await tx.CommitAsync();
+                return Ok(new { Success = true, Data = (object?)null });
+            }
+            if (!string.Equals(existing.PrmVoucherStatus, "PENDING", StringComparison.OrdinalIgnoreCase))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Prm_VoucherNewCar_Save_InvalidPrmVoucherStatus",
+                    "Check.DB.PrmVoucherStatus", existing.PrmVoucherStatus, "Check.PrmVoucherStatus.Expected", "PENDING");
+            }
+            _db.Set<Prm_VoucherNewCarSpec>().RemoveRange(await _db.Set<Prm_VoucherNewCarSpec>().Where(x => EF.Functions.Like((x.PrmVoucherCode ?? "").ToLower(), p, PortQuery.Esc)).ToListAsync());
+            _db.Set<Prm_VoucherNewCarDtl>().RemoveRange(await _db.Set<Prm_VoucherNewCarDtl>().Where(x => EF.Functions.Like((x.PrmVoucherCode ?? "").ToLower(), p, PortQuery.Esc)).ToListAsync());
+            _db.Set<Prm_VoucherNewCar>().Remove(existing);
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return PortResult.Fail("Prm_VoucherNewCar_Save", "Exception", ex.Message);
+        }
+    }
 }
