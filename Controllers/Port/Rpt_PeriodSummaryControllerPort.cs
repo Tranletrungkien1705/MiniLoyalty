@@ -44,6 +44,15 @@ public class Rpt_PeriodSummarySearchReq
     public string? PeriodMonth { get; set; }
 }
 
+/// <summary>
+/// DTO yêu cầu tìm kiếm giao dịch đặc cách đối soát tổng hợp kỳ Rpt_PeriodSummary_TransactionExceptionally (#288).
+/// </summary>
+public class Rpt_PeriodSummarySearchTransactionExceptionallyReq
+{
+    public string? PeriodMonth { get; set; }
+    public string? DLCodeExceptionally { get; set; }
+}
+
 [ApiController]
 [Route("api/rpt_periodsummary")]
 public class Rpt_PeriodSummaryControllerPort : ControllerBase
@@ -290,6 +299,119 @@ public class Rpt_PeriodSummaryControllerPort : ControllerBase
             Data = new
             {
                 Lst_Rpt_PeriodSummary_Transaction = list.Count > 0 ? list : null
+            }
+        });
+    }
+
+    /// <summary>
+    /// Port 1:1 action SearchTransactionExceptionally — tìm kiếm giao dịch đặc cách đối soát tổng hợp kỳ Rpt_PeriodSummary_TransactionExceptionally (#288).
+    /// Nguồn tra cứu (chỉ đọc):
+    ///   - Gate:     13.ClientGate/V10/idn.Loyalty.WebAPI/Controllers/Rpt_PeriodSummaryController.cs:365-443 (SearchTransactionExceptionally)
+    ///   - Filter:   Rpt_PeriodSummaryController.cs:667-700 (strWhereClause_Rpt_PeriodSummary_Transaction)
+    ///   - Service:  13.ClientGate/V10/idn.Loyalty.ClientService/Services/Loyalty/Rpt_PeriodSummaryService.cs:41-45 (WA_Rpt_PeriodSummary_Transaction_Get)
+    ///   - API:      11.BackEnd/V10/idn.Loyalty.Biz.Web/Controllers/ReportController.cs:725-789 (WA_Rpt_PeriodSummary_Transaction_Get)
+    ///   - Biz LIVE: 11.BackEnd/V10/idn.Loyalty.Biz/Report.cs:5785-5909 (WAS_Rpt_PeriodSummary_Transaction_Get),
+    ///               :6053-6275 (Rpt_PeriodSummary_Transaction_GetX)
+    ///
+    /// ĐẶC ĐIỂM NGHIỆP VỤ:
+    ///   - Gate SearchTransactionExceptionally nhận: PeriodMonth, DLCodeExceptionally (:365).
+    ///   - strWhereClause_Rpt_PeriodSummary_Transaction (:667-700) lọc trên bảng draft Rpt_PeriodSummary_Transaction:
+    ///       + DLCodeExceptionally: toán tử '=' (nguyên chuỗi, không phân biệt hoa thường) trên cột DLCodeExceptionally (:696).
+    ///       + PeriodMonth: toán tử '=' (nguyên chuỗi, không phân biệt hoa thường) trên cột PeriodMonth (:690).
+    ///       + DealPointType: in ('INTRODUCTION', 'CONSUMPTION', 'BIRTHDAY', 'SALES', 'POINTUSE') (:677-685, gate :392).
+    ///       + KHÔNG lọc KeyWord, FlagActive hay OrgID.
+    ///   - Inner join với Rpt_PeriodSummary_TransactionExceptionally rpste trên (PeriodMonth, DLCodeExceptionally, AutoID) (:6206-6208).
+    ///   - Left join với CrdCardTransaction cct trên t.AutoID = cct.AutoId để lấy CreateDTimeUTC và CardNo (:6209-6210).
+    ///   - Điều kiện lọc trên rpste: rpste.DLCode != rpste.DLCodeExceptionally và rpste.DealPointType == "CONSUMPTION" (:6212-6213).
+    ///   - Sắp xếp: order by rpste.LogLUDTimeUTC desc (:6215).
+    ///   - Che giá trị 3 cột: AutoID = "N/A", RefNo = "N/A", DLCode = "N/A" theo đúng câu SQL nguồn (:6184, :6185, :6189).
+    ///   - Định dạng CreateDTimeUTC: chuỗi yyyy-MM-dd sau khi quy đổi giờ VN (UTC+7) qua StdDTimeVN và StdDate (Report.cs:5874-5879).
+    ///   - Phản hồi: khi không có bản ghi nào, Lst_Rpt_PeriodSummary_TransactionExceptionally trả về null (gate :395, :420-430).
+    /// </summary>
+    [HttpPost("searchtransactionexceptionally")]
+    public async Task<IActionResult> SearchTransactionExceptionally([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Rpt_PeriodSummarySearchTransactionExceptionallyReq? req)
+    {
+        var allowedTypes = new[] { "INTRODUCTION", "CONSUMPTION", "BIRTHDAY", "SALES", "POINTUSE" };
+
+        var draftQuery = _db.Set<Rpt_PeriodSummary_Transaction>().AsNoTracking().AsQueryable();
+
+        // 1. DealPointType in ('INTRODUCTION', 'CONSUMPTION', 'BIRTHDAY', 'SALES', 'POINTUSE') — gate :392, Report.cs:677-685
+        draftQuery = draftQuery.Where(x => x.DealPointType != null && allowedTypes.Contains(x.DealPointType));
+
+        // 2. Lọc PeriodMonth với toán tử '=' (nguyên chuỗi, không phân biệt hoa thường) — gate :391, :690
+        if (!string.IsNullOrWhiteSpace(req?.PeriodMonth))
+        {
+            var p_month = PortQuery.Equal(req.PeriodMonth);
+            draftQuery = draftQuery.Where(x => EF.Functions.Like(x.PeriodMonth.ToLower(), p_month, PortQuery.Esc));
+        }
+
+        // 3. Lọc DLCodeExceptionally (hoặc fallback DLCPCode) với toán tử '=' (nguyên chuỗi, không phân biệt hoa thường) — gate :390, :696
+        string? dlCodeExc = req?.DLCodeExceptionally;
+        if (!string.IsNullOrWhiteSpace(dlCodeExc))
+        {
+            var p_dlExc = PortQuery.Equal(dlCodeExc);
+            draftQuery = draftQuery.Where(x => x.DLCodeExceptionally != null && EF.Functions.Like(x.DLCodeExceptionally.ToLower(), p_dlExc, PortQuery.Esc));
+        }
+
+        // 4. Inner join với Rpt_PeriodSummary_TransactionExceptionally trên (PeriodMonth, DLCodeExceptionally, AutoID),
+        //    left join với CrdCardTransaction trên AutoID,
+        //    lọc rpste.DLCode != rpste.DLCodeExceptionally và rpste.DealPointType == "CONSUMPTION",
+        //    sắp xếp rpste.LogLUDTimeUTC desc — Report.cs:6181-6215
+        var joinedQuery = from t in draftQuery
+                          join rpste in _db.Set<Rpt_PeriodSummary_TransactionExceptionally>().AsNoTracking()
+                              on new { t.PeriodMonth, t.DLCodeExceptionally, t.AutoID }
+                              equals new { rpste.PeriodMonth, rpste.DLCodeExceptionally, rpste.AutoID }
+                          join cct in _db.Set<CrdCardTransaction>().AsNoTracking()
+                              on t.AutoID equals cct.AutoId into cctGroup
+                          from cct in cctGroup.DefaultIfEmpty()
+                          where rpste.DLCode != rpste.DLCodeExceptionally
+                             && rpste.DealPointType == "CONSUMPTION"
+                          orderby rpste.LogLUDTimeUTC descending
+                          select new
+                          {
+                              Item = rpste,
+                              CardNo = cct != null ? cct.CardNo : null,
+                              CreateDTimeUtc = cct != null ? cct.CreateDTimeUTC : null
+                          };
+
+        var rawList = await joinedQuery.ToListAsync();
+
+        // 5. Che cột 'N/A' (AutoID, RefNo, DLCode) và format CreateDTimeUTC quy đổi giờ VN (UTC+7) định dạng yyyy-MM-dd — Report.cs:6184-6189, :5874-5879
+        var list = rawList.Select(x => new
+        {
+            PeriodMonth = x.Item.PeriodMonth,
+            AutoID = "N/A",
+            RefNo = "N/A",
+            NetworkID = x.Item.NetworkID,
+            OrgID = x.Item.OrgID,
+            DealPointType = x.Item.DealPointType,
+            DLCode = "N/A",
+            RefCode07 = x.Item.RefCode07,
+            MemberNo = x.Item.MemberNo,
+            MemberName = x.Item.MemberName,
+            CardTypeUse = x.Item.CardTypeUse,
+            CardTypeInit = x.Item.CardTypeInit,
+            DLCodeExceptionally = x.Item.DLCodeExceptionally,
+            AmountChTotal = x.Item.AmountChTotal,
+            AmountChTotalInit = x.Item.AmountChTotalInit,
+            AmountChTotalDiffer = x.Item.AmountChTotalDiffer,
+            PointExpiryDTime = x.Item.PointExpiryDTime,
+            LogLUDTimeUTC = x.Item.LogLUDTimeUTC,
+            LogLUBy = x.Item.LogLUBy,
+            PointChTotal = x.Item.PointChTotal,
+            PointChTotalInit = x.Item.PointChTotalInit,
+            PointChTotalDiffer = x.Item.PointChTotalDiffer,
+            CreateDTimeUTC = x.CreateDTimeUtc.HasValue ? x.CreateDTimeUtc.Value.ToString("yyyy-MM-dd HH:mm:ss") : null,   // nguồn trả nguyên cct.CreateDTimeUTC
+            CardNo = x.CardNo
+        }).ToList();
+
+        // 6. Định dạng trả về: Lst_Rpt_PeriodSummary_TransactionExceptionally là null khi rỗng (gate :395, :420-430)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Lst_Rpt_PeriodSummary_TransactionExceptionally = list.Count > 0 ? (object)list : null
             }
         });
     }
