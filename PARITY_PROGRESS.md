@@ -56,7 +56,7 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 44 | Crd_MemberController/GetRegisterByMemberNo | Đã làm | 2baa16d |
 | 45 | Crd_MemberController/GetCalcPointBuyCreta | Đã làm | 85b280a |
 | 46 | Crd_MemberController/Save | Đã làm | 2b9e0b6 |
-| 47 | Crd_MemberController/SaveAndApprove | Cần xem tay | Phu thuoc chuoi Finish #53 |
+| 47 | Crd_MemberController/SaveAndApprove | Chưa làm |  |
 | 48 | Crd_MemberController/Update | Đã làm | 0840dd6 |
 | 49 | Crd_MemberController/Delete | Đã làm | f8ef5b6 |
 | 50 | Crd_MemberController/Cancel | Đã làm | f8ef5b6 |
