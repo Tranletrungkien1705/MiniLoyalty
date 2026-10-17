@@ -490,6 +490,94 @@ public class Rpt_PeriodSummaryControllerPort : ControllerBase
     [HttpPost("searchtransactiondetail")]
     public async Task<IActionResult> SearchTransactionDetail([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Rpt_PeriodSummarySearchTransactionDetailReq? req)
     {
+        var allList = await GetTransactionDetailListAsync(req);
+
+        // 9. Định dạng trả về: Lst_Crd_CardTransaction là null khi rỗng — gate :476, :500, :515
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Lst_Crd_CardTransaction = allList.Count > 0 ? (object)allList : null
+            }
+        });
+    }
+
+    /// <summary>
+    /// Port 1:1 action ExportExcelTransactionDetail — xuất Excel danh sách chi tiết giao dịch thẻ đối soát tổng hợp kỳ (#295).
+    /// Nguồn tra cứu (chỉ đọc):
+    ///   - Gate:     13.ClientGate/V10/idn.Loyalty.WebAPI/Controllers/Rpt_PeriodSummaryController.cs:1332-1428 (ExportExcelTransactionDetail)
+    ///   - Filter:   Rpt_PeriodSummaryController.cs:737-774 (strWhereClause_Crd_CardTransaction)
+    ///               + DLCode: toán tử '=' nguyên chuỗi (:744)
+    ///               + DealPointType: toán tử 'in' tách dấu phẩy (:749-754)
+    ///               + CreateDTimeUTCFrom: toán tử '>=' (:759-762)
+    ///               + CreateDTimeUTCTo: toán tử '<=' (:766-769)
+    ///   - Service:  13.ClientGate/V10/idn.Loyalty.ClientService/Services/Loyalty/Crd_CardTransactionService.cs:25-34 (WA_Crd_CardTransaction_Get)
+    ///   - API:      11.BackEnd/V10/idn.Loyalty.Biz.Web/Controllers/CrdCardTransactionController.cs:24-60 (WA_Crd_CardTransaction_Get)
+    ///   - Biz LIVE: 11.BackEnd/V10/idn.Loyalty.Biz/Master.Loyalty.cs:21144-21250 (WAS_Crd_CardTransaction_Get),
+    ///               :21254-21408 (Crd_CardTransaction_Get),
+    ///               :21409-21817 (Crd_CardTransaction_GetX)
+    ///               Inner join Crd_Member, Crd_Card, union Crd_MemberDiscountTransaction khi DealPointType chứa 'DISCOUNTRO' (:21664-21791)
+    ///               Sắp xếp: order by LogLUDTimeUTC desc (:21618)
+    ///               Ghi đè: if (DealPointType == PointIncrease) AmountChTotal = PointChRankTotal (:1390-1396)
+    ///   - Columns:  Rpt_PeriodSummaryController.cs:1541-1565 (GetImportDicColumsTransactionDtl - 19 cột)
+    ///   - Sheet:    "Crd_CardTransaction" (:1401, :1403)
+    ///   - Khi rỗng: throw new ServiceException("Không có dữ liệu") (:1414) -> HTTP 400 PortResult.Fail("Rpt_PeriodSummary_ExportExcelTransactionDetail", "Message", "Không có dữ liệu")
+    ///   - Khi thành công: Success = true, Data = { Url = ... } (:1405-1409)
+    /// </summary>
+    [HttpPost("exportexceltransactiondetail")]
+    public async Task<IActionResult> ExportExcelTransactionDetail([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Rpt_PeriodSummarySearchTransactionDetailReq? req)
+    {
+        var list = await GetTransactionDetailListAsync(req);
+
+        // 1. Kiểm tra danh sách rỗng — gate :1414, :1420
+        // Khi không có dữ liệu: throw ServiceException("Không có dữ liệu") -> gate catch :1420
+        // Trên port trả HTTP 400: PortResult.Fail("Rpt_PeriodSummary_ExportExcelTransactionDetail", "Message", "Không có dữ liệu")
+        if (list == null || list.Count == 0)
+        {
+            return PortResult.Fail("Rpt_PeriodSummary_ExportExcelTransactionDetail", "Message", "Không có dữ liệu");
+        }
+
+        // 2. Chuẩn bị đường dẫn thư mục xuất file Excel — gate :1401
+        var webRoot = _env?.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = _env != null
+                ? Path.Combine(_env.ContentRootPath, "wwwroot")
+                : Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+        }
+
+        string virtualPath;
+        try
+        {
+            // 3. Lấy từ điển 19 cột từ GetImportDicColumsTransactionDtl(), sinh file và xuất Excel — gate :1398, :1401, :1403
+            var dicColNames = GetImportDicColumsTransactionDtl();
+            var (physicalPath, vPath) = PortExcel.GenExcelExportFilePath(webRoot, "Crd_CardTransaction");
+            virtualPath = vPath;
+            PortExcel.ExportToExcelFromList(list, dicColNames, physicalPath, "Crd_CardTransaction");
+        }
+        catch (Exception ex)
+        {
+            // Bắt ngoại lệ nếu ghi file lỗi -> trả Fail (gate :1420)
+            return PortResult.Fail("Rpt_PeriodSummary_ExportExcelTransactionDetail", "Exception", ex.Message);
+        }
+
+        // 4. Trả URL tải file với Success = true — gate :1405-1409
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+            }
+        });
+    }
+
+    /// <summary>
+    /// Helper dùng chung lấy danh sách chi tiết giao dịch cho SearchTransactionDetail (#289) và ExportExcelTransactionDetail (#295).
+    /// </summary>
+    private async Task<List<Crd_CardTransactionSearchResult>> GetTransactionDetailListAsync(Rpt_PeriodSummarySearchTransactionDetailReq? req)
+    {
         var normalQuery = from cct in _db.Set<CrdCardTransaction>().AsNoTracking()
                           join cm in _db.Set<CrdMember>().AsNoTracking() on cct.MemberNo equals cm.MemberNo
                           join cc in _db.Set<CrdCard>().AsNoTracking() on new { cct.MemberNo, cct.CardNo } equals new { cc.MemberNo, cc.CardNo }
@@ -740,15 +828,7 @@ public class Rpt_PeriodSummaryControllerPort : ControllerBase
             }
         }
 
-        // 9. Định dạng trả về: Lst_Crd_CardTransaction là null khi rỗng — gate :476, :500, :515
-        return Ok(new
-        {
-            Success = true,
-            Data = new
-            {
-                Lst_Crd_CardTransaction = allList.Count > 0 ? (object)allList : null
-            }
-        });
+        return allList;
     }
 
     /// <summary>
@@ -1621,6 +1701,35 @@ public class Rpt_PeriodSummaryControllerPort : ControllerBase
             { nameof(RptPE_CrdTransationDeCreaseInstPeriodDtl.DealPointTypeIC), "Loại tích điểm" },
             { nameof(RptPE_CrdTransationDeCreaseInstPeriodDtl.AmountChTotalIC), "Điểm tích hạng sử dụng" },
             { nameof(RptPE_CrdTransationDeCreaseInstPeriodDtl.AmountChTotalInitIC), "Điểm tích hạng thực" }
+        };
+    }
+
+    /// <summary>
+    /// Từ điển 19 cột xuất Excel chi tiết giao dịch thẻ đối soát tổng hợp kỳ: gate Rpt_PeriodSummaryController.cs:1541-1565 (GetImportDicColumsTransactionDtl).
+    /// </summary>
+    private static Dictionary<string, string> GetImportDicColumsTransactionDtl()
+    {
+        return new Dictionary<string, string>
+        {
+            { nameof(Crd_CardTransactionSearchResult.AutoId), "Số giao dịch" },
+            { nameof(Crd_CardTransactionSearchResult.DLCode), "Mã đại lý" },
+            { nameof(Crd_CardTransactionSearchResult.RefNo), "Số tham chiếu" },
+            { nameof(Crd_CardTransactionSearchResult.MemberNo), "Mã hội viên" },
+            { nameof(Crd_CardTransactionSearchResult.MemberName), "Họ và tên" },
+            { nameof(Crd_CardTransactionSearchResult.CardTypeUse), "Hạng sử dụng" },
+            { nameof(Crd_CardTransactionSearchResult.CardTypeInit), "Hạng thực" },
+            { nameof(Crd_CardTransactionSearchResult.DealPointType), "Loại điểm" },
+            { nameof(Crd_CardTransactionSearchResult.DLCodeExceptionally), "Đại lý yêu cầu đặc cách" },
+            { nameof(Crd_CardTransactionSearchResult.AmountChTotal), "Số điểm hạng sử dụng" },
+            { nameof(Crd_CardTransactionSearchResult.AmountChTotalInit), "Số điểm hạng thực" },
+            { nameof(Crd_CardTransactionSearchResult.AmountChTotalDiffer), "Số điểm chênh hạng" },
+            { nameof(Crd_CardTransactionSearchResult.PointExpiryDTime), "Ngày hết hạn sử dụng điểm" },
+            { nameof(Crd_CardTransactionSearchResult.CreateDTimeUTC), "Ngày giao dịch" },
+            { nameof(Crd_CardTransactionSearchResult.CardNo), "Mã kỳ xét hạng" },
+            { nameof(Crd_CardTransactionSearchResult.CarNo), "Biển số" },
+            { nameof(Crd_CardTransactionSearchResult.DiscountRate), "% chiết khấu" },
+            { nameof(Crd_CardTransactionSearchResult.DiscountAmount), "Tổng tiền chiết khấu" },
+            { nameof(Crd_CardTransactionSearchResult.DiscountRevenue), "Doanh thu chiết khấu" }
         };
     }
 }
