@@ -2132,7 +2132,7 @@ public class Crd_MemberControllerPort : ControllerBase
     /// <summary>
     /// Sinh mã thẻ qua GenCardNo ({DLCode+0}{MemberNo}{Seq:00}) — Card.cs:27641-27740.
     /// </summary>
-    private async Task<string> GenCardNoAsync(string strMemberNo, string strDLCode)
+    private async Task<string> GenCardNoAsync(string strMemberNo, string? strDLCode)
     {
         long nSeqCardNo = 0;
         var cards = await _db.Set<CrdCard>().AsNoTracking()
@@ -2451,153 +2451,16 @@ public class Crd_MemberControllerPort : ControllerBase
 
         var now = DateTime.UtcNow;
         var user = CmUser();
-        var dateEndMonthNextYear = GetDateEndMonthOfNextYear(now);
 
         // Mở transaction an toàn: Card.cs:15118
         await using var tx = await _db.Database.BeginTransactionAsync();
         try
         {
-            // Bước 3: Cập nhật Crd_Member (Card.cs:17465-17505, :17544-17567, :17705-17738)
-            // Tính điểm mở thẻ mới dblPointOpenCard (Card.cs:17451-17462):
-            // Trong khoảng [2024-12-16 00:00:00, 2025-01-15 23:59:59] gán 150000; ngoài khoảng = 0 (hoặc giữ từ member nếu đã seed test)
-            double dblPointOpenCard = 0.0;
-            var dPrmOpenCardFrom = new DateTime(2024, 12, 16, 0, 0, 0);
-            var dPrmOpenCardTo = new DateTime(2025, 1, 15, 23, 59, 59);
-            if (now >= dPrmOpenCardFrom && now <= dPrmOpenCardTo)
-            {
-                dblPointOpenCard = 150000;
-            }
-            if (dblPointOpenCard <= 0 && (m.PointOpenCard ?? 0) > 0)
-            {
-                dblPointOpenCard = m.PointOpenCard ?? 0.0;
-            }
-
-            m.RegisStatus = "FINISH";
-            m.MemberStatus = "APPROVE";
-            m.RegisFinishDTimeUTC = now;
-            m.RegisFinishBy = user;
-            m.MemberActiveDate = now.Date;
-            m.EffDateStart = now.Date;
-            m.EffDateEnd = dateEndMonthNextYear;
-            m.PointOpenCard = dblPointOpenCard;
-            m.LUDTimeUTC = now;
-            m.LUBy = user;
-            m.LogLUDTimeUTC = now;
-            m.LogLUBy = user;
-            // LỖI NGUỒN GIỮ NGUYÊN Card.cs:17547: Trong mệnh đề SET của UPDATE, dòng `t.Remark = f.Remark` bị comment `-- , t.Remark = f.Remark`!
-            // Do đó cột Remark trong Crd_Member KHÔNG được cập nhật (giữ nguyên giá trị cũ, tương tự như action Approve và ApproveByDealer).
-
-            // Bước 4: Thêm vào bảng Map_QueryDealer_Member (Card.cs:17507-17538, :17598-17621)
-            // BỎ MẶC ĐỊNH TỰ CHẾ: lấy DLCodeRegis và NetworkID từ member, không gán mặc định nếu rỗng (fix_note.md mục 1)
-            string? strDLCodeRegis = CmStdParam(m.DLCodeRegis);
-            string? strNetworkID = m.NetworkID;
-            if (!string.IsNullOrWhiteSpace(strDLCodeRegis))
-            {
-                var existsMap = await _db.Set<Map_QueryDealer_Member>()
-                    .AnyAsync(x => x.DLCPCode == strDLCodeRegis && x.MemberNo == strMemberNo);
-                if (!existsMap)
-                {
-                    _db.Set<Map_QueryDealer_Member>().Add(new Map_QueryDealer_Member
-                    {
-                        DLCPCode = strDLCodeRegis,
-                        MemberNo = strMemberNo,
-                        NetworkID = strNetworkID,
-                        QueryDate = now.Date,
-                        Remark = null,
-                        FlagActive = "1",
-                        LogLUDTimeUTC = now,
-                        LogLUBy = user
-                    });
-                }
-            }
-
-            // Bước 5: Phê duyệt thẻ Crd_Card và kiểm tra thẻ hợp lệ (Card.cs:17642-17702)
-            // 5.1. Tìm thẻ gần nhất có MemberNo = strMemberNo và CardStatus = 'PENDING' (order by CreateDTimeUTC desc, :17645-17653)
-            var pendingCard = await _db.Set<CrdCard>()
-                .Where(c => c.MemberNo == strMemberNo && c.CardStatus == "PENDING")
-                .OrderByDescending(c => c.CreateDTimeUTC)
-                .FirstOrDefaultAsync();
-
-            // 5.2. Kiểm tra số lượng thẻ có CardStatus = 'APPROVE' của hội viên trước khi duyệt (:17655-17661, :17688)
-            var approveCards = await _db.Set<CrdCard>()
-                .Where(c => c.MemberNo == strMemberNo && c.CardStatus == "APPROVE")
-                .OrderBy(c => c.CardNo)
-                .ToListAsync();
-
-            if (approveCards.Count > 1)
+            var err = await FinishCoreAsync(m, user, now, isSameCardType);
+            if (err != null)
             {
                 await tx.RollbackAsync();
-                var firstCard = approveCards[0];
-                return PortResult.Fail("Crd_Member_FinishX_CardNoInvalid",
-                    "Check.MemberNo", strMemberNo,
-                    "Check.CardNo", firstCard.CardNo,
-                    "Check.CardStatus", firstCard.CardStatus ?? "APPROVE",
-                    "Expect", "Only 1 Card of Member Active");
-            }
-
-            // 5.3. Nếu có thẻ PENDING: gọi Crd_Card_ApproveX (:17671, Card.cs:23463-23620) cập nhật thẻ đó sang CardStatus = 'APPROVE'
-            if (pendingCard != null)
-            {
-                pendingCard.CardStatus = "APPROVE";
-                pendingCard.ApproveDTimeUTC = now;
-                pendingCard.ApproveBy = user;
-                pendingCard.CardActiveDate = now.Date;
-                pendingCard.EffDateStart = now.Date;
-                pendingCard.EffDateEnd = dateEndMonthNextYear;
-                pendingCard.LUDTimeUTC = now;
-                pendingCard.LUBy = user;
-                pendingCard.LogLUDTimeUTC = now;
-                pendingCard.LogLUBy = user;
-            }
-
-            var activeCard = pendingCard ?? approveCards.FirstOrDefault();
-
-            // Chuỗi cộng điểm (Card.cs:17741-17841, fix_note.md mục 2):
-            double dblPointBuyCar = m.PointBuyCar ?? 0.0;
-            double dblPointIntro = m.PointIntro ?? 0.0;
-            double dblPointBuyCreta = m.PointBuyCreta ?? 0.0;
-            double dblPointVoucherNewCar = m.PointVoucherNewCar ?? 0.0;
-            double? unitPointToMoney = await PortCardTransactionEngine.GetUnitPointToMoneyAsync(_db);
-
-            // 1. Crd_Member_PerformBuyNewCarX (:17742-17758)
-            if (dblPointBuyCar > 0 && activeCard != null && unitPointToMoney.HasValue)
-            {
-                await PortCardTransactionEngine.PerformBuyNewCarXAsync(_db, m, activeCard, dblPointBuyCar, unitPointToMoney!.Value, now, user);
-            }
-
-            // 2. Crd_Member_PerformIntroX (:17761-17778)
-            if (dblPointIntro > 0 && unitPointToMoney.HasValue)
-            {
-                await PortCardTransactionEngine.PerformIntroXAsync(_db, m, dblPointIntro, unitPointToMoney!.Value, now, user);
-            }
-
-            // 3. Crd_Member_PerformOpenCardX (:17781-17797)
-            if (dblPointOpenCard > 0 && activeCard != null && unitPointToMoney.HasValue)
-            {
-                await PortCardTransactionEngine.PerformOpenCardXAsync(_db, m, activeCard, dblPointOpenCard, unitPointToMoney!.Value, now, user);
-            }
-
-            // 4. Crd_Member_PerformBuyCretaX (:17800-17820)
-            if (dblPointBuyCreta > 0 && !isSameCardType && activeCard != null && unitPointToMoney.HasValue)
-            {
-                await PortCardTransactionEngine.PerformBuyCretaXAsync(_db, m, activeCard, dblPointBuyCreta, unitPointToMoney!.Value, now, user);
-            }
-
-            // 5. Crd_Member_PerformVoucherNewCarX_New20260813 (:17823-17841)
-            if (dblPointVoucherNewCar > 0 && activeCard != null)
-            {
-                await PortCardTransactionEngine.PerformVoucherNewCarXAsync(_db, m, activeCard, dblPointVoucherNewCar, now, user);
-            }
-
-            // Bước 6: Cập nhật Req_MemberRegister nếu SourceRegisType == "ONLINE" (Card.cs:17843-17864)
-            if (string.Equals(m.SourceRegisType, "ONLINE", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(m.ReqMemberRegisterCodeSys))
-            {
-                var reg = await _db.Set<Req_MemberRegister>()
-                    .FirstOrDefaultAsync(r => r.ReqMemberRegisterCodeSys == m.ReqMemberRegisterCodeSys);
-                if (reg != null)
-                {
-                    reg.ReqMemberRegisterStatus = "FINISH";
-                }
+                return err;
             }
 
             // Commit transaction: Card.cs:15180
@@ -2617,6 +2480,800 @@ public class Crd_MemberControllerPort : ControllerBase
             // Rollback transaction khi có lỗi ngoại lệ: Card.cs:15188
             await tx.RollbackAsync();
             return PortResult.Fail("Crd_Member_Finish", "Exception", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Thực hiện các bước hoàn tất đăng ký hội viên — port 1:1 từ Crd_Member_FinishX_New20250918 (Card.cs:17348-17944).
+    /// Tách lõi dùng chung cho Finish (#053) và SaveAndApprove (#047).
+    /// </summary>
+    private async Task<IActionResult?> FinishCoreAsync(CrdMember m, string user, DateTime now, bool isSameCardType)
+    {
+        var dateEndMonthNextYear = GetDateEndMonthOfNextYear(now);
+        string strMemberNo = m.MemberNo ?? "";
+
+        // Bước 3: Cập nhật Crd_Member (Card.cs:17465-17505, :17544-17567, :17705-17738)
+        // Tính điểm mở thẻ mới dblPointOpenCard (Card.cs:17451-17462):
+        // Trong khoảng [2024-12-16 00:00:00, 2025-01-15 23:59:59] gán 150000; ngoài khoảng = 0 (hoặc giữ từ member nếu đã seed test)
+        double dblPointOpenCard = 0.0;
+        var dPrmOpenCardFrom = new DateTime(2024, 12, 16, 0, 0, 0);
+        var dPrmOpenCardTo = new DateTime(2025, 1, 15, 23, 59, 59);
+        if (now >= dPrmOpenCardFrom && now <= dPrmOpenCardTo)
+        {
+            dblPointOpenCard = 150000;
+        }
+        if (dblPointOpenCard <= 0 && (m.PointOpenCard ?? 0) > 0)
+        {
+            dblPointOpenCard = m.PointOpenCard ?? 0.0;
+        }
+
+        m.RegisStatus = "FINISH";
+        m.MemberStatus = "APPROVE";
+        m.RegisFinishDTimeUTC = now;
+        m.RegisFinishBy = user;
+        m.MemberActiveDate = now.Date;
+        m.EffDateStart = now.Date;
+        m.EffDateEnd = dateEndMonthNextYear;
+        m.PointOpenCard = dblPointOpenCard;
+        m.LUDTimeUTC = now;
+        m.LUBy = user;
+        m.LogLUDTimeUTC = now;
+        m.LogLUBy = user;
+        // LỖI NGUỒN GIỮ NGUYÊN Card.cs:17547: Trong mệnh đề SET của UPDATE, dòng `t.Remark = f.Remark` bị comment `-- , t.Remark = f.Remark`!
+        // Do đó cột Remark trong Crd_Member KHÔNG được cập nhật (giữ nguyên giá trị cũ, tương tự như action Approve và ApproveByDealer).
+
+        // Bước 4: Thêm vào bảng Map_QueryDealer_Member (Card.cs:17507-17538, :17598-17621)
+        // BỎ MẶC ĐỊNH TỰ CHẾ: lấy DLCodeRegis và NetworkID từ member, không gán mặc định nếu rỗng (fix_note.md mục 1)
+        string? strDLCodeRegis = CmStdParam(m.DLCodeRegis);
+        string? strNetworkID = m.NetworkID;
+        if (!string.IsNullOrWhiteSpace(strDLCodeRegis))
+        {
+            var existsMap = await _db.Set<Map_QueryDealer_Member>()
+                .AnyAsync(x => x.DLCPCode == strDLCodeRegis && x.MemberNo == strMemberNo);
+            if (!existsMap)
+            {
+                _db.Set<Map_QueryDealer_Member>().Add(new Map_QueryDealer_Member
+                {
+                    DLCPCode = strDLCodeRegis,
+                    MemberNo = strMemberNo,
+                    NetworkID = strNetworkID ?? "1001",
+                    QueryDate = now.Date,
+                    Remark = null,
+                    FlagActive = "1",
+                    LogLUDTimeUTC = now,
+                    LogLUBy = user
+                });
+            }
+        }
+
+        // Bước 5: Phê duyệt thẻ Crd_Card và kiểm tra thẻ hợp lệ (Card.cs:17642-17702)
+        // 5.1. Tìm thẻ gần nhất có MemberNo = strMemberNo và CardStatus = 'PENDING' (order by CreateDTimeUTC desc, :17645-17653)
+        var pendingCard = await _db.Set<CrdCard>()
+            .Where(c => c.MemberNo == strMemberNo && c.CardStatus == "PENDING")
+            .OrderByDescending(c => c.CreateDTimeUTC)
+            .FirstOrDefaultAsync();
+
+        // 5.2. Kiểm tra số lượng thẻ có CardStatus = 'APPROVE' của hội viên trước khi duyệt (:17655-17661, :17688)
+        var approveCards = await _db.Set<CrdCard>()
+            .Where(c => c.MemberNo == strMemberNo && c.CardStatus == "APPROVE")
+            .OrderBy(c => c.CardNo)
+            .ToListAsync();
+
+        if (approveCards.Count > 1)
+        {
+            var firstCard = approveCards[0];
+            return PortResult.Fail("Crd_Member_FinishX_CardNoInvalid",
+                "Check.MemberNo", strMemberNo,
+                "Check.CardNo", firstCard.CardNo,
+                "Check.CardStatus", firstCard.CardStatus ?? "APPROVE",
+                "Expect", "Only 1 Card of Member Active");
+        }
+
+        // 5.3. Nếu có thẻ PENDING: gọi Crd_Card_ApproveX (:17671, Card.cs:23463-23620) cập nhật thẻ đó sang CardStatus = 'APPROVE'
+        if (pendingCard != null)
+        {
+            pendingCard.CardStatus = "APPROVE";
+            pendingCard.ApproveDTimeUTC = now;
+            pendingCard.ApproveBy = user;
+            pendingCard.CardActiveDate = now.Date;
+            pendingCard.EffDateStart = now.Date;
+            pendingCard.EffDateEnd = dateEndMonthNextYear;
+            pendingCard.LUDTimeUTC = now;
+            pendingCard.LUBy = user;
+            pendingCard.LogLUDTimeUTC = now;
+            pendingCard.LogLUBy = user;
+        }
+
+        var activeCard = pendingCard ?? approveCards.FirstOrDefault();
+
+        // Chuỗi cộng điểm (Card.cs:17741-17841, fix_note.md mục 2):
+        double dblPointBuyCar = m.PointBuyCar ?? 0.0;
+        double dblPointIntro = m.PointIntro ?? 0.0;
+        double dblPointBuyCreta = m.PointBuyCreta ?? 0.0;
+        double dblPointVoucherNewCar = m.PointVoucherNewCar ?? 0.0;
+        double? unitPointToMoney = await PortCardTransactionEngine.GetUnitPointToMoneyAsync(_db);
+
+        // 1. Crd_Member_PerformBuyNewCarX (:17742-17758)
+        if (dblPointBuyCar > 0 && activeCard != null && unitPointToMoney.HasValue)
+        {
+            await PortCardTransactionEngine.PerformBuyNewCarXAsync(_db, m, activeCard, dblPointBuyCar, unitPointToMoney!.Value, now, user);
+        }
+
+        // 2. Crd_Member_PerformIntroX (:17761-17778)
+        if (dblPointIntro > 0 && unitPointToMoney.HasValue)
+        {
+            await PortCardTransactionEngine.PerformIntroXAsync(_db, m, dblPointIntro, unitPointToMoney!.Value, now, user);
+        }
+
+        // 3. Crd_Member_PerformOpenCardX (:17781-17797)
+        if (dblPointOpenCard > 0 && activeCard != null && unitPointToMoney.HasValue)
+        {
+            await PortCardTransactionEngine.PerformOpenCardXAsync(_db, m, activeCard, dblPointOpenCard, unitPointToMoney!.Value, now, user);
+        }
+
+        // 4. Crd_Member_PerformBuyCretaX (:17800-17820)
+        if (dblPointBuyCreta > 0 && !isSameCardType && activeCard != null && unitPointToMoney.HasValue)
+        {
+            await PortCardTransactionEngine.PerformBuyCretaXAsync(_db, m, activeCard, dblPointBuyCreta, unitPointToMoney!.Value, now, user);
+        }
+
+        // 5. Crd_Member_PerformVoucherNewCarX_New20260813 (:17823-17841)
+        if (dblPointVoucherNewCar > 0 && activeCard != null)
+        {
+            await PortCardTransactionEngine.PerformVoucherNewCarXAsync(_db, m, activeCard, dblPointVoucherNewCar, now, user);
+        }
+
+        // Bước 6: Cập nhật Req_MemberRegister nếu SourceRegisType == "ONLINE" (Card.cs:17843-17864)
+        if (string.Equals(m.SourceRegisType, "ONLINE", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(m.ReqMemberRegisterCodeSys))
+        {
+            var reg = await _db.Set<Req_MemberRegister>()
+                .FirstOrDefaultAsync(r => r.ReqMemberRegisterCodeSys == m.ReqMemberRegisterCodeSys);
+            if (reg != null)
+            {
+                reg.ReqMemberRegisterStatus = "FINISH";
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Lưu và phê duyệt đăng ký hội viên — port 1:1 từ Crd_MemberController.SaveAndApprove (#047).
+    /// Nguồn Gate: Crd_MemberController.cs:823-902 (SaveAndApprove) và :903-929 (Crd_Member_Return).
+    /// Nguồn API: CrdMemberController.cs:843-913 (WA_Crd_Member_SaveAndApprove).
+    /// Nguồn Biz: Card.cs:17945-18071 (WAS_Crd_Member_SaveAndApprove) -> Card.cs:19073-19466 (Crd_Member_SaveAndApprove_New20260805).
+    /// </summary>
+    [HttpPost("saveandapprove")]
+    public async Task<IActionResult> SaveAndApprove([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_MemberSaveReq? req)
+    {
+        // Gate :834-844: strJson null -> ServiceException("strJson null") -> Fail("Crd_Member_SaveAndApprove", "Check.strJson", null)
+        Crd_MemberSaveInput? mem = req?.Crd_Member;
+        if (req == null || mem == null)
+        {
+            return PortResult.Fail("Crd_Member_SaveAndApprove", "Check.strJson", null);
+        }
+
+        // Xử lý file đính kèm theo Crd_Member_Return (Gate :903-929)
+        if (string.Equals(mem.FlagFileUpload, "1", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!string.IsNullOrEmpty(mem.AttFileId))
+            {
+                mem.MemberFileName = mem.AttFileId;
+                mem.MemberFilePath = null;
+            }
+        }
+        else
+        {
+            if (!string.IsNullOrEmpty(mem.MemberFilePath))
+            {
+                mem.MemberFilePath = mem.MemberFilePath.Replace("/", "\\");
+            }
+            mem.MemberFileSpec = null;
+        }
+
+        bool bIsDelete = string.Equals(req.FlagIsDelete, "1", StringComparison.OrdinalIgnoreCase);
+
+        // Chuẩn hoá MemberNo theo GenMemberNo (Card.cs:19283, :27568-27640)
+        string? strMemberNo;
+        if (mem.MemberNo != null && string.IsNullOrWhiteSpace(mem.MemberNo))
+        {
+            strMemberNo = "";
+        }
+        else if (!string.IsNullOrWhiteSpace(mem.MemberNo))
+        {
+            strMemberNo = StdParam(mem.MemberNo);
+        }
+        else
+        {
+            var seq = await PortSeq.NextAsync<Seq_MemberNo>(_db);
+            strMemberNo = (seq % 1000000).ToString("D6");
+        }
+
+        var strOrgID = StdParam(mem.OrgID ?? req.OrgID ?? Request.Headers["OrgID"].ToString()) ?? "4020320001";
+        var strNetworkID = StdParam(mem.NetworkID ?? req.NetworkID ?? Request.Headers["NetworkID"].ToString()) ?? "1001";
+        var strDLCodeRegis = StdParam(mem.DLCodeRegis);
+        var strCardTypeUse = StdParam(mem.CardTypeUse);
+        var strCardTypeInit = StdParam(mem.CardTypeInit);
+        var strFlagExceptionally = StdFlag(mem.FlagExceptionally);
+        var strRegistrationDate = mem.RegistrationDate;
+        var strDLCodeExceptionally = StdParam(mem.DLCodeExceptionally);
+        var strCustomerCode = StdParam(mem.CustomerCode);
+        var strMemberName = StdStr(mem.MemberName);
+        var strPhoneNo = StdStr(mem.PhoneNo);
+        var strMemberGender = StdStr(mem.MemberGender);
+        var strDateOfBirth = mem.DateOfBirth;
+        var strProvinceCode = StdParam(mem.ProvinceCode);
+        var strDistrictCode = StdParam(mem.DistrictCode);
+        var strMemAddress = StdStr(mem.MemAddress);
+        var strIDCardNo = StdParam(mem.IDCardNo);
+        var strCarNo = StdParam(mem.CarNo);
+        var strVIN = StdParam(mem.VIN);
+        var strTradeMarkCode = StdParam(mem.TradeMarkCode);
+        var strModelCode = StdParam(mem.ModelCode);
+        var strModelName = StdStr(mem.ModelName);
+        var strMemberNoIntro = StdParam(mem.MemberNoIntro);
+        var strCarNoIntro = StdParam(mem.CarNoIntro);
+        double dblPointIntro = mem.PointIntro ?? 0.0;
+        double dblPointBuyCar = mem.PointBuyCar ?? 0.0;
+        double dblPointBuyCreta = 3000000.0;
+        string? strDealNo = StdParam(mem.DealNo);
+        string? strTVBHName = StdStr(mem.TVBHName);
+        string? strRemark = StdStr(mem.Remark);
+        string? strMemberFileSpec = StdStr(mem.MemberFileSpec);
+        string? strMemberFileName = StdStr(mem.MemberFileName);
+        string? strMemberFilePath = StdStr(mem.MemberFilePath);
+        string? strSourceRegisType = StdParam(mem.SourceRegisType);
+        string? strReqMemberRegisterCodeSys = StdParam(mem.ReqMemberRegisterCodeSys);
+        double dblPointVoucherNewCar = mem.PointVoucherNewCar ?? 0.0;
+        string? strPurchaseType = StdParam(mem.PurchaseType);
+        var strWarrantyExpiryDate = mem.WarrantyExpiryDate;
+        var strInvoiceDate = mem.InvoiceDate;
+        string strWAUserCode = StdParam(req.WAUserCode ?? Request.Headers["WAUserCode"].ToString()) ?? "port";
+        DateTime dtimeSys = DateTime.UtcNow;
+
+        // Transaction toàn cục theo Card.cs:19187
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // 1. Kiểm tra xe cũ strPurchaseType == "BUYUSED" (Card.cs:19228-19253)
+            string? strMemberNoUp = null;
+            if (string.Equals(strPurchaseType, "BUYUSED", StringComparison.OrdinalIgnoreCase))
+            {
+                var patVIN_Old = PortQuery.Equal(strVIN ?? "");
+                var oldMember = await _db.Set<CrdMember>()
+                    .FirstOrDefaultAsync(t => EF.Functions.Like((t.VIN ?? "").ToLower(), patVIN_Old, PortQuery.Esc) &&
+                                              t.RegisStatus == "FINISH" && t.MemberStatus == "APPROVE");
+                if (oldMember != null)
+                {
+                    strMemberNoUp = oldMember.MemberNo;
+                    strCustomerCode = oldMember.CustomerCode;
+
+                    // Gọi Crd_Member_InActiveX (Card.cs:14085-14279, :19256-19277)
+                    oldMember.MemberStatus = "CANCEL";
+                    oldMember.InactiveDTimeUTC = dtimeSys;
+                    oldMember.InactiveBy = strWAUserCode;
+                    oldMember.Remark = strRemark;
+                    oldMember.LUDTimeUTC = dtimeSys;
+                    oldMember.LUBy = strWAUserCode;
+                    oldMember.LogLUDTimeUTC = dtimeSys;
+                    oldMember.LogLUBy = strWAUserCode;
+
+                    // Gọi Crd_Card_CancelX huỷ thẻ APPROVE cũ (Card.cs:14219-14259, :22675-22830)
+                    var oldCard = await _db.Set<CrdCard>()
+                        .Where(c => c.MemberNo == strMemberNoUp && c.CardStatus == "APPROVE")
+                        .OrderByDescending(c => c.CreateDTimeUTC)
+                        .FirstOrDefaultAsync();
+                    if (oldCard != null)
+                    {
+                        oldCard.CardStatus = "CANCEL";
+                        oldCard.CancelDTimeUTC = dtimeSys;
+                        oldCard.CancelBy = strWAUserCode;
+                        oldCard.Remark = null;
+                        oldCard.LUDTimeUTC = dtimeSys;
+                        oldCard.LUBy = strWAUserCode;
+                        oldCard.LogLUDTimeUTC = dtimeSys;
+                        oldCard.LogLUBy = strWAUserCode;
+
+                        oldMember.CardStatus = "CANCEL";
+                    }
+
+                    await _db.SaveChangesAsync();
+                }
+            }
+
+            // 2. Guards theo thứ tự SaveX (Card.cs:9354-9785)
+            // 2.1) strMemberNo rỗng -> Crd_Member_SaveX_InvalidMemberNo (:9360)
+            if (string.IsNullOrEmpty(strMemberNo))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Crd_Member_SaveX_InvalidMemberNo", "Check.strMemberNo", strMemberNo);
+            }
+
+            // 2.2) Crd_Member_CheckDB(strMemberNo) (:9367): Nếu đã tồn tại, bắt buộc RegisStatus == 'PENDING' (:9400)
+            var existingMember = await _db.Set<CrdMember>().AsNoTracking()
+                .FirstOrDefaultAsync(x => x.MemberNo == strMemberNo);
+            if (existingMember != null)
+            {
+                if (!string.Equals(existingMember.RegisStatus, "PENDING", StringComparison.OrdinalIgnoreCase))
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Crd_Member_SaveX_InvalidRegisStatus",
+                        "Check.DB.RegisStatus", existingMember.RegisStatus,
+                        "Check.RegisStatus.Expected", "PENDING");
+                }
+            }
+
+            // 2.4) Mst_Org_CheckDB(strOrgID, Yes, Active) (:9438)
+            if (!string.IsNullOrEmpty(strOrgID))
+            {
+                var org = await _db.Set<Mst_Org>().AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.OrgID == strOrgID);
+                if (org == null)
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Mst_Org_CheckDB_OrgNotFound", "Check.OrgID", strOrgID);
+                }
+                if (org.FlagActive != "1")
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Mst_Org_CheckDB_FlagActiveNotMatched", "Check.OrgID", strOrgID);
+                }
+            }
+
+            // 2.5) Mst_CardType_CheckDB(strCardTypeUse, Yes, Active) (:9448)
+            if (!string.IsNullOrEmpty(strCardTypeUse))
+            {
+                var cardTypeUse = await _db.Set<Mst_CardType>().AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.CardType == strCardTypeUse);
+                if (cardTypeUse == null)
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("ErridnLoyalty.Mst_CardType_CheckDB_CardTypeNotFound", "Check.CardType", strCardTypeUse);
+                }
+                if (cardTypeUse.FlagActive != "1")
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Mst_CardType_CheckDB_FlagActiveNotMatched", "Check.CardType", strCardTypeUse,
+                        "Check.strFlagActiveListToCheck", "1",
+                        "DB.FlagActive", cardTypeUse.FlagActive);
+                }
+            }
+
+            // 2.6) Mst_CardType_CheckDB(strCardTypeInit, Yes, Active) (:9458)
+            if (!string.IsNullOrEmpty(strCardTypeInit))
+            {
+                var cardTypeInit = await _db.Set<Mst_CardType>().AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.CardType == strCardTypeInit);
+                if (cardTypeInit == null)
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("ErridnLoyalty.Mst_CardType_CheckDB_CardTypeNotFound", "Check.CardType", strCardTypeInit);
+                }
+                if (cardTypeInit.FlagActive != "1")
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Mst_CardType_CheckDB_FlagActiveNotMatched", "Check.CardType", strCardTypeInit,
+                        "Check.strFlagActiveListToCheck", "1",
+                        "DB.FlagActive", cardTypeInit.FlagActive);
+                }
+            }
+
+            // 2.7) Mst_PurchaseType_CheckDB(strPurchaseType, Yes, Active) (:9470, nếu có PurchaseType)
+            if (!string.IsNullOrEmpty(strPurchaseType))
+            {
+                var pt = await _db.Set<Mst_PurchaseType>().AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.PurchaseType == strPurchaseType);
+                if (pt == null)
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Mst_PurchaseType_CheckDB_PurchaseTypeNotFound", "Check.PurchaseType", strPurchaseType);
+                }
+                if (pt.FlagActive != "1")
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Mst_PurchaseType_CheckDB_FlagActiveNotMatched", "Check.PurchaseType", strPurchaseType,
+                        "Check.strFlagActiveListToCheck", "1",
+                        "DB.FlagActive", pt.FlagActive);
+                }
+            }
+
+            // 2.8) SourceRegisType (:9480-9502)
+            if (string.Equals(strSourceRegisType, "ONLINE", StringComparison.OrdinalIgnoreCase))
+            {
+                var reqOnline = await _db.Set<Req_MemberRegister>().AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.ReqMemberRegisterCodeSys == strReqMemberRegisterCodeSys);
+                if (reqOnline == null)
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Req_MemberRegister_CheckDB_MemberRegisterNotFound", "Check.ReqMemberRegisterCodeSys", strReqMemberRegisterCodeSys);
+                }
+                if (!string.Equals(reqOnline.ReqMemberRegisterStatus, "APPROVE", StringComparison.OrdinalIgnoreCase))
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Req_MemberRegister_CheckDB_ReqMemberRegisterStatusNotMatched",
+                        "Check.ReqMemberRegisterCodeSys", strReqMemberRegisterCodeSys,
+                        "Check.strReqMemberRegisterStatusListToCheck", "APPROVE",
+                        "DB.ReqMemberRegisterStatus", reqOnline.ReqMemberRegisterStatus);
+                }
+            }
+            if (!(string.Equals(strSourceRegisType, "ONLINE", StringComparison.OrdinalIgnoreCase) ||
+                  string.Equals(strSourceRegisType, "OFFLINE", StringComparison.OrdinalIgnoreCase)))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Crd_Member_SaveX_InvalidSourceRegisType",
+                    "Check.MemberNo", strMemberNo,
+                    "Check.SourceRegisType", strSourceRegisType);
+            }
+
+            // 2.9) MemberNoIntro (:9509)
+            string? strVIN_Intro = null;
+            string? strIDCardNo_Intro = null;
+            if (!string.IsNullOrEmpty(strMemberNoIntro))
+            {
+                var intro = await _db.Set<CrdMember>().AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.MemberNo == strMemberNoIntro);
+                if (intro == null)
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Crd_Member_CheckDB_MemberNotFound", "Check.MemberNo", strMemberNoIntro);
+                }
+                if (!string.Equals(intro.RegisStatus, "FINISH", StringComparison.OrdinalIgnoreCase))
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Crd_Member_CheckDB_RegisStatusNotMatched",
+                        "Check.MemberNo", strMemberNoIntro,
+                        "Check.strRegisStatusListToCheck", "FINISH",
+                        "DB.RegisStatus", intro.RegisStatus);
+                }
+                if (!string.Equals(intro.MemberStatus, "APPROVE", StringComparison.OrdinalIgnoreCase))
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Crd_Member_CheckDB_MemberStatusNotMatched",
+                        "Check.MemberNo", strMemberNoIntro,
+                        "Check.strMemberStatusListToCheck", "APPROVE",
+                        "DB.MemberStatus", intro.MemberStatus);
+                }
+                strVIN_Intro = intro.VIN?.Trim().ToUpperInvariant();
+                strIDCardNo_Intro = intro.IDCardNo?.Trim().ToUpperInvariant();
+            }
+
+            // 2.10) DLCodeExceptionally (:9527)
+            if (!string.IsNullOrEmpty(strDLCodeExceptionally))
+            {
+                var dealer = await _db.Set<Mst_DealerCP>().AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.DLCPCode == strDLCodeExceptionally);
+                if (dealer == null)
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("ErridnLoyalty.Mst_DealerCP_CheckDB_DLNotFound", "Check.DLCPCode", strDLCodeExceptionally);
+                }
+                if (dealer.FlagActive != "1")
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Mst_DealerCP_CheckDB_FlagActiveNotMatched",
+                        "Check.DLCPCode", strDLCodeExceptionally,
+                        "Check.strFlagActiveListToCheck", "1",
+                        "DB.FlagActive", dealer.FlagActive);
+                }
+            }
+
+            // 2.11) VIN đủ 17 ký tự (:9536)
+            if (string.IsNullOrEmpty(strVIN) || strVIN.Length != 17)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Crd_Member_SaveX_InvalidVIN",
+                    "Check.VIN", strVIN,
+                    "Check.VIN.Length", strVIN?.Length ?? 0,
+                    "Expect.VIN", "VIN must have 17 characters");
+            }
+
+            // 2.12) Trùng CarNo và VIN (:9550-9658)
+            var patCarNo = PortQuery.Equal(strCarNo ?? "");
+            var patVIN = PortQuery.Equal(strVIN ?? "");
+            var regisStatuses = new[] { "PENDING", "APPROVE1", "APPROVE2" };
+
+            if (!string.IsNullOrEmpty(strCarNo))
+            {
+                var carNoPending = await _db.Set<CrdMember>().AsNoTracking()
+                    .Where(t => EF.Functions.Like((t.CarNo ?? "").ToLower(), patCarNo, PortQuery.Esc) && regisStatuses.Contains(t.RegisStatus!))
+                    .FirstOrDefaultAsync();
+                if (carNoPending != null)
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Crd_Member_SaveX_CarNoExistedOtherMember",
+                        "Check.Input.CarNo", strCarNo,
+                        "Check.Input.MemberNo", strMemberNo,
+                        "Check.BD.MemberNo", carNoPending.MemberNo,
+                        "Check.BD.RegisStatus", carNoPending.RegisStatus,
+                        "Expect", "1 CarNo - 1 MemberNo in ('PENDING', 'APPROVE1', 'APPROVE2')");
+                }
+
+                var carNoActive = await _db.Set<CrdMember>().AsNoTracking()
+                    .Where(t => EF.Functions.Like((t.CarNo ?? "").ToLower(), patCarNo, PortQuery.Esc) &&
+                                t.RegisStatus == "FINISH" && t.MemberStatus == "APPROVE")
+                    .FirstOrDefaultAsync();
+                if (carNoActive != null)
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Crd_Member_SaveX_CarNoExistedActiveMember",
+                        "Check.Input.CarNo", strCarNo,
+                        "Check.Input.MemberNo", strMemberNo,
+                        "Check.BD.MemberNo", carNoActive.MemberNo,
+                        "Check.BD.RegisStatus", carNoActive.RegisStatus,
+                        "Check.BD.MemberStatus", carNoActive.MemberStatus,
+                        "Expect", "1 CarNo - 1 MemberNo active");
+                }
+            }
+
+            var vinPending = await _db.Set<CrdMember>().AsNoTracking()
+                .Where(t => EF.Functions.Like((t.VIN ?? "").ToLower(), patVIN, PortQuery.Esc) && regisStatuses.Contains(t.RegisStatus!))
+                .FirstOrDefaultAsync();
+            if (vinPending != null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Crd_Member_SaveX_VINExistedOtherMember",
+                    "Check.Input.VIN", strVIN,
+                    "Check.Input.MemberNo", strMemberNo,
+                    "Check.BD.MemberNo", vinPending.MemberNo,
+                    "Check.BD.RegisStatus", vinPending.RegisStatus,
+                    "Expect", "1 VIN - 1 MemberNo in ('PENDING', 'APPROVE1', 'APPROVE2')");
+            }
+
+            var vinActive = await _db.Set<CrdMember>().AsNoTracking()
+                .Where(t => EF.Functions.Like((t.VIN ?? "").ToLower(), patVIN, PortQuery.Esc) &&
+                            t.RegisStatus == "FINISH" && t.MemberStatus == "APPROVE")
+                .FirstOrDefaultAsync();
+            if (vinActive != null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Crd_Member_SaveX_VINExistedActiveMember",
+                    "Check.Input.VIN", strVIN,
+                    "Check.Input.MemberNo", strMemberNo,
+                    "Check.BD.MemberNo", vinActive.MemberNo,
+                    "Check.BD.RegisStatus", vinActive.RegisStatus,
+                    "Check.BD.MemberStatus", vinActive.MemberStatus,
+                    "Expect", "1 VIN - 1 MemberNo active");
+            }
+
+            // 2.13) Điểm không âm (:9660-9694)
+            if (dblPointBuyCar < 0)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Crd_Member_SaveX_InvalidValues", "Check.PointBuyCar", dblPointBuyCar);
+            }
+            if (dblPointIntro < 0)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Crd_Member_SaveX_InvalidValues", "Check.PointIntro", dblPointIntro);
+            }
+            if (dblPointBuyCreta < 0)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Crd_Member_SaveX_InvalidValues", "Check.PointBuyCreta", dblPointBuyCreta);
+            }
+
+            // 2.14) Điểm giới thiệu (:9697-9732)
+            if (dblPointIntro > 0)
+            {
+                if (string.Equals(strIDCardNo_Intro, strIDCardNo, StringComparison.OrdinalIgnoreCase))
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Crd_Member_SaveX_IDCardNoIntroAndIDCardNoIsDuplicate",
+                        "Check.MemberNo", strMemberNo,
+                        "Check.CarNo", strCarNo,
+                        "Check.IDCardNo", strIDCardNo,
+                        "Check.MemberNoIntro", strMemberNoIntro,
+                        "Check.CarNoIntro", strCarNoIntro,
+                        "Check.IDCardNo_Intro", strIDCardNo_Intro,
+                        "Check.PointIntro", dblPointIntro,
+                        "ConditionRaise", "(IDCardNo <> IDCardNo_Intro)");
+                }
+                if (string.IsNullOrEmpty(strMemberNoIntro))
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Crd_Member_SaveX_InvalidMemberNoIntro",
+                        "Check.PointIntro", dblPointIntro,
+                        "Check.MemberNoIntro", strMemberNoIntro,
+                        "Check.CarNoIntro", strCarNoIntro);
+                }
+            }
+            if (dblPointVoucherNewCar < 0)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Crd_Member_SaveX_InvalidValues",
+                    "Check.MemberNo", strMemberNo,
+                    "Check.PointVoucherNewCar", dblPointVoucherNewCar);
+            }
+
+            // 2.15) Cờ đặc cách (:9760-9785)
+            if (string.Equals(strFlagExceptionally, "1", StringComparison.OrdinalIgnoreCase))
+            {
+                if (string.IsNullOrEmpty(strRemark))
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Crd_Member_SaveX_RemarkNotAllowNull", "Check.strRemark", strRemark);
+                }
+                if (string.IsNullOrEmpty(strMemberFilePath))
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Crd_Member_SaveX_MemberFilePathNotAllowNull", "Check.strMemberFilePath", strMemberFilePath);
+                }
+            }
+
+            // 3. Lưu Crd_Member và Crd_Card với trạng thái PENDING
+            var oldMemberSameNo = await _db.Set<CrdMember>().FirstOrDefaultAsync(x => x.MemberNo == strMemberNo);
+            if (oldMemberSameNo != null)
+            {
+                _db.Set<CrdMember>().Remove(oldMemberSameNo);
+                await _db.SaveChangesAsync();
+            }
+
+            CrdMember? newMember = null;
+            if (!bIsDelete)
+            {
+                newMember = new CrdMember
+                {
+                    MemberNo = strMemberNo,
+                    NetworkID = strNetworkID,
+                    OrgID = strOrgID,
+                    DLCodeRegis = strDLCodeRegis,
+                    DLCodeExceptionally = strDLCodeExceptionally,
+                    RegistrationDate = ParseDate(strRegistrationDate) ?? dtimeSys.Date,
+                    CustomerCode = strCustomerCode ?? "",
+                    ProvinceCode = strProvinceCode ?? "",
+                    DistrictCode = strDistrictCode ?? "",
+                    UserCode_Member = null,
+                    MemberName = strMemberName ?? "",
+                    MemberGender = strMemberGender,
+                    IDCardNo = strIDCardNo ?? "",
+                    PhoneNo = strPhoneNo ?? "",
+                    DateOfBirth = ParseDate(strDateOfBirth) ?? dtimeSys.Date,
+                    MemAddress = strMemAddress ?? "",
+                    CarNo = strCarNo ?? "",
+                    VIN = strVIN ?? "",
+                    ModelCode = strModelCode ?? "",
+                    ModelName = strModelName,
+                    TradeMarkCode = strTradeMarkCode ?? "",
+                    EffDateStart = null,
+                    EffDateEnd = null,
+                    PointTotal = 0,
+                    PointBlock = 0,
+                    PointAvail = 0,
+                    AmountTotal = 0,
+                    AmountBlock = 0,
+                    AmountAvail = 0,
+                    QtyVisitTotal = 0,
+                    QtyVisitBlock = 0,
+                    QtyVisitAvail = 0,
+                    PointBegin = 0,
+                    PointEnd = 0,
+                    AmountBegin = 0,
+                    AmountEnd = 0,
+                    QtyVisitBegin = 0,
+                    QtyVisitEnd = 0,
+                    PointCardRank = 0,
+                    CardTypeUse = strCardTypeUse,
+                    CardTypeInit = strCardTypeInit,
+                    MemberActiveDate = null,
+                    FlagExceptionally = strFlagExceptionally,
+                    MemberNoIntro = strMemberNoIntro,
+                    CarNoIntro = strCarNoIntro,
+                    PointIntro = dblPointIntro,
+                    PointBuyCar = dblPointBuyCar,
+                    PointBuyCreta = dblPointBuyCreta,
+                    PointVoucherNewCar = dblPointVoucherNewCar,
+                    DealNo = strDealNo,
+                    TVBHName = strTVBHName,
+                    MemberFilePath = strMemberFilePath,
+                    MemberFileName = strMemberFileName,
+                    SourceRegisType = strSourceRegisType,
+                    ReqMemberRegisterCodeSys = strReqMemberRegisterCodeSys,
+                    PurchaseType = strPurchaseType,
+                    WarrantyExpiryDate = ParseDate(strWarrantyExpiryDate),
+                    InvoiceDate = ParseDate(strInvoiceDate),
+                    CreateDTimeUTC = dtimeSys,
+                    CreateBy = strWAUserCode,
+                    LUDTimeUTC = dtimeSys,
+                    LUBy = strWAUserCode,
+                    MemberStatus = "PENDING",
+                    RegisStatus = "PENDING",
+                    Remark = strRemark,
+                    LogLUDTimeUTC = dtimeSys,
+                    LogLUBy = strWAUserCode
+                };
+                _db.Set<CrdMember>().Add(newMember);
+                await _db.SaveChangesAsync();
+
+                // Tạo thẻ mới (Card.cs:19348-19376, :27435-27597)
+                var strCardNo = await GenCardNoAsync(strMemberNo, strDLCodeRegis);
+                var newCard = new CrdCard
+                {
+                    CardNo = strCardNo,
+                    CardNoPrev = null,
+                    NetworkID = strNetworkID,
+                    MemberNo = strMemberNo,
+                    CardSourceCode = "NEW",
+                    RankPolicyCode = null,
+                    DLCodeExceptionally = strDLCodeExceptionally,
+                    PointBonus = 0,
+                    PointPurchaseAddCar = dblPointBuyCar,
+                    EffDateStart = null,
+                    EffDateEnd = null,
+                    PointTotal = 0,
+                    PointBlock = 0,
+                    PointAvail = 0,
+                    AmountTotal = 0,
+                    AmountBlock = 0,
+                    AmountAvail = 0,
+                    QtyVisitTotal = 0,
+                    QtyVisitBlock = 0,
+                    QtyVisitAvail = 0,
+                    PointCardRank = 0,
+                    TotalAmountPeriod = 0,
+                    CardTypeUse = strCardTypeUse,
+                    CardTypeInit = strCardTypeInit,
+                    CardTypeUsePrev = null,
+                    CardTypeInitPrev = null,
+                    CardActiveDate = null,
+                    FlagExceptionally = strFlagExceptionally,
+                    CreateDTimeUTC = dtimeSys,
+                    CreateBy = strWAUserCode,
+                    LUDTimeUTC = dtimeSys,
+                    LUBy = strWAUserCode,
+                    CardStatus = "PENDING",
+                    Remark = strRemark,
+                    LogLUDTimeUTC = dtimeSys,
+                    LogLUBy = strWAUserCode
+                };
+                _db.Set<CrdCard>().Add(newCard);
+                await _db.SaveChangesAsync();
+            }
+
+            // 4. Phân nhánh duyệt theo hạng thẻ (Card.cs:19380-19416)
+            if (newMember != null)
+            {
+                bool isSameCardType = string.Equals(strCardTypeUse, strCardTypeInit, StringComparison.Ordinal);
+                if (isSameCardType)
+                {
+                    // Hạng sử dụng trùng hạng thực: duyệt hoàn tất F qua Crd_Member_FinishX_New20250918 (:17348-17944)
+                    var err = await FinishCoreAsync(newMember, strWAUserCode, dtimeSys, isSameCardType: true);
+                    if (err != null)
+                    {
+                        await tx.RollbackAsync();
+                        return err;
+                    }
+                }
+                else
+                {
+                    // Hạng sử dụng khác hạng thực: duyệt cấp 1 A1 qua Crd_Member_ApproveByDealerX (:14523-14671)
+                    newMember.RegisStatus = "APPROVE1";
+                    newMember.RegisAppr1DTimeUTC = dtimeSys;
+                    newMember.RegisAppr1By = strWAUserCode;
+                    newMember.LUDTimeUTC = dtimeSys;
+                    newMember.LUBy = strWAUserCode;
+                    newMember.LogLUDTimeUTC = dtimeSys;
+                    newMember.LogLUBy = strWAUserCode;
+                    // MemberStatus giữ nguyên 'PENDING', thẻ giữ nguyên 'PENDING' (:14601-14637)
+                }
+
+                await _db.SaveChangesAsync();
+            }
+
+            // Commit transaction: Card.cs:19421
+            await tx.CommitAsync();
+
+            // Trả về thành công: Gate :888-889 (Success = true, Data = null)
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+        catch (PortThresholdException tex)
+        {
+            await tx.RollbackAsync();
+            return PortResult.Fail("Crd_CardTransaction_Perform_QtyChangeOverThreshold", tex.Params);
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return PortResult.Fail("Crd_Member_SaveAndApprove", "Exception", ex.Message);
         }
     }
 }
@@ -3520,6 +4177,164 @@ public class Crd_MemberFinishSeeder : IPortSeeder
                 MemberNo = "MB_FIN_VOUCHER",
                 NetworkID = "1001",
                 CardStatus = "PENDING",
+                CreateDTimeUTC = now,
+                CreateBy = "seed",
+                LUDTimeUTC = now,
+                LUBy = "seed"
+            });
+        }
+
+        await db.SaveChangesAsync();
+    }
+}
+
+/// <summary>
+/// Seeder dữ liệu mẫu cho kiểm thử Crd_Member SaveAndApprove (#047) — Order => 80.
+/// Idempotent: kiểm tra trước khi thêm dòng mới.
+/// </summary>
+public class Crd_MemberSaveAndApproveSeeder : IPortSeeder
+{
+    public int Order => 80;
+
+    public async Task SeedAsync(AppDbContext db)
+    {
+        var now = DateTime.UtcNow;
+
+        // Mst_DealerCP 'VN040' (FlagActive '1') neu chua co
+        if (!await db.Set<Mst_DealerCP>().AnyAsync(x => x.DLCPCode == "VN040"))
+        {
+            db.Set<Mst_DealerCP>().Add(new Mst_DealerCP
+            {
+                DLCPCode = "VN040",
+                NetworkID = "1001",
+                DLCPName = "Đại lý Hyundai VN040",
+                DLCPPhoneNo = "0241234567",
+                FlagActive = "1",
+                FlagBirthPoints = "1",
+                Remark = "Seed for SaveAndApprove 047",
+                LogLUDTimeUTC = now,
+                LogLUBy = "seed"
+            });
+        }
+
+        // Mst_CardType 'I' (FlagActive '1'), 'S' (FlagActive '1') neu chua co
+        if (!await db.Set<Mst_CardType>().AnyAsync(x => x.CardType == "I"))
+        {
+            db.Set<Mst_CardType>().Add(new Mst_CardType
+            {
+                CardType = "I",
+                NetworkID = "1001",
+                CardTypeName = "Hạng tiêu chuẩn (I)",
+                FlagActive = "1",
+                LogLUDTimeUTC = now,
+                LogLUBy = "seed"
+            });
+        }
+        if (!await db.Set<Mst_CardType>().AnyAsync(x => x.CardType == "S"))
+        {
+            db.Set<Mst_CardType>().Add(new Mst_CardType
+            {
+                CardType = "S",
+                NetworkID = "1001",
+                CardTypeName = "Hạng bạc (S)",
+                FlagActive = "1",
+                LogLUDTimeUTC = now,
+                LogLUBy = "seed"
+            });
+        }
+
+        // Mst_PurchaseType 'BUYNEW' va 'BUYUSED' (FlagActive '1') neu chua co
+        if (!await db.Set<Mst_PurchaseType>().AnyAsync(x => x.PurchaseType == "BUYNEW"))
+        {
+            db.Set<Mst_PurchaseType>().Add(new Mst_PurchaseType
+            {
+                PurchaseType = "BUYNEW",
+                PurchaseTypeName = "Mua xe mới",
+                FlagActive = "1"
+            });
+        }
+        if (!await db.Set<Mst_PurchaseType>().AnyAsync(x => x.PurchaseType == "BUYUSED"))
+        {
+            db.Set<Mst_PurchaseType>().Add(new Mst_PurchaseType
+            {
+                PurchaseType = "BUYUSED",
+                PurchaseTypeName = "Mua xe cũ",
+                FlagActive = "1"
+            });
+        }
+
+        // MB_ACTIVE_047: VIN '17CHARVINACTIVE47', CarNo '30A-ACTIVE47', RegisStatus 'FINISH', MemberStatus 'APPROVE', CustomerCode 'CUS_OLD_047', kem the CD_ACTIVE_047 CardStatus 'APPROVE'
+        if (!await db.Set<CrdMember>().AnyAsync(x => x.MemberNo == "MB_ACTIVE_047"))
+        {
+            db.Set<CrdMember>().Add(new CrdMember
+            {
+                MemberNo = "MB_ACTIVE_047",
+                NetworkID = "1001",
+                OrgID = "4020320001",
+                DLCodeRegis = "VN040",
+                CustomerCode = "CUS_OLD_047",
+                ProvinceCode = "P01",
+                DistrictCode = "D01",
+                MemberName = "Nguyen Van Active 047",
+                PhoneNo = "0912345047",
+                IDCardNo = "001090000047",
+                CarNo = "30A-ACTIVE47",
+                VIN = "17CHARVINACTIVE47",
+                ModelCode = "CRETA",
+                TradeMarkCode = "HYUNDAI",
+                CardTypeUse = "I",
+                CardTypeInit = "I",
+                MemberStatus = "APPROVE",
+                RegisStatus = "FINISH",
+                SourceRegisType = "OFFLINE",
+                RegistrationDate = now,
+                CreateDTimeUTC = now,
+                CreateBy = "seed",
+                LUDTimeUTC = now,
+                LUBy = "seed"
+            });
+        }
+        if (!await db.Set<CrdCard>().AnyAsync(x => x.CardNo == "CD_ACTIVE_047"))
+        {
+            db.Set<CrdCard>().Add(new CrdCard
+            {
+                CardNo = "CD_ACTIVE_047",
+                MemberNo = "MB_ACTIVE_047",
+                NetworkID = "1001",
+                CardStatus = "APPROVE",
+                CardSourceCode = "NEW",
+                CreateDTimeUTC = now,
+                CreateBy = "seed",
+                LUDTimeUTC = now,
+                LUBy = "seed"
+            });
+        }
+
+        // MB_PENDING_047: VIN '17CHARVINPENDIN47', CarNo '30A-PENDING47', RegisStatus 'PENDING', MemberStatus 'PENDING'
+        if (!await db.Set<CrdMember>().AnyAsync(x => x.MemberNo == "MB_PENDING_047"))
+        {
+            db.Set<CrdMember>().Add(new CrdMember
+            {
+                MemberNo = "MB_PENDING_047",
+                NetworkID = "1001",
+                OrgID = "4020320001",
+                DLCodeRegis = "VN040",
+                CustomerCode = "CUS_P47",
+                ProvinceCode = "P01",
+                DistrictCode = "D01",
+                MemberName = "Nguyen Van Pending 047",
+                PhoneNo = "0912345147",
+                IDCardNo = "001090000147",
+                CarNo = "30A-PENDING47",
+                VIN = "17CHARVINPENDIN47",
+                ModelCode = "CRETA",
+                TradeMarkCode = "HYUNDAI",
+                CardTypeUse = "I",
+                CardTypeInit = "I",
+                MemberStatus = "PENDING",
+                RegisStatus = "PENDING",
+                SourceRegisType = "OFFLINE",
+                RegistrationDate = now,
                 CreateDTimeUTC = now,
                 CreateBy = "seed",
                 LUDTimeUTC = now,
