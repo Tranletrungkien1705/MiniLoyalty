@@ -73,8 +73,19 @@ public class Crd_MemberColumnChangeGetReq
 // Gate :546-561 chỉ chuyển Crd_MemberChangeInfo; FlagIsDelete và Lst_Crd_MemberChangeInfoDtl không bao giờ được gán (=> null).
 public class Crd_MemberChangeInfoSaveReq
 {
-
     public Crd_MemberChangeInfo? Crd_MemberChangeInfo { get; set; }
+}
+
+/// <summary>
+/// DTO nhận tham số cho Crd_MemberChangeInfoController/Add (#033).
+/// Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Crd_MemberChangeInfoController.cs:606-702
+/// API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\CrdMemberChangeInfoController.cs:169-239
+/// Biz: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\Card.cs:29560-29659 (WAS_), 29399-29558 (Save), 28667-29397 (SaveX)
+/// </summary>
+public class Crd_MemberChangeInfoAddReq
+{
+    public Crd_MemberChangeInfo? Crd_MemberChangeInfo { get; set; }
+    public List<Crd_MemberChangeInfoDtl>? Lst_Crd_MemberChangeInfoDtl { get; set; }
 }
 
 /// <summary>
@@ -809,6 +820,53 @@ public class Crd_MemberChangeInfoControllerPort : ControllerBase
     private static string? StdStr(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim().Normalize();
 
     /// <summary>
+    /// Thêm mới đề nghị thay đổi thông tin hội viên (Action Add, #033).
+    /// Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Crd_MemberChangeInfoController.cs:606-702
+    /// API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\CrdMemberChangeInfoController.cs:169-239
+    /// Biz: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\Card.cs:29560-29659 (WAS_), 29399-29558 (Save), 28667-29397 (SaveX)
+    /// </summary>
+    [HttpPost("add")]
+    public async Task<IActionResult> Add([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_MemberChangeInfoAddReq? req)
+    {
+        // 1. Kiểm tra rỗng / null ở tầng Gate (Gate :617, 626, Ca 1)
+        if (req == null || req.Crd_MemberChangeInfo == null)
+        {
+            return PortResult.Fail("Crd_MemberChangeInfo_Save", "Check.strJson", null);
+        }
+
+        var headerInput = req.Crd_MemberChangeInfo;
+        var dtlsInput = req.Lst_Crd_MemberChangeInfoDtl;
+
+        // 2. Xử lý file trong hàm phụ Crd_MemberChangeInfo_Return (Gate :579-604, Ca 11)
+        var flagFileUpload = (headerInput.FlagFileUpload ?? "").Trim();
+        if (string.Equals(flagFileUpload, "1", StringComparison.OrdinalIgnoreCase))
+        {
+            // Trường hợp upload file (GAP: UploadFileX được ghi nhận trong GAP theo luật)
+            headerInput.AttachFilePath = null;
+        }
+        else
+        {
+            // Trường hợp không upload file (chuẩn hóa gạch chéo thành gạch chéo ngược)
+            if (!string.IsNullOrEmpty(headerInput.AttachFilePath))
+            {
+                headerInput.AttachFilePath = headerInput.AttachFilePath.Replace("/", "\\");
+            }
+            headerInput.AttachFileBase64 = null;
+        }
+
+        // 3. Sinh mã RequestNo tự động qua Sequence SeqType.RequestNo (Gate :646-668, Seq.cs:148)
+        // Sinh số thứ tự trong transaction RIÊNG đã commit độc lập (LESSONS A.15, Ca 12)
+        var seq = await PortSeq.NextAsync<Seq_RequestNo>(_db);
+        var strRequestNo = PortSeq.Build("{0}REQUESTNO.{3}.{1:00000}{2}", "", seq, 100000, "", DateTime.UtcNow);
+
+        // GHI ĐÈ RequestNo của client bằng RequestNo mới sinh từ sequence (Gate :666, Ca 8)
+        headerInput.RequestNo = strRequestNo;
+
+        // 4. Gọi logic lưu dùng chung SaveCoreAsync (LESSONS A.2 & A.3)
+        return await SaveCoreAsync(headerInput, dtlsInput, bIsDelete: false);
+    }
+
+    /// <summary>
     /// Lưu / Sửa / Xóa đề nghị thay đổi thông tin hội viên (Action Save, #032).
     /// Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Crd_MemberChangeInfoController.cs:516-578
     /// API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\CrdMemberChangeInfoController.cs:169-239
@@ -823,11 +881,15 @@ public class Crd_MemberChangeInfoControllerPort : ControllerBase
             return PortResult.Fail("Crd_MemberChangeInfo_Save", "Check.strJson", null);
         }
 
-        var headerInput = req.Crd_MemberChangeInfo;
+        return await SaveCoreAsync(req.Crd_MemberChangeInfo, null, bIsDelete: false);
+    }
 
+    /// <summary>
+    /// Nghiệp vụ lưu cốt lõi dùng chung giữa Save (#032) và Add (#033) (Card.cs:28667-29397 Crd_MemberChangeInfo_SaveX).
+    /// </summary>
+    private async Task<IActionResult> SaveCoreAsync(Crd_MemberChangeInfo headerInput, List<Crd_MemberChangeInfoDtl>? reqDtl, bool bIsDelete)
+    {
         // 2. Chuẩn hoá tham số đầu vào (Card.cs:28726-28737)
-        var bIsDelete = false;
-
         var strRequestNo = StdParam(headerInput.RequestNo);
         var strMemberNo = StdParam(headerInput.MemberNo);
         var strDLCodeRequest = StdParam(headerInput.DLCodeRequest);
@@ -847,7 +909,6 @@ public class Crd_MemberChangeInfoControllerPort : ControllerBase
             }
         }
 
-        List<Crd_MemberChangeInfoDtl>? reqDtl = null;
         var dtimeSys = DateTime.UtcNow;
         var strOrgID = headerInput.OrgID ?? "1001";
         var strNetworkID = _config?["Biz_NetworkID"] ?? "1001";
@@ -1097,6 +1158,7 @@ public class Crd_MemberChangeInfoControllerPort : ControllerBase
                     AttachFilePath = strAttachFilePath,
                     AttachFileName = strAttachFileName,
                     AttachFileSize = dbAttachFileSize > 0 ? dbAttachFileSize.ToString() : null,
+                    AttachFileBase64 = strAttachFileBase64,
                     CreateDTimeUTC = strCreateDTimeUTC,
                     CreateBy = strCreateBy,
                     LUDTimeUTC = dtimeSys.ToString("yyyy-MM-dd HH:mm:ss"),
