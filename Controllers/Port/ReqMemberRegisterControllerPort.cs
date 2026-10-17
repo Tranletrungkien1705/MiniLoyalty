@@ -65,10 +65,12 @@ public class Req_MemberRegisterGetResult
 public class ReqMemberRegisterControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly Microsoft.AspNetCore.Hosting.IWebHostEnvironment? _env;
 
-    public ReqMemberRegisterControllerPort(AppDbContext db)
+    public ReqMemberRegisterControllerPort(AppDbContext db, Microsoft.AspNetCore.Hosting.IWebHostEnvironment? env = null)
     {
         _db = db;
+        _env = env;
     }
 
     [HttpPost("getbyreqmemberregistercodesys")]
@@ -145,7 +147,7 @@ public class ReqMemberRegisterControllerPort : ControllerBase
         });
     }
 
-    private async Task<IActionResult> BuildSuccessResultAsync(Req_MemberRegister reg, double utcOffset)
+    private async Task EnrichAsync(Req_MemberRegister reg, double utcOffset)
     {
         // Bổ sung thông tin từ các bảng liên quan như trong Member.cs:630-653
         if (!string.IsNullOrEmpty(reg.ProvinceCode))
@@ -203,6 +205,16 @@ public class ReqMemberRegisterControllerPort : ControllerBase
             reg.CreateDTimeUTC = createDt.AddHours(utcOffset).ToString("yyyy-MM-dd HH:mm:ss");
         }
 
+    }
+
+    private async Task<IActionResult> BuildSuccessResultAsync(Req_MemberRegister reg, double utcOffset)
+    {
+        await EnrichAsync(reg, utcOffset);
+        return await BuildAttachResultAsync(reg);
+    }
+
+    private async Task<IActionResult> BuildAttachResultAsync(Req_MemberRegister reg)
+    {
         // Lấy danh sách attach files (Member.cs:660-715)
         var idFiles = await _db.Set<Req_MemberRegisterIDAttachFile>()
             .Where(f => EF.Functions.Like(f.ReqMemberRegisterCodeSys.ToLower(), PortQuery.Equal(reg.ReqMemberRegisterCodeSys), PortQuery.Esc))
@@ -230,5 +242,135 @@ public class ReqMemberRegisterControllerPort : ControllerBase
                 Lst_Req_MemberRegisterAttachFile = attachFiles.Count > 0 ? attachFiles : null
             }
         });
+    }
+
+    // ===================== #273 Search / #276 Export =====================
+    // Gate ReqMemberRegisterController.cs:31 (Search), :497 (Export); strWhereClause_Req_MemberRegister; Biz Member.cs:515 (Req_MemberRegister_GetX).
+    public class Req_MemberRegisterSearchReq
+    {
+        public string? OrgID { get; set; }
+        public string? ReqMemberRegisterCode { get; set; }
+        public string? ReqMemberRegisterCodeSys { get; set; }
+        public string? RegisterDateFrom { get; set; }
+        public string? RegisterDateTo { get; set; }
+        public string? DLCodeRegis { get; set; }
+        public string? CustomerPhoneNo { get; set; }
+        public string? CarNo { get; set; }
+        public string? VIN { get; set; }
+        public string? CustomerName { get; set; }
+        public string? ReqMemberRegisterStatus { get; set; }
+        public int Ft_PageIndex { get; set; } = 0;
+        public int Ft_PageSize { get; set; } = 10;
+    }
+
+    // Export (:497) không có tham số ReqMemberRegisterCode.
+    public class Req_MemberRegisterExportReq
+    {
+        public string? OrgID { get; set; }
+        public string? ReqMemberRegisterCodeSys { get; set; }
+        public string? RegisterDateFrom { get; set; }
+        public string? RegisterDateTo { get; set; }
+        public string? DLCodeRegis { get; set; }
+        public string? CustomerPhoneNo { get; set; }
+        public string? CarNo { get; set; }
+        public string? VIN { get; set; }
+        public string? CustomerName { get; set; }
+        public string? ReqMemberRegisterStatus { get; set; }
+    }
+
+    private IQueryable<Req_MemberRegister> RmrFilter(string? codeSys, string? code, string? dateFrom, string? dateTo, string? dlCodeRegis,
+        string? phone, string? carNo, string? vin, string? custName, string? status)
+    {
+        var q = _db.Set<Req_MemberRegister>().AsNoTracking().AsQueryable();
+        if (!string.IsNullOrEmpty(codeSys)) { var p = PortQuery.Equal(codeSys); q = q.Where(x => EF.Functions.Like((x.ReqMemberRegisterCodeSys ?? "").ToLower(), p, PortQuery.Esc)); }
+        if (!string.IsNullOrEmpty(code)) { var p = PortQuery.Equal(code); q = q.Where(x => EF.Functions.Like((x.ReqMemberRegisterCode ?? "").ToLower(), p, PortQuery.Esc)); }
+        if (!string.IsNullOrEmpty(dateFrom)) { q = q.Where(x => string.Compare(x.RegisterDate, dateFrom) >= 0); }
+        if (!string.IsNullOrEmpty(dateTo)) { q = q.Where(x => string.Compare(x.RegisterDate, dateTo) <= 0); }
+        if (!string.IsNullOrEmpty(dlCodeRegis)) { var p = PortQuery.Equal(dlCodeRegis); q = q.Where(x => EF.Functions.Like((x.DLCodeRegis ?? "").ToLower(), p, PortQuery.Esc)); }
+        if (!string.IsNullOrEmpty(phone)) { var p = PortQuery.Contains(phone); q = q.Where(x => EF.Functions.Like((x.CustomerPhoneNo ?? "").ToLower(), p, PortQuery.Esc)); }
+        if (!string.IsNullOrEmpty(carNo)) { var p = PortQuery.Equal(carNo); q = q.Where(x => EF.Functions.Like((x.CarNo ?? "").ToLower(), p, PortQuery.Esc)); }
+        if (!string.IsNullOrEmpty(vin)) { var p = PortQuery.Equal(vin); q = q.Where(x => EF.Functions.Like((x.VIN ?? "").ToLower(), p, PortQuery.Esc)); }
+        if (!string.IsNullOrEmpty(custName)) { var p = PortQuery.Contains(custName); q = q.Where(x => EF.Functions.Like((x.CustomerName ?? "").ToLower(), p, PortQuery.Esc)); }
+        if (!string.IsNullOrEmpty(status)) { var p = PortQuery.Equal(status); q = q.Where(x => EF.Functions.Like((x.ReqMemberRegisterStatus ?? "").ToLower(), p, PortQuery.Esc)); }
+        return q.OrderByDescending(x => x.CreateDTimeUTC);
+    }
+
+    [HttpPost("search")]
+    public async Task<IActionResult> Search([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Req_MemberRegisterSearchReq? req)
+    {
+        req ??= new Req_MemberRegisterSearchReq();
+        double utcOffset = GetUtcOffset();
+        int pageIndex = req.Ft_PageIndex;
+        int pageSize = req.Ft_PageSize;
+
+        var q = RmrFilter(req.ReqMemberRegisterCodeSys, req.ReqMemberRegisterCode, req.RegisterDateFrom, req.RegisterDateTo, req.DLCodeRegis,
+            req.CustomerPhoneNo, req.CarNo, req.VIN, req.CustomerName, req.ReqMemberRegisterStatus);
+        int itemCount = await q.CountAsync();
+
+        long recordStart = (long)pageIndex * pageSize;
+        var list = new List<Req_MemberRegister>();
+        if (pageSize > 0 && recordStart >= 0 && recordStart < itemCount)
+        {
+            list = await q.Skip((int)Math.Min(recordStart, int.MaxValue)).Take((int)Math.Min(pageSize, int.MaxValue)).ToListAsync();
+        }
+
+        int pageCount = 0;
+        if (list.Count > 0)
+        {
+            foreach (var item in list) await EnrichAsync(item, utcOffset);
+            int ps = pageSize == 0 ? 10 : pageSize;
+            pageCount = (itemCount % ps == 0) ? itemCount / ps : itemCount / ps + 1;
+        }
+        return Ok(new { Success = true, Data = new PageInfo<Req_MemberRegister>(list, itemCount, pageCount, pageIndex, pageSize) });
+    }
+
+    [HttpPost("export")]
+    public async Task<IActionResult> Export([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Req_MemberRegisterExportReq? req)
+    {
+        req ??= new Req_MemberRegisterExportReq();
+        double utcOffset = GetUtcOffset();
+        var list = await RmrFilter(req.ReqMemberRegisterCodeSys, null, req.RegisterDateFrom, req.RegisterDateTo, req.DLCodeRegis,
+            req.CustomerPhoneNo, req.CarNo, req.VIN, req.CustomerName, req.ReqMemberRegisterStatus).ToListAsync();
+        if (list.Count == 0)
+        {
+            return PortResult.Fail("Req_MemberRegister_Export", "Message", "Không có dữ liệu");
+        }
+        foreach (var item in list) await EnrichAsync(item, utcOffset);
+
+        var webRoot = _env?.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = _env != null ? System.IO.Path.Combine(_env.ContentRootPath, "wwwroot") : System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "wwwroot");
+        }
+        var dic = new Dictionary<string, string>
+        {
+            { "ReqMemberRegisterCodeSys", "Mã lượt đăng ký" },
+            { "DLCodeRegis", "Đại lý đăng ký" },
+            { "RegisterDate", "Ngày HV đăng ký" },
+            { "ReqMemberRegisterStatus", "Trạng thái yêu cầu" },
+            { "FlagIsSyncDMS", "Trạng thái đồng bộ DMS" },
+            { "CarNo", "Biển số" },
+            { "VIN", "Số khung" },
+            { "ModelName", "Tên Model" },
+            { "CustomerName", "Tên khách hàng" },
+            { "CustomerIDNo", "MST/CCCD" },
+            { "CustomerPhoneNo", "Số điện thoại" },
+            { "CustomerDateOfBirth", "Ngày sinh" },
+            { "GenderCode", "Mã Giới tính" },
+            { "GenderName", "Tên Giới tính" },
+            { "ProvinceCode", "Mã Tỉnh/TP" },
+            { "ProvinceName", "Tên Tỉnh/TP" },
+            { "Remark", "Ghi chú" },
+        };
+        try
+        {
+            var (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Req_MemberRegister");
+            PortExcel.ExportToExcelFromList(list, dic, physicalPath, "Req_MemberRegister");
+            return Ok(new { Success = true, Data = new { Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath } });
+        }
+        catch (Exception ex)
+        {
+            return PortResult.Fail("Req_MemberRegister_Export", "Exception", ex.Message);
+        }
     }
 }
