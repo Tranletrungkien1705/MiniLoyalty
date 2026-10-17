@@ -334,6 +334,31 @@ public class Crd_DealUsePromotionGetByMemberNoDtlItem
     public string? Unit { get; set; }
 }
 
+/// <summary>
+/// Tham số đầu vào cho action GetByPhoneNo — port 1:1 Crd_DealUsePromotionController/GetByPhoneNo (#026).
+/// Nguồn Gate: Crd_DealUsePromotionController.cs:378 (GetByPhoneNo(string PhoneNo)).
+/// </summary>
+public class Crd_DealUsePromotionGetByPhoneNoReq
+{
+    public string? PhoneNo { get; set; }
+}
+
+/// <summary>
+/// DTO thông tin thẻ và hội viên trả về từ GetByPhoneNo (#026).
+/// Kế thừa toàn bộ 100+ thuộc tính Crd_Card và Crd_Member từ Crd_DealUsePromotionSearchItem (Crd_Card.cs:1-120).
+/// </summary>
+public class Crd_DealUsePromotionGetByPhoneNoCardItem : Crd_DealUsePromotionSearchItem
+{
+}
+
+/// <summary>
+/// DTO chi tiết chương trình ưu đãi trả về từ GetByPhoneNo (#026).
+/// Trong GetByPhoneNo, Rt_Cols_Crd_DealUsePromotionDtl = "" nên danh sách trả về luôn rỗng [].
+/// </summary>
+public class Crd_DealUsePromotionGetByPhoneNoDtlItem : Crd_DealUsePromotionGetByMemberNoDtlItem
+{
+}
+
 [ApiController]
 [Route("api/crd_dealusepromotion")]
 public class Crd_DealUsePromotionControllerPort : ControllerBase
@@ -1506,6 +1531,182 @@ public class Crd_DealUsePromotionControllerPort : ControllerBase
     {
         var s = MapToSearchItem(cc, cm, idx);
         return new Crd_DealUsePromotionGetByMemberNoCardItem
+        {
+            MyIdxSeq = s.MyIdxSeq,
+            CardNo = s.CardNo,
+            CardNoPrev = s.CardNoPrev,
+            NetworkID = s.NetworkID,
+            MemberNo = s.MemberNo,
+            DLCodeExceptionally = s.DLCodeExceptionally,
+            CardSourceCode = s.CardSourceCode,
+            RankPolicyCode = s.RankPolicyCode,
+            PointBonus = s.PointBonus,
+            PointPurchaseAddCar = s.PointPurchaseAddCar,
+            EffDateStart = s.EffDateStart,
+            EffDateEnd = s.EffDateEnd,
+            PointTotal = s.PointTotal,
+            PointBlock = s.PointBlock,
+            PointAvail = s.PointAvail,
+            AmountTotal = s.AmountTotal,
+            AmountBlock = s.AmountBlock,
+            AmountAvail = s.AmountAvail,
+            QtyVisitTotal = s.QtyVisitTotal,
+            QtyVisitBlock = s.QtyVisitBlock,
+            QtyVisitAvail = s.QtyVisitAvail,
+            PointCardRank = s.PointCardRank,
+            TotalAmountPeriod = s.TotalAmountPeriod,
+            CardTypeUse = s.CardTypeUse,
+            CardTypeInit = s.CardTypeInit,
+            CardTypeUsePrev = s.CardTypeUsePrev,
+            CardTypeInitPrev = s.CardTypeInitPrev,
+            CardActiveDate = s.CardActiveDate,
+            FlagExceptionally = s.FlagExceptionally,
+            RankActionType = s.RankActionType,
+            CardTypeUseExpect = s.CardTypeUseExpect,
+            CardTypeInitExpect = s.CardTypeInitExpect,
+            CreateDTimeUTC = s.CreateDTimeUTC,
+            CreateBy = s.CreateBy,
+            LUDTimeUTC = s.LUDTimeUTC,
+            LUBy = s.LUBy,
+            ApproveDTimeUTC = s.ApproveDTimeUTC,
+            ApproveBy = s.ApproveBy,
+            CancelDTimeUTC = s.CancelDTimeUTC,
+            CancelBy = s.CancelBy,
+            CardStatus = s.CardStatus,
+            Remark = s.Remark,
+            LogLUDTimeUTC = s.LogLUDTimeUTC,
+            LogLUBy = s.LogLUBy,
+
+            MemberName = s.MemberName,
+            MemberStatus = s.MemberStatus,
+            IDCardNo = s.IDCardNo,
+            MemberGender = s.MemberGender,
+            MemAddress = s.MemAddress,
+            DateOfBirth = s.DateOfBirth,
+            PhoneNo = s.PhoneNo,
+            CarNo = s.CarNo,
+            VIN = s.VIN,
+            ModelCode = s.ModelCode,
+            ModelName = s.ModelName,
+            BrandName = s.BrandName,
+            ProvinceCode = s.ProvinceCode,
+            ProvinceName = s.ProvinceName,
+            DistrictCode = s.DistrictCode,
+            DistrictName = s.DistrictName,
+            WarrantyExpiryDate = s.WarrantyExpiryDate,
+            InvoiceDate = s.InvoiceDate,
+            MemberActiveDate = s.MemberActiveDate,
+            InactiveDTimeUTC = s.InactiveDTimeUTC,
+            PointBegin = s.PointBegin,
+            PointEnd = s.PointEnd,
+            RevenueMiss = s.RevenueMiss,
+            QtyVisitMiss = s.QtyVisitMiss,
+            cc_FlagShow = s.cc_FlagShow,
+            cm_FlagShow = s.cm_FlagShow,
+            AmountEnd = s.AmountEnd,
+            mdcp_DLCPCode = s.mdcp_DLCPCode,
+            mdcp_DLCPName = s.mdcp_DLCPName,
+            mcm_ModelName = s.mcm_ModelName,
+            PointExpiry = s.PointExpiry,
+            AmountRef = s.AmountRef,
+            ConvertValue = s.ConvertValue,
+            ConvertPoint = s.ConvertPoint,
+            PolicyAmountUnit = s.PolicyAmountUnit,
+            PolicyPointUnit = s.PolicyPointUnit,
+            PolicyCode = s.PolicyCode,
+            ParamCode = s.ParamCode,
+            ParamPointUnit = s.ParamPointUnit,
+            ParamAmountUnit = s.ParamAmountUnit,
+            PointAccumulated = s.PointAccumulated,
+            PointUse = s.PointUse,
+            TradeMarkCode = s.TradeMarkCode,
+            DLCodeRequest = s.DLCodeRequest,
+            PointVoucher = s.PointVoucher,
+            PurchaseType = s.PurchaseType,
+            PurchaseTypeName = s.PurchaseTypeName
+        };
+    }
+
+    /// <summary>
+    /// Lấy thông tin thẻ và chi tiết ưu đãi theo PhoneNo — port 1:1 Crd_DealUsePromotionController/GetByPhoneNo (#026).
+    /// Nguồn:
+    ///   - Gate: Crd_DealUsePromotionController.cs:378-456 (GetByPhoneNo), :460-477 (strWhereClause_Crd_Card)
+    ///   - API: CrdDealUsePromotionController.cs:169-239 (WA_Crd_Card_GetForPromotion)
+    ///   - Biz: Master.Loyalty.cs:16790-16903 (WAS_Crd_Card_GetForPromotion)
+    ///          Master.Loyalty.cs:16904-17062 (Crd_Card_GetForPromotion)
+    ///          Master.Loyalty.cs:17063-17467 (Crd_Card_GetForPromotionX - bản LIVE)
+    /// </summary>
+    [HttpPost("getbyphoneno")]
+    public async Task<IActionResult> GetByPhoneNo(
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_DealUsePromotionGetByPhoneNoReq? req)
+    {
+        var phoneNoParam = req?.PhoneNo?.Trim();
+
+        // 1. Kiểm tra PhoneNo null hoặc rỗng (Gate Crd_DealUsePromotionController.cs:402):
+        //    Nếu PhoneNo null hoặc rỗng -> bỏ qua gọi service, đặt SetSuccess(),
+        //    trả về Crd_Card rỗng (MemberNo = null) và Lst_Crd_DealUsePromotionDtl là mảng rỗng [].
+        if (string.IsNullOrEmpty(phoneNoParam))
+        {
+            return Ok(new
+            {
+                Success = true,
+                Data = new
+                {
+                    Crd_Card = new Crd_DealUsePromotionGetByPhoneNoCardItem { MemberNo = (string?)null },
+                    Lst_Crd_DealUsePromotionDtl = new List<Crd_DealUsePromotionGetByPhoneNoDtlItem>()
+                }
+            });
+        }
+
+        // 2. Truy vấn thẻ và hội viên:
+        //    - Gate :404-407: strWhereClause_Crd_Card lọc Crd_Member.PhoneNo = PhoneNo (toán tử =, không LIKE, không tách dấu phẩy)
+        //    - Gate :420, :424: Ft_RecordCount = "1", Rt_Cols_Crd_DealUsePromotionDtl = ""
+        //    - Biz :17191-17197: Crd_Card cc inner join Crd_Member cm on cc.MemberNo = cm.MemberNo
+        //      Điều kiện bắt buộc trên thẻ: cc.CardStatus = 'APPROVE'
+        //      Sắp xếp: order by cc.LogLUDTimeUTC desc
+        //    - Biz :17104: bGet_Crd_DealUsePromotionDtl = false -> không ném lỗi MemberNotFound, không truy vấn chi tiết ưu đãi
+        var row = await (from cc in _db.Set<CrdCard>()
+                         join cm in _db.Set<CrdMember>() on cc.MemberNo equals cm.MemberNo
+                         where cc.CardStatus == LoyaltyConst.CardStatus.Approve
+                            && EF.Functions.Like((cm.PhoneNo ?? "").ToLower(), PortQuery.Equal(phoneNoParam), PortQuery.Esc)
+                         orderby cc.LogLUDTimeUTC descending, cc.CardNo descending
+                         select new { cc, cm })
+                        .FirstOrDefaultAsync();
+
+        // 3. Nếu không tìm thấy thẻ phù hợp: Gate :429-432 objRT_Crd_Card.Lst_Crd_Card rỗng,
+        //    objCrd_Card giữ nguyên đối tượng rỗng (MemberNo = null), Lst_Crd_DealUsePromotionDtl rỗng [].
+        //    KHÔNG ném lỗi Crd_DealUsePromotion_Get_MemberNotFound (Gate :438-443).
+        if (row == null)
+        {
+            return Ok(new
+            {
+                Success = true,
+                Data = new
+                {
+                    Crd_Card = new Crd_DealUsePromotionGetByPhoneNoCardItem { MemberNo = (string?)null },
+                    Lst_Crd_DealUsePromotionDtl = new List<Crd_DealUsePromotionGetByPhoneNoDtlItem>()
+                }
+            });
+        }
+
+        // 4. Nếu tìm thấy thẻ hợp lệ: ánh xạ sang Crd_DealUsePromotionGetByPhoneNoCardItem
+        var cardItem = MapToGetByPhoneNoCardItem(row.cc, row.cm, 0);
+
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Crd_Card = cardItem,
+                Lst_Crd_DealUsePromotionDtl = new List<Crd_DealUsePromotionGetByPhoneNoDtlItem>()
+            }
+        });
+    }
+
+    private static Crd_DealUsePromotionGetByPhoneNoCardItem MapToGetByPhoneNoCardItem(CrdCard cc, CrdMember cm, long? idx = null)
+    {
+        var s = MapToSearchItem(cc, cm, idx);
+        return new Crd_DealUsePromotionGetByPhoneNoCardItem
         {
             MyIdxSeq = s.MyIdxSeq,
             CardNo = s.CardNo,

@@ -647,3 +647,271 @@ public class Crd_DealUsePromotionGetForMemberNoSeeder : IPortSeeder
         await db.SaveChangesAsync();
     }
 }
+
+/// <summary>
+/// Seeder dữ liệu mẫu phục vụ kiểm thử Crd_DealUsePromotionController/GetByPhoneNo (#026).
+/// Thứ tự Order => 76 (chưa dùng trong dải 10-99 theo bài học A.4, chạy sau Order 74, 75). Idempotent.
+/// Nguồn logic & dữ liệu kiểm thử 8 ca P2:
+///   - MB2601 / CD2601: PhoneNo "0901000026", APPROVE, tạo 2026-10-01
+///   - MB2602 / CD2602: PhoneNo "0901000026" (cùng số MB2601), APPROVE, tạo 2026-10-05 (mới hơn CD2601)
+///   - MB2603 / CD2603: PhoneNo "0901000027", CardStatus PENDING (chưa duyệt)
+///   - MB2604: PhoneNo "0901000028", hội viên không có thẻ Crd_Card
+///   - MB2605 / CD2605_OLD, CD2605_NEW: PhoneNo "0901000029", 2 thẻ APPROVE (CD2605_NEW mới hơn)
+///   - MB2606 / CD2606: PhoneNo "0901000030", 1 hội viên 1 thẻ DIAMOND APPROVE
+/// </summary>
+public class Crd_DealUsePromotionGetByPhoneNoSeeder : IPortSeeder
+{
+    public int Order => 76;
+
+    public async Task SeedAsync(AppDbContext db)
+    {
+        if (await db.Set<CrdMember>().AnyAsync(x => x.MemberNo == "MB2601")) return;
+
+        const string net = "1001";
+        const string org = "1001";
+        const string user = "seed";
+
+        var d2026_10_01 = new DateTime(2026, 10, 1, 10, 0, 0, DateTimeKind.Utc);
+        var d2026_10_05 = new DateTime(2026, 10, 5, 10, 0, 0, DateTimeKind.Utc);
+        var d2026_10_06 = new DateTime(2026, 10, 6, 10, 0, 0, DateTimeKind.Utc);
+        var d2026_10_02 = new DateTime(2026, 10, 2, 8, 0, 0, DateTimeKind.Utc);
+        var d2026_10_07 = new DateTime(2026, 10, 7, 15, 0, 0, DateTimeKind.Utc);
+        var d2026_10_03 = new DateTime(2026, 10, 3, 12, 0, 0, DateTimeKind.Utc);
+
+        // 1. MB2601
+        db.Set<CrdMember>().Add(new CrdMember
+        {
+            MemberNo = "MB2601",
+            NetworkID = net,
+            OrgID = org,
+            DLCodeRegis = "DL2601",
+            ProvinceCode = "P01",
+            DistrictCode = "D01",
+            MemberName = "Tran Thi Huong",
+            PhoneNo = "0901000026",
+            CarNo = "30A-26001",
+            VIN = "VIN26000000000001",
+            MemberStatus = LoyaltyConst.MemberStatus.Approve,
+            RegisStatus = LoyaltyConst.RegisStatus.Finish,
+            CardTypeUse = "GOLD",
+            CardTypeInit = "GOLD",
+            AmountEnd = 1500000,
+            CreateDTimeUTC = d2026_10_01,
+            CreateBy = user,
+            LUDTimeUTC = d2026_10_01,
+            LUBy = user,
+            LogLUDTimeUTC = d2026_10_01,
+            LogLUBy = user
+        });
+
+        db.Set<CrdCard>().Add(new CrdCard
+        {
+            CardNo = "CD2601",
+            MemberNo = "MB2601",
+            NetworkID = net,
+            CardStatus = LoyaltyConst.CardStatus.Approve,
+            CardTypeUse = "GOLD",
+            CardTypeInit = "GOLD",
+            CardSourceCode = "NEW",
+            CreateDTimeUTC = d2026_10_01,
+            CreateBy = user,
+            LUDTimeUTC = d2026_10_01,
+            LUBy = user,
+            LogLUDTimeUTC = d2026_10_01,
+            LogLUBy = user
+        });
+
+        // 2. MB2602 (CÙNG số điện thoại với MB2601, thẻ mới hơn)
+        db.Set<CrdMember>().Add(new CrdMember
+        {
+            MemberNo = "MB2602",
+            NetworkID = net,
+            OrgID = org,
+            DLCodeRegis = "DL2601",
+            ProvinceCode = "P01",
+            DistrictCode = "D01",
+            MemberName = "Le Van Binh",
+            PhoneNo = "0901000026",
+            CarNo = "30A-26002",
+            VIN = "VIN26000000000002",
+            MemberStatus = LoyaltyConst.MemberStatus.Approve,
+            RegisStatus = LoyaltyConst.RegisStatus.Finish,
+            CardTypeUse = "PLATINUM",
+            CardTypeInit = "PLATINUM",
+            AmountEnd = 2500000,
+            CreateDTimeUTC = d2026_10_05,
+            CreateBy = user,
+            LUDTimeUTC = d2026_10_05,
+            LUBy = user,
+            LogLUDTimeUTC = d2026_10_05,
+            LogLUBy = user
+        });
+
+        db.Set<CrdCard>().Add(new CrdCard
+        {
+            CardNo = "CD2602",
+            MemberNo = "MB2602",
+            NetworkID = net,
+            CardStatus = LoyaltyConst.CardStatus.Approve,
+            CardTypeUse = "PLATINUM",
+            CardTypeInit = "PLATINUM",
+            CardSourceCode = "NEW",
+            CreateDTimeUTC = d2026_10_05,
+            CreateBy = user,
+            LUDTimeUTC = d2026_10_05,
+            LUBy = user,
+            LogLUDTimeUTC = d2026_10_05,
+            LogLUBy = user
+        });
+
+        // 3. MB2603 (thẻ CD2603 có CardStatus = PENDING)
+        db.Set<CrdMember>().Add(new CrdMember
+        {
+            MemberNo = "MB2603",
+            NetworkID = net,
+            OrgID = org,
+            DLCodeRegis = "DL2601",
+            ProvinceCode = "P01",
+            DistrictCode = "D01",
+            MemberName = "Pham Van Canh",
+            PhoneNo = "0901000027",
+            MemberStatus = LoyaltyConst.MemberStatus.Approve,
+            CreateDTimeUTC = d2026_10_06,
+            CreateBy = user,
+            LUDTimeUTC = d2026_10_06,
+            LUBy = user,
+            LogLUDTimeUTC = d2026_10_06,
+            LogLUBy = user
+        });
+
+        db.Set<CrdCard>().Add(new CrdCard
+        {
+            CardNo = "CD2603",
+            MemberNo = "MB2603",
+            NetworkID = net,
+            CardStatus = LoyaltyConst.CardStatus.Pending,
+            CardTypeUse = "SILVER",
+            CardTypeInit = "SILVER",
+            CardSourceCode = "NEW",
+            CreateDTimeUTC = d2026_10_06,
+            CreateBy = user,
+            LUDTimeUTC = d2026_10_06,
+            LUBy = user,
+            LogLUDTimeUTC = d2026_10_06,
+            LogLUBy = user
+        });
+
+        // 4. MB2604 (hội viên không có thẻ trong Crd_Card)
+        db.Set<CrdMember>().Add(new CrdMember
+        {
+            MemberNo = "MB2604",
+            NetworkID = net,
+            OrgID = org,
+            DLCodeRegis = "DL2601",
+            ProvinceCode = "P01",
+            DistrictCode = "D01",
+            MemberName = "Hoang Thi Dung",
+            PhoneNo = "0901000028",
+            MemberStatus = LoyaltyConst.MemberStatus.Approve,
+            CreateDTimeUTC = d2026_10_01,
+            CreateBy = user,
+            LUDTimeUTC = d2026_10_01,
+            LUBy = user,
+            LogLUDTimeUTC = d2026_10_01,
+            LogLUBy = user
+        });
+
+        // 5. MB2605 (hội viên có 2 thẻ APPROVE: CD2605_OLD và CD2605_NEW)
+        db.Set<CrdMember>().Add(new CrdMember
+        {
+            MemberNo = "MB2605",
+            NetworkID = net,
+            OrgID = org,
+            DLCodeRegis = "DL2601",
+            ProvinceCode = "P01",
+            DistrictCode = "D01",
+            MemberName = "Do Van Em",
+            PhoneNo = "0901000029",
+            MemberStatus = LoyaltyConst.MemberStatus.Approve,
+            CreateDTimeUTC = d2026_10_02,
+            CreateBy = user,
+            LUDTimeUTC = d2026_10_02,
+            LUBy = user,
+            LogLUDTimeUTC = d2026_10_02,
+            LogLUBy = user
+        });
+
+        db.Set<CrdCard>().Add(new CrdCard
+        {
+            CardNo = "CD2605_OLD",
+            MemberNo = "MB2605",
+            NetworkID = net,
+            CardStatus = LoyaltyConst.CardStatus.Approve,
+            CardTypeUse = "SILVER",
+            CardTypeInit = "SILVER",
+            CardSourceCode = "NEW",
+            CreateDTimeUTC = d2026_10_02,
+            CreateBy = user,
+            LUDTimeUTC = d2026_10_02,
+            LUBy = user,
+            LogLUDTimeUTC = d2026_10_02,
+            LogLUBy = user
+        });
+
+        db.Set<CrdCard>().Add(new CrdCard
+        {
+            CardNo = "CD2605_NEW",
+            MemberNo = "MB2605",
+            NetworkID = net,
+            CardStatus = LoyaltyConst.CardStatus.Approve,
+            CardTypeUse = "GOLD",
+            CardTypeInit = "GOLD",
+            CardSourceCode = "UPGRADE",
+            CreateDTimeUTC = d2026_10_07,
+            CreateBy = user,
+            LUDTimeUTC = d2026_10_07,
+            LUBy = user,
+            LogLUDTimeUTC = d2026_10_07,
+            LogLUBy = user
+        });
+
+        // 6. MB2606 (1 hội viên có 1 thẻ DIAMOND APPROVE)
+        db.Set<CrdMember>().Add(new CrdMember
+        {
+            MemberNo = "MB2606",
+            NetworkID = net,
+            OrgID = org,
+            DLCodeRegis = "DL2601",
+            ProvinceCode = "P01",
+            DistrictCode = "D01",
+            MemberName = "Nguyen Van Phuc",
+            PhoneNo = "0901000030",
+            MemberStatus = LoyaltyConst.MemberStatus.Approve,
+            CreateDTimeUTC = d2026_10_03,
+            CreateBy = user,
+            LUDTimeUTC = d2026_10_03,
+            LUBy = user,
+            LogLUDTimeUTC = d2026_10_03,
+            LogLUBy = user
+        });
+
+        db.Set<CrdCard>().Add(new CrdCard
+        {
+            CardNo = "CD2606",
+            MemberNo = "MB2606",
+            NetworkID = net,
+            CardStatus = LoyaltyConst.CardStatus.Approve,
+            CardTypeUse = "DIAMOND",
+            CardTypeInit = "DIAMOND",
+            CardSourceCode = "NEW",
+            CreateDTimeUTC = d2026_10_03,
+            CreateBy = user,
+            LUDTimeUTC = d2026_10_03,
+            LUBy = user,
+            LogLUDTimeUTC = d2026_10_03,
+            LogLUBy = user
+        });
+
+        await db.SaveChangesAsync();
+    }
+}
