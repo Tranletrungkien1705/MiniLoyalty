@@ -3,8 +3,10 @@ namespace MiniLoyalty.Controllers.Port;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
@@ -38,11 +40,33 @@ public class Crd_CardTransactionServiceTurnSearchReq
 public class Crd_CardTransactionServiceTurnControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly IWebHostEnvironment? _env;
 
-    public Crd_CardTransactionServiceTurnControllerPort(AppDbContext db)
+    public Crd_CardTransactionServiceTurnControllerPort(AppDbContext db, IWebHostEnvironment? env = null)
     {
         _db = db;
+        _env = env;
     }
+
+    /// <summary>
+    /// Từ điển 13 cột xuất Excel — port 1:1 DicColums() (gate Crd_CardTransactionServiceTurnController.cs:352-370).
+    /// </summary>
+    private static readonly Dictionary<string, string> DicColNames = new()
+    {
+        { "STT", "STT" },
+        { "DLCode", "Mã đại lý" },
+        { "DLCPName", "Tên đại lý" },
+        { "AutoId", "Mã giao dịch" },
+        { "CreateDate", "Thời gian giao dịch" },
+        { "MemberNo", "Mã hội viên" },
+        { "CardNo", "Mã kỳ xét hạng" },
+        { "CardTypeUse", "Hạng sử dụng" },
+        { "RefNo", "Số tham chiếu" },
+        { "AmountAvailPrevious", "Điểm trước tiêu" },
+        { "AmountChTotal", "Điểm tiêu trong lượt dịch vụ" },
+        { "Amount", "Tổng tiền KH" },
+        { "QtyVisitChTotal", "Số lượt DV" },
+    };
 
     /// <summary>
     /// Port 1:1 Crd_CardTransactionServiceTurnController.Search (#017).
@@ -61,27 +85,125 @@ public class Crd_CardTransactionServiceTurnControllerPort : ControllerBase
     /// ĐẶC ĐIỂM NGHIỆP VỤ 1:1:
     ///   - Gate nhận các tham số: DLCode, CreateDTimeUTCFrom, CreateDTimeUTCTo, AmountAvailPreviousFrom,
     ///     AmountAvailPreviousTo, IsAbleToUsePoint, IsAbleToUsePointNotUse, IsNotAbleToUsePoint (+ Ft_RecordCount).
-    ///   - Chuẩn hoá ngày tháng qua StdDTimeBeginDay/StdDTimeEndDay kết hợp StdDTimeUTC (AddHours(-7)).
-    ///   - Phân quyền đại lý: lấy DLCPCode của user từ header hoặc body; nếu != "HTV" thì lọc cct.DLCode = DLCPCode (Report.cs:12820-12826).
-    ///   - Biz lọc cố định CreateDTimeUTC >= '2023-06-30 17:00:00' (Report.cs:12853).
-    ///   - Truy vấn 3 bước nguồn:
-    ///     (a) Filter_Draft: select distinct cct.RefNo từ Crd_DealSerRO cdsro INNER JOIN Crd_CardTransaction cct (SERVICETURN)
-    ///         kèm điều kiện Where, phân trang theo RecordStart="0" và Ft_RecordCount (mặc định 123456000 từ BaseController).
-    ///     (b) SERVICETURN: INNER JOIN Crd_DealSerRODtl (ExpenseType='ROREPAIR') và INNER JOIN Mst_DealerCP (ĐL không có trong Mst_DealerCP bị loại).
-    ///     (c) POINTUSE: LEFT JOIN theo dòng (không GroupBy/Sum: nhiều dòng POINTUSE cùng RefNo => nhân dòng).
-    ///   - Lọc theo Ft_FilterClause (AmountAvailPreviousFrom/To, IsAbleToUsePoint, IsAbleToUsePointNotUse, IsNotAbleToUsePoint).
+    ///   - Sử dụng chung hàm truy vấn QueryDataAsync với action Export.
     ///   - Sắp xếp CreateDTimeUTC asc, đánh số STT = 1..N, định dạng CreateDate = yyyy-MM-dd giờ VN (+7h).
     ///   - Phản hồi: khi danh sách rỗng, Lst_Crd_CardTransactionServiceTurn trả về null (gate :96-105).
     /// </summary>
     [HttpPost("search")]
     public async Task<IActionResult> Search([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_CardTransactionServiceTurnSearchReq? req)
     {
+        var ordered = await QueryDataAsync(req);
+
+        // 9. Phản hồi: khi danh sách rỗng, Lst_Crd_CardTransactionServiceTurn trả về null (gate :96-105)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Lst_Crd_CardTransactionServiceTurn = ordered.Count > 0 ? ordered : null
+            }
+        });
+    }
+
+    /// <summary>
+    /// Port 1:1 Crd_CardTransactionServiceTurnController.Export (#018).
+    /// Chuỗi gọi nguồn:
+    ///   - Gate:     13.ClientGate/V10/idn.Loyalty.WebAPI/Controllers/Crd_CardTransactionServiceTurnController.cs:122-230 (Export)
+    ///   - Filter:   Crd_CardTransactionServiceTurnController.cs:234-261 (strWhereClause_Crd_CardTransactionServiceTurn),
+    ///               :265-348 (strFilterClause_Crd_CardTransactionServiceTurn)
+    ///   - Service:  13.ClientGate/V10/idn.Loyalty.ClientService/Services/Loyalty/Crd_CardTransactionServiceTurnService.cs
+    ///               (WA_Crd_CardTransactionServiceTurn_Get)
+    ///   - API:      11.BackEnd/V10/idn.Loyalty.Biz.Web/Controllers/CrdCardTransactionServiceTurnController.cs:20-87
+    ///               (WA_Crd_CardTransactionServiceTurn_Get)
+    ///   - Biz LIVE: 11.BackEnd/V10/idn.Loyalty.Biz/Report.cs:12527-12632 (WAS_Crd_CardTransactionServiceTurn_Get),
+    ///               :12633-12776 (Crd_CardTransactionServiceTurn_Get),
+    ///               :12777-13010 (Crd_CardTransactionServiceTurn_GetX)
+    ///
+    /// ĐẶC ĐIỂM NGHIỆP VỤ 1:1:
+    ///   - Gate nhận các tham số: DLCode, CreateDTimeUTCFrom, CreateDTimeUTCTo, AmountAvailPreviousFrom,
+    ///     AmountAvailPreviousTo, IsAbleToUsePoint, IsAbleToUsePointNotUse, IsNotAbleToUsePoint (+ Ft_RecordCount, DLCPCode).
+    ///   - Sử dụng chung hàm truy vấn QueryDataAsync với action Search (không viết lại truy vấn).
+    ///   - Khi danh sách sau khi lọc rỗng hoặc null: ném ServiceException("Không có dữ liệu") (gate :209)
+    ///     -> trả về Fail 400 kèm mã lỗi "Crd_CardTransactionServiceTurn_Export" và Message "Không có dữ liệu".
+    ///   - Làm tròn tiền: duyệt từng dòng dr["Amount"] = TUtils.CUtils.MyRoundVND(Convert.ToDouble(dr["Amount"])) (gate :197-201).
+    ///   - Sinh đường dẫn file: GenExcelExportFilePath("Crd_CardTransactionServiceTurn", ref url) (gate :189).
+    ///   - Xuất file Excel: ExcelExport.ExportToExcelFromList(lst, dicColNames, filePath, "Báo cáo lượt dịch vụ") (gate :205)
+    ///     với 13 cột theo đúng DicColums() (gate :352-370).
+    ///   - Trả về thành công: { Success = true, Data = { Url = GetRequestBaseAddress() + url } } (gate :212-216).
+    /// </summary>
+    [HttpPost("export")]
+    public async Task<IActionResult> Export([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_CardTransactionServiceTurnSearchReq? req)
+    {
+        var items = await QueryDataAsync(req);
+
+        // Gate :191-210: nếu danh sách sau lọc rỗng hoặc null -> ném ServiceException("Không có dữ liệu")
+        if (items == null || items.Count == 0)
+        {
+            return PortResult.Fail("Crd_CardTransactionServiceTurn_Export", "Message", "Không có dữ liệu");
+        }
+
+        // Gate :197-201: dr["Amount"] = TUtils.CUtils.MyRoundVND(Convert.ToDouble(dr["Amount"]))
+        var exportList = items.Select(x => new Crd_CardTransactionServiceTurn
+        {
+            STT = x.STT,
+            DLCode = x.DLCode,
+            DLCPName = x.DLCPName,
+            AutoId = x.AutoId,
+            CreateDate = x.CreateDate,
+            MemberNo = x.MemberNo,
+            CardNo = x.CardNo,
+            CardTypeUse = x.CardTypeUse,
+            RefNo = x.RefNo,
+            AmountAvailPrevious = x.AmountAvailPrevious,
+            AmountChTotal = x.AmountChTotal,
+            Amount = x.Amount.HasValue ? Math.Round(x.Amount.Value, MidpointRounding.AwayFromZero) : null,
+            QtyVisitChTotal = x.QtyVisitChTotal,
+            CreateDTimeUTC = x.CreateDTimeUTC
+        }).ToList();
+
+        // Tạo thư mục và đường dẫn file Excel xuất: GenExcelExportFilePath (gate :189)
+        var webRoot = _env?.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = _env != null ? Path.Combine(_env.ContentRootPath, "wwwroot") : Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+        }
+
+        try
+        {
+            var (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Crd_CardTransactionServiceTurn");
+
+            // Xuất file Excel: ExcelExport.ExportToExcelFromList(lst, dicColNames, filePath, "Báo cáo lượt dịch vụ") (gate :205)
+            PortExcel.ExportToExcelFromList(exportList, DicColNames, physicalPath, "Báo cáo lượt dịch vụ");
+
+            // Trả về { Success = true, Data = { Url = GetRequestBaseAddress() + url } } (gate :212-216)
+            return Ok(new
+            {
+                Success = true,
+                Data = new
+                {
+                    Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            // Bọc try/catch riêng cho phần xuất Excel, trả lỗi Fail đúng tên action (bài học A.2, gate :219-223)
+            return PortResult.Fail("Crd_CardTransactionServiceTurn_Export", "Exception", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Hàm dùng chung truy vấn dữ liệu cho Search (#017) và Export (#018) theo chuỗi logic nghiệp vụ của nguồn
+    /// (Crd_CardTransactionServiceTurnController.cs:234-348 và Report.cs:12527-13010).
+    /// </summary>
+    private async Task<List<Crd_CardTransactionServiceTurn>> QueryDataAsync(Crd_CardTransactionServiceTurnSearchReq? req)
+    {
         var r = req ?? new Crd_CardTransactionServiceTurnSearchReq();
 
         // 1. Phân quyền đại lý người dùng (drAbilityOfUser, Report.cs:12814-12826)
         // Nguồn lấy DLCPCode của user: nếu có và != "HTV" thì cct.DLCode = DLCPCode. Mặc định "HTV" (không lọc).
         string userDLCPCode = "HTV";
-        if (Request.Headers.TryGetValue("DLCPCode", out var hdrVal) && !string.IsNullOrWhiteSpace(hdrVal))
+        if (Request?.Headers != null && Request.Headers.TryGetValue("DLCPCode", out var hdrVal) && !string.IsNullOrWhiteSpace(hdrVal))
         {
             userDLCPCode = hdrVal.ToString().Trim();
         }
@@ -158,14 +280,7 @@ public class Crd_CardTransactionServiceTurnControllerPort : ControllerBase
 
         if (distinctRefNos.Count == 0)
         {
-            return Ok(new
-            {
-                Success = true,
-                Data = new
-                {
-                    Lst_Crd_CardTransactionServiceTurn = (List<Crd_CardTransactionServiceTurn>?)null
-                }
-            });
+            return new List<Crd_CardTransactionServiceTurn>();
         }
 
         // 5. Bước 2: SERVICETURN (Report.cs:12886-12902)
@@ -196,14 +311,7 @@ public class Crd_CardTransactionServiceTurnControllerPort : ControllerBase
 
         if (serviceTurns.Count == 0)
         {
-            return Ok(new
-            {
-                Success = true,
-                Data = new
-                {
-                    Lst_Crd_CardTransactionServiceTurn = (List<Crd_CardTransactionServiceTurn>?)null
-                }
-            });
+            return new List<Crd_CardTransactionServiceTurn>();
         }
 
         // 6. Bước 3: POINTUSE & JOIN (Report.cs:12905-12935)
@@ -274,15 +382,7 @@ public class Crd_CardTransactionServiceTurnControllerPort : ControllerBase
             }
         }
 
-        // 9. Phản hồi: khi danh sách rỗng, Lst_Crd_CardTransactionServiceTurn trả về null (gate :96-105)
-        return Ok(new
-        {
-            Success = true,
-            Data = new
-            {
-                Lst_Crd_CardTransactionServiceTurn = ordered.Count > 0 ? ordered : null
-            }
-        });
+        return ordered;
     }
 
     /// <summary>

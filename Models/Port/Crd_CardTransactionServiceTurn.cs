@@ -7,10 +7,10 @@ using MiniLoyalty.Data;
 namespace MiniLoyalty.Models.Port;
 
 // ===========================================================================================
-// PORT 1:1 từ dự án nguồn 2022.7.Loyalty — Crd_CardTransactionServiceTurn (#017).
+// PORT 1:1 từ dự án nguồn 2022.7.Loyalty — Crd_CardTransactionServiceTurn (#017 Search & #018 Export).
 //
 // Nguồn tra cứu (chỉ đọc):
-//   - Gate:     13.ClientGate/V10/idn.Loyalty.WebAPI/Controllers/Crd_CardTransactionServiceTurnController.cs:33-118
+//   - Gate:     13.ClientGate/V10/idn.Loyalty.WebAPI/Controllers/Crd_CardTransactionServiceTurnController.cs:33-118 (Search), :122-230 (Export)
 //   - API:      11.BackEnd/V10/idn.Loyalty.Biz.Web/Controllers/CrdCardTransactionServiceTurnController.cs:20-87
 //   - Biz LIVE: 11.BackEnd/V10/idn.Loyalty.Biz/Report.cs:12527-12776 (WAS_Crd_CardTransactionServiceTurn_Get,
 //               Crd_CardTransactionServiceTurn_Get, Crd_CardTransactionServiceTurn_GetX)
