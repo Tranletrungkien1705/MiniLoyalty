@@ -169,6 +169,147 @@ public class Crd_MemberVoucherTransactionControllerPort : ControllerBase
             }
         });
     }
+
+    /// <summary>
+    /// Báo cáo giao dịch voucher của hội viên.
+    /// Nguồn: Crd_MemberVoucherTransactionController.cs:135-258 (Report).
+    /// </summary>
+    [HttpPost("report")]
+    public async Task<IActionResult> Report([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_MemberVoucherTransactionReportReq? req)
+    {
+        // 1. Chuẩn hoá tham số đầu vào: StdParam cho DLCode, DealPointType, RefNo, VoucherNo; StdDTime cho CreateDTimeUTCFrom, CreateDTimeUTCTo
+        // Nguồn: Crd_MemberVoucherTransactionController.cs:159-164
+        var strDLCode = string.IsNullOrWhiteSpace(req?.DLCode) ? null : req.DLCode.Trim().ToUpperInvariant();
+        var strDealPointType = string.IsNullOrWhiteSpace(req?.DealPointType) ? null : req.DealPointType.Trim();
+        var strRefNo = string.IsNullOrWhiteSpace(req?.RefNo) ? null : req.RefNo.Trim();
+        var strVoucherNo = string.IsNullOrWhiteSpace(req?.VoucherNo) ? null : req.VoucherNo.Trim();
+        var strCreateDTimeUTCFrom = string.IsNullOrWhiteSpace(req?.CreateDTimeUTCFrom) ? null : req.CreateDTimeUTCFrom.Trim();
+        var strCreateDTimeUTCTo = string.IsNullOrWhiteSpace(req?.CreateDTimeUTCTo) ? null : req.CreateDTimeUTCTo.Trim();
+
+        // 2. Guard validation bắt buộc (Crd_MemberVoucherTransactionController.cs:166-173):
+        // CreateDTimeUTCFrom rỗng -> ném ServiceException("invalid_CreateDTimeUTCFrom", "invalid_CreateDTimeUTCFrom") (:166-169)
+        if (string.IsNullOrEmpty(strCreateDTimeUTCFrom))
+        {
+            return PortResult.Fail("invalid_CreateDTimeUTCFrom", "Check.CreateDTimeUTCFrom", req?.CreateDTimeUTCFrom);
+        }
+
+        // CreateDTimeUTCTo rỗng -> ném ServiceException("invalid_CreateDTimeUTCTo", "invalid_CreateDTimeUTCTo") (:170-173)
+        if (string.IsNullOrEmpty(strCreateDTimeUTCTo))
+        {
+            return PortResult.Fail("invalid_CreateDTimeUTCTo", "Check.CreateDTimeUTCTo", req?.CreateDTimeUTCTo);
+        }
+
+        // 3. Phân trang: chống tràn int và xử lý âm theo bài học A.12 (Crd_MemberVoucherTransactionController.cs:183-184, Transaction.cs:4897-4898)
+        var pageIndex = req?.Ft_PageIndex ?? 0;
+        var pageSize = req?.Ft_PageSize ?? 10;
+        if (pageIndex < 0 || pageSize <= 0)
+        {
+            return Ok(new
+            {
+                Success = true,
+                Data = new
+                {
+                    DataList = (object?)null
+                }
+            });
+        }
+
+        // 4. Truy vấn kết hợp: Crd_MemberVoucherTransaction mvt left join Crd_Member cm left join RptPE_MemberVoucherDeCreaseInst rp
+        // Nguồn draft: Transaction.cs:4919-4921, 4976-4981
+        var baseQuery = from mvt in _db.Set<Crd_MemberVoucherTransaction>()
+                        join cm in _db.Set<CrdMember>() on mvt.MemberNo equals cm.MemberNo into cmGroup
+                        from cm in cmGroup.DefaultIfEmpty()
+                        join rp in _db.Set<RptPE_MemberVoucherDeCreaseInst>() on mvt.AutoId.ToString() equals rp.RefNoDC into rpGroup
+                        from rp in rpGroup.DefaultIfEmpty()
+                        select new { mvt, cm, rp };
+
+        // 5. Bộ lọc theo strWhereClause_Crd_MemberVoucherTransaction_Report (Crd_MemberVoucherTransactionController.cs:434-472):
+        // DLCode: toán tử '=' (:443)
+        if (!string.IsNullOrEmpty(strDLCode))
+        {
+            baseQuery = baseQuery.Where(x => EF.Functions.Like((x.mvt.DLCode ?? "").ToLower(), PortQuery.Equal(strDLCode), PortQuery.Esc));
+        }
+
+        // DealPointType: toán tử 'in', tách chuỗi theo dấu phẩy (:447-453)
+        if (!string.IsNullOrEmpty(strDealPointType))
+        {
+            var dealTypes = strDealPointType.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(s => s.ToLowerInvariant())
+                .ToList();
+            baseQuery = baseQuery.Where(x => dealTypes.Contains((x.mvt.DealPointType ?? "").ToLower()));
+        }
+
+        // RefNo: toán tử '=' (:456)
+        if (!string.IsNullOrEmpty(strRefNo))
+        {
+            baseQuery = baseQuery.Where(x => EF.Functions.Like((x.mvt.RefNo ?? "").ToLower(), PortQuery.Equal(strRefNo), PortQuery.Esc));
+        }
+
+        // VoucherNo: toán tử '=' trên bảng RptPE_MemberVoucherDeCreaseInst.VoucherNo (:460)
+        if (!string.IsNullOrEmpty(strVoucherNo))
+        {
+            baseQuery = baseQuery.Where(x => x.rp != null && EF.Functions.Like((x.rp.VoucherNo ?? "").ToLower(), PortQuery.Equal(strVoucherNo), PortQuery.Esc));
+        }
+
+        // CreateDTimeUTCFrom: toán tử '>=' (:464)
+        if (DateTime.TryParse(strCreateDTimeUTCFrom, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dFrom)
+            || DateTime.TryParse(strCreateDTimeUTCFrom, out dFrom))
+        {
+            baseQuery = baseQuery.Where(x => x.mvt.CreateDTimeUTC >= dFrom);
+        }
+
+        // CreateDTimeUTCTo: toán tử '<=' (:468)
+        if (DateTime.TryParse(strCreateDTimeUTCTo, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dTo)
+            || DateTime.TryParse(strCreateDTimeUTCTo, out dTo))
+        {
+            baseQuery = baseQuery.Where(x => x.mvt.CreateDTimeUTC <= dTo);
+        }
+
+        // 6. Sắp xếp: order by cast(mvt.AutoId as bigint) asc (Transaction.cs:4924-4925, 4983-4984)
+        var orderedQuery = baseQuery.OrderBy(x => x.mvt.AutoId);
+
+        // 7. Phân trang: skip & take (Transaction.cs:4938-4939)
+        long recordStart = (long)pageIndex * pageSize;
+        var pagedQuery = orderedQuery
+            .Skip((int)Math.Min(recordStart, int.MaxValue))
+            .Take((int)Math.Min(pageSize, int.MaxValue));
+
+        var rows = await pagedQuery.AsNoTracking().ToListAsync();
+
+        if (rows.Count == 0)
+        {
+            return Ok(new
+            {
+                Success = true,
+                Data = new
+                {
+                    DataList = (object?)null
+                }
+            });
+        }
+
+        // 8. Ánh xạ các trường NotMapped và trả về kết quả (Transaction.cs:4958-4974)
+        var resultList = new List<Crd_MemberVoucherTransaction>(rows.Count);
+        long seq = recordStart;
+        foreach (var row in rows)
+        {
+            var item = row.mvt;
+            item.MyIdxSeq = seq++;
+            item.cm_MemberName = row.cm?.MemberName;
+            item.cm_CarNo = row.cm?.CarNo;
+            item.ic_VoucherNo = row.rp?.VoucherNo;
+            resultList.Add(item);
+        }
+
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                DataList = resultList
+            }
+        });
+    }
 }
 
 /// <summary>
@@ -183,4 +324,20 @@ public class Crd_MemberVoucherTransactionSearchReq
     public string? PointChTotalTo { get; set; }                    // Điểm giao dịch đến (:35)
     public string? DealPointType { get; set; }                     // Loại giao dịch (:36)
     public string? MemberNo { get; set; }                          // Mã hội viên (:37)
+}
+
+/// <summary>
+/// DTO tham số báo cáo giao dịch voucher hội viên.
+/// Nguồn tham số gate: Crd_MemberVoucherTransactionController.cs:135-144.
+/// </summary>
+public class Crd_MemberVoucherTransactionReportReq
+{
+    public string? DLCode { get; set; }                            // Đại lý giao dịch (:136)
+    public string? DealPointType { get; set; }                     // Loại giao dịch (:137)
+    public string? RefNo { get; set; }                             // Số Giao dịch/Voucher (:138)
+    public string? VoucherNo { get; set; }                         // Số Voucher sử dụng (:139)
+    public string? CreateDTimeUTCFrom { get; set; }                // Thời gian giao dịch UTC từ (:140)
+    public string? CreateDTimeUTCTo { get; set; }                  // Thời gian giao dịch UTC đến (:141)
+    public int Ft_PageIndex { get; set; } = 0;                     // Trang hiện tại (:142)
+    public int Ft_PageSize { get; set; } = 10;                     // Số bản ghi/trang (:143)
 }
