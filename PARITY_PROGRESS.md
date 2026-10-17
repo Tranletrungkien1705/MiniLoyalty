@@ -4,7 +4,7 @@ Nguồn mẫu số: `D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.Web
 
 **Mẫu số (N)**: 337
 
-**Tiến độ hiện tại**: 276/337 (81.90%)
+**Tiến độ hiện tại**: 280/337 (83.09%)
 
 Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã có` (đã port từ trước, có bằng chứng) · `Bỏ` (scaffold/không nghiệp vụ, ghi lý do) · `Cần xem tay`.
 
@@ -276,10 +276,10 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 264 | Prm_VoucherNewCarController/Search | Đã làm | b6c2312 |
 | 265 | Prm_VoucherNewCarController/GetByPrmVoucherCode | Chưa làm | - |
 | 266 | Prm_VoucherNewCarController/Save | Đã làm | 9bc369d |
-| 267 | Prm_VoucherNewCarController/Approve | Chưa làm | - |
-| 268 | Prm_VoucherNewCarController/Finish | Chưa làm | - |
-| 269 | Prm_VoucherNewCarController/Delete | Chưa làm | - |
-| 270 | Prm_VoucherNewCarController/Cancel | Chưa làm | - |
+| 267 | Prm_VoucherNewCarController/Approve | Đã làm | 9bc369d |
+| 268 | Prm_VoucherNewCarController/Finish | Đã làm | 9bc369d |
+| 269 | Prm_VoucherNewCarController/Delete | Đã làm | 9bc369d |
+| 270 | Prm_VoucherNewCarController/Cancel | Đã làm | 9bc369d |
 | 271 | Prm_VoucherNewCarController/CalcPrm | Chưa làm | - |
 | 272 | Prm_VoucherNewCarController/Export | Chưa làm | - |
 | 273 | ReqMemberRegisterController/Search | Chưa làm | - |
