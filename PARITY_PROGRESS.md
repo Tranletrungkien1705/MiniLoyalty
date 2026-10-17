@@ -46,7 +46,7 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 34 | Crd_MemberChangeInfoController/Delete | Đã làm | ea0e47a |
 | 35 | Crd_MemberChangeInfoController/Reject | Đã làm | e9be730 |
 | 36 | Crd_MemberChangeInfoController/Approve | Đã làm | 017c05b |
-| 37 | Crd_MemberChangeInfoController/Finish | Cần xem tay | Phu thuoc Crd_Member_UpdateX_New20230104 + DMS CarSv |
+| 37 | Crd_MemberChangeInfoController/Finish | Chưa làm |  |
 | 38 | Crd_MemberChangeInfoController/Export | Đã làm | 3da4949 |
 | 39 | Crd_MemberController/Search | Đã làm | febb049 |
 | 40 | Crd_MemberController/GetByMemberNo | Đã làm | 9569b01 |
