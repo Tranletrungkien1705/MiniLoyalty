@@ -96,6 +96,14 @@ public class Crd_MemberGetByPhoneNoReq
     public string? PhoneNo { get; set; }
 }
 
+/// <summary>
+/// Tham số request lấy thông tin đăng ký hội viên theo mã hội viên — Crd_MemberController.GetRegisterByMemberNo (Gate Crd_MemberController.cs:571).
+/// </summary>
+public class Crd_MemberGetRegisterByMemberNoReq
+{
+    public string? MemberNo { get; set; }
+}
+
 
 /// <summary>
 /// Model từng dòng dữ liệu hội viên trả về ở DataList — port 1:1 từ model Crd_Member.cs (1-122) và select cuối (Card.cs:20400-20549).
@@ -880,6 +888,53 @@ public class Crd_MemberControllerPort : ControllerBase
             FlagExceptionCard = member.FlagExceptionCard,
             AmountCardRank = member.AmountCardRank
         };
+
+        return Ok(new { Success = true, Data = new { Crd_Member = item } });
+    }
+
+    /// <summary>
+    /// Lấy thông tin đăng ký của một hội viên theo mã hội viên — port 1:1 từ Crd_MemberController.GetRegisterByMemberNo (#044).
+    /// Nguồn Gate: Crd_MemberController.cs:571-657 (GetRegisterByMemberNo)
+    /// Nguồn hàm lọc: Crd_MemberController.cs:1494-1558 (strWhereClause_Crd_Member)
+    /// Nguồn API: CrdMemberController.cs:97-166 (WA_Crd_Member_GetRegister)
+    /// Nguồn Biz: Card.cs:19760-19858 (WAS_Crd_Member_GetRegister) -> Card.cs:19860-20012 (Crd_Member_GetRegister) -> Card.cs:20303-20600 (Crd_Member_GetRegisterX_New20231019 - bản LIVE)
+    /// </summary>
+    [HttpPost("getregisterbymemberno")]
+    public async Task<IActionResult> GetRegisterByMemberNo([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_MemberGetRegisterByMemberNoReq? req)
+    {
+        // Gate :594: if (MemberNo != null && !TUtils.CUtils.IsNullOrEmpty(MemberNo))
+        // Nếu req null hoặc MemberNo rỗng: trả ngay Data = { Crd_Member = null } (Gate :594, :641-644)
+        if (req == null || string.IsNullOrWhiteSpace(req.MemberNo))
+        {
+            return Ok(new { Success = true, Data = new { Crd_Member = (object?)null } });
+        }
+
+        // Truy vấn Crd_Member inner join Crd_Card cc on cmb.MemberNo = cc.MemberNo and cc.CardSourceCode = 'NEW' (Card.cs:20528-20530)
+        // Lọc duy nhất cmb.MemberNo = req.MemberNo bằng toán tử '=' (Gate :1500-1503, Biz :20367-20368)
+        // KHÔNG lọc MemberStatus (khác GetByMemberNo). Sắp xếp cmb.MemberNo asc, lấy top 1 (Biz :20335-20336, :20369, :20377-20384)
+        var patMemberNo = PortQuery.Equal(req.MemberNo);
+
+        var query = from cm in _db.Set<CrdMember>().AsNoTracking()
+                    join cc in _db.Set<CrdCard>().AsNoTracking() on cm.MemberNo equals cc.MemberNo
+                    where cc.CardSourceCode == "NEW"
+                       && EF.Functions.Like((cm.MemberNo ?? "").ToLower(), patMemberNo, PortQuery.Esc)
+                    orderby cm.MemberNo ascending
+                    select new CrdMemberCardPair(cm, cc);
+
+        var pair = await query.FirstOrDefaultAsync();
+        if (pair == null)
+        {
+            // Không tìm thấy hội viên hoặc hội viên không có thẻ NEW (bị inner join loại bỏ) -> Crd_Member = null
+            return Ok(new { Success = true, Data = new { Crd_Member = (object?)null } });
+        }
+
+        // Tái sử dụng BuildMemberItemsAsync để lookup danh mục và format RegisFinishDTimeUTC (utcOffset +7) (Card.cs:20400-20549, Gate :628-632)
+        var items = await BuildMemberItemsAsync(new List<CrdMemberCardPair> { pair }, 0);
+        var item = items[0];
+
+        // Chuẩn hóa MemberFilePath: StdStr, nếu không rỗng thì format api/file/{filepath.Replace("\\", "/")}, nếu rỗng thì null (Gate :634-635)
+        var filepath = item.MemberFilePath?.Trim();
+        item.MemberFilePath = string.IsNullOrEmpty(filepath) ? null : PortExcel.GetRequestBaseAddress(Request) + $"api/file/{filepath.Replace("\\", "/")}";
 
         return Ok(new { Success = true, Data = new { Crd_Member = item } });
     }
