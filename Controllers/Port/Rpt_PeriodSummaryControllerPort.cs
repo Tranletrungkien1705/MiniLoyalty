@@ -100,4 +100,64 @@ public class Rpt_PeriodSummaryControllerPort : ControllerBase
             }
         });
     }
+
+    /// <summary>
+    /// Port 1:1 action SearchDetail — tìm kiếm chi tiết báo cáo đối soát tổng hợp kỳ Rpt_PeriodSummaryDtl (#285).
+    /// Nguồn tra cứu (chỉ đọc):
+    ///   - Gate:     13.ClientGate/V10/idn.Loyalty.WebAPI/Controllers/Rpt_PeriodSummaryController.cs:136-210 (SearchDetail)
+    ///   - Filter:   Rpt_PeriodSummaryController.cs:631-648 (strWhereClause_Rpt_PeriodSummaryDtl)
+    ///   - Service:  13.ClientGate/V10/idn.Loyalty.ClientService/Services/Loyalty/Rpt_PeriodSummaryService.cs:21-39 (WA_Rpt_PeriodSummaryDtl_Get)
+    ///   - API:      11.BackEnd/V10/idn.Loyalty.Biz.Web/Controllers/ReportController.cs:585-635 (WA_Rpt_PeriodSummaryDtl_Get)
+    ///   - Biz LIVE: 11.BackEnd/V10/idn.Loyalty.Biz/Report.cs:4945-5372 (WAS_Rpt_PeriodSummaryDtl_Get, Rpt_PeriodSummaryDtl_Get, Rpt_PeriodSummaryDtl_GetX)
+    ///
+    /// ĐẶC ĐIỂM NGHIỆP VỤ:
+    ///   - Gate SearchDetail nhận: DLCPCode, PeriodMonth.
+    ///   - strWhereClause_Rpt_PeriodSummaryDtl (:631-648) chỉ lọc:
+    ///       + DLCode (map từ DLCPCode tại gate :160) với toán tử '=' (nguyên chuỗi) cho cột DLCPCode.
+    ///       + PeriodMonth với toán tử '=' (nguyên chuỗi) cho cột PeriodMonth.
+    ///       + KHÔNG lọc KeyWord, FlagActive hay OrgID.
+    ///   - Sắp xếp: order by rpsd.LogLUDTimeUTC desc (Report.cs:5254, :5317).
+    ///   - Công thức tính HCol: HCol = (rpsd.HCol ?? 0) + (rpsd.LCol ?? 0) (Report.cs:5302).
+    ///   - Phản hồi: khi không có bản ghi nào, Lst_Rpt_PeriodSummaryDtl trả về null (gate :163, :187-190, :193-197).
+    /// </summary>
+    [HttpPost("searchdetail")]
+    public async Task<IActionResult> SearchDetail([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Rpt_PeriodSummarySearchReq? req)
+    {
+        var query = _db.Set<Rpt_PeriodSummaryDtl>().AsNoTracking().AsQueryable();
+
+        // 1. Lọc DLCPCode (hoặc DLCode) với toán tử '=' (nguyên chuỗi, không phân biệt hoa thường) — gate :636-639
+        string? dlCode = req?.DLCPCode;
+        if (!string.IsNullOrWhiteSpace(dlCode))
+        {
+            var p_dlCode = PortQuery.Equal(dlCode);
+            query = query.Where(x => EF.Functions.Like(x.DLCPCode.ToLower(), p_dlCode, PortQuery.Esc));
+        }
+
+        // 2. Lọc PeriodMonth với toán tử '=' (nguyên chuỗi, không phân biệt hoa thường) — gate :641-645
+        if (!string.IsNullOrWhiteSpace(req?.PeriodMonth))
+        {
+            var p_month = PortQuery.Equal(req.PeriodMonth);
+            query = query.Where(x => EF.Functions.Like(x.PeriodMonth.ToLower(), p_month, PortQuery.Esc));
+        }
+
+        // 3. Sắp xếp: order by rpsd.LogLUDTimeUTC desc (Report.cs:5254, :5317)
+        var list = await query.OrderByDescending(x => x.LogLUDTimeUTC).ToListAsync();
+
+        // 4. Tính toán nghiệp vụ cột HCol: (rpsd.HCol + rpsd.LCol) — Report.cs:5302
+        foreach (var item in list)
+        {
+            item.HCol = (item.HCol ?? 0) + (item.LCol ?? 0);
+        }
+
+        // 5. Định dạng trả về: Lst_Rpt_PeriodSummaryDtl là null khi rỗng (gate :163, :187-190, :193-197)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Lst_Rpt_PeriodSummaryDtl = list.Count > 0 ? list : null
+            }
+        });
+    }
 }
+
