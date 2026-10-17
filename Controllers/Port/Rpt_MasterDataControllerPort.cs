@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
@@ -12,11 +14,14 @@ using MiniLoyalty.Models.Port;
 namespace MiniLoyalty.Controllers.Port;
 
 // ============================================================================================
-// PORT 1:1 — Rpt_MasterDataController/Search (#282)
+// PORT 1:1 — Rpt_MasterDataController/Search (#282) & ExportExcel (#283)
 //
 // Nguồn tầng Gate:
 //   - D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Rpt_MasterDataController.cs:29-131 (Search)
+//   - D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Rpt_MasterDataController.cs:135-248 (ExportExcel)
 //   - D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Rpt_MasterDataController.cs:252-269 (strWhereClause_Rpt_MasterData)
+//   - D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Rpt_MasterDataController.cs:273-321 (DicColums - 43 cột HTV)
+//   - D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Rpt_MasterDataController.cs:322-359 (DicColumsSpec - 32 cột Spec)
 // Nguồn tầng API:
 //   - D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\RptMasterDataController.cs:91-158 (WA_Rpt_MasterData_Get)
 // Nguồn tầng Biz LIVE:
@@ -43,12 +48,20 @@ namespace MiniLoyalty.Controllers.Port;
 //      - Query Rpt_MasterData: inner join Rpt_MasterDataSpec trên PeriodMonth (Report.cs:1116-1127)
 //      - Query Rpt_MasterDataSpec: inner join Rpt_MasterData trên PeriodMonth (Report.cs:1153-1164)
 //      - Lọc DLCode: nếu !string.IsNullOrEmpty(strDLCode) và strDLCode != "HTV" -> rmds.DLCPCode = strDLCode (Report.cs:915-920). Nếu strDLCode == "HTV" thì không lọc DLCPCode ở Biz.
-//   6. Trả kết quả tại Gate (Rpt_MasterDataController.cs:100-117):
+//   6. Trả kết quả tại Gate (Rpt_MasterDataController.cs:100-117) cho Search:
 //      - Nếu !string.IsNullOrEmpty(DLCPCode):
 //        * Nếu DLCPCode != "HTV" -> Data = new { Lst_Rpt_MasterDataSpec = list_Rpt_MasterDataSpec }
 //        * Nếu DLCPCode == "HTV" -> Data = null (LỖI NGUỒN GIỮ NGUYÊN: Gate bỏ sót trường hợp HTV, không gán Data, Gate :100-109)
 //      - Nếu string.IsNullOrEmpty(DLCPCode) -> Data = new { Lst_Rpt_MasterData = list_Rpt_MasterData, Lst_Rpt_MasterDataSpec = list_Rpt_MasterDataSpec }
 //      - Khi danh sách rỗng (count == 0), trường tương ứng mang giá trị null thay vì mảng rỗng [] (Gate :67-74)
+//   7. Quy tắc xuất file Excel tại Gate (Rpt_MasterDataController.cs:205-235) cho ExportExcel:
+//      - Kiểm tra danh sách rỗng (:205-210):
+//        Neu (list_Rpt_MasterData == null || list_Rpt_MasterData.Count == 0) || (list_Rpt_MasterDataSpec == null || list_Rpt_MasterDataSpec.Count == 0)
+//        -> ném ServiceException("Không có dữ liệu") -> bắt tại catch (:237-241) trả 400 PortResult.Fail("Rpt_MasterData_ExportExcel", "Message", "Không có dữ liệu").
+//      - Phân nhánh xuất Excel (:212-235):
+//        * Neu DLCPCode == "HTV": dùng DicColums() (43 cột), prefix "Rpt_MasterData", sheet "Rpt_MasterData", xuất list_Rpt_MasterData.
+//        * Nguoc lai (DLCPCode != "HTV" hoặc null/rỗng): dùng DicColumsSpec() (32 cột), prefix "Rpt_MasterDataSpec", sheet "Rpt_MasterDataSpec", xuất list_Rpt_MasterDataSpec.
+//      - Trả về Success = true, Data = { Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath }.
 // ============================================================================================
 
 /// <summary>
@@ -60,17 +73,20 @@ namespace MiniLoyalty.Controllers.Port;
 public class Rpt_MasterDataControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly IWebHostEnvironment _env;
 
-    public Rpt_MasterDataControllerPort(AppDbContext db)
+    public Rpt_MasterDataControllerPort(AppDbContext db, IWebHostEnvironment env)
     {
         _db = db;
+        _env = env;
     }
 
     /// <summary>
-    /// Port 1:1 action Search từ gate Rpt_MasterDataController.cs:29-131 (#282).
+    /// Tách logic truy vấn dữ liệu báo cáo dùng chung cho cả Search (#282) và ExportExcel (#283).
+    /// Nguồn: gate Rpt_MasterDataController.cs:40-75, :166-204 -> API RptMasterDataController.cs:91-158
+    /// -> Biz Report.cs:9937-10049 (WAS_Rpt_MasterData_Get), :10050-10201 (Rpt_MasterData_Get), :10202-10937 (Rpt_MasterData_GetX).
     /// </summary>
-    [HttpPost("search")]
-    public async Task<IActionResult> Search([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Rpt_MasterDataSearchReq? req)
+    private async Task<(List<Rpt_MasterData>? listMaster, List<Rpt_MasterDataSpec>? listSpec, IActionResult? error)> QueryReportDataAsync(Rpt_MasterDataSearchReq? req)
     {
         // 1. Chuẩn hoá tham số đầu vào theo đúng hàm nguồn (Report.cs:10251-10255)
         var strRptDateType = StdStr(req?.RptDateType);
@@ -83,13 +99,13 @@ public class Rpt_MasterDataControllerPort : ControllerBase
         // Guard 1: RptDateType rỗng -> Rpt_MasterData_Get_InvalidRptDateType (Report.cs:10433)
         if (string.IsNullOrEmpty(strRptDateType))
         {
-            return PortResult.Fail("Rpt_MasterData_Get_InvalidRptDateType");
+            return (null, null, PortResult.Fail("Rpt_MasterData_Get_InvalidRptDateType"));
         }
 
         // Guard 2: RptDateYear rỗng -> Rpt_MasterData_Get_InvalidRptDateYear (Report.cs:10424)
         if (string.IsNullOrEmpty(strRptDateYear))
         {
-            return PortResult.Fail("Rpt_MasterData_Get_InvalidRptDateYear");
+            return (null, null, PortResult.Fail("Rpt_MasterData_Get_InvalidRptDateYear"));
         }
 
         // Guard 3: RptDateType không thuộc ("Month", "Quarter", "Year") -> Rpt_MasterData_Get_InvalidRptDateType (Report.cs:10415)
@@ -97,7 +113,7 @@ public class Rpt_MasterDataControllerPort : ControllerBase
             && !string.Equals(strRptDateType, "Quarter", StringComparison.OrdinalIgnoreCase)
             && !string.Equals(strRptDateType, "Year", StringComparison.OrdinalIgnoreCase))
         {
-            return PortResult.Fail("Rpt_MasterData_Get_InvalidRptDateType");
+            return (null, null, PortResult.Fail("Rpt_MasterData_Get_InvalidRptDateType"));
         }
 
         // Guard 4: Nếu RptDateType == "Quarter" mà strRptDateQuarter không thuộc ("1", "2", "3", "4") -> Rpt_MasterData_Get_InvalidRptDateQuarter (Report.cs:10360)
@@ -107,7 +123,7 @@ public class Rpt_MasterDataControllerPort : ControllerBase
             {
                 if (strRptDateQuarter != "1" && strRptDateQuarter != "2" && strRptDateQuarter != "3" && strRptDateQuarter != "4")
                 {
-                    return PortResult.Fail("Rpt_MasterData_Get_InvalidRptDateQuarter");
+                    return (null, null, PortResult.Fail("Rpt_MasterData_Get_InvalidRptDateQuarter"));
                 }
             }
         }
@@ -226,7 +242,7 @@ public class Rpt_MasterDataControllerPort : ControllerBase
 
                 dtFromLocal = dtimeMonthFirst.Date;
 
-                if (string.Compare(strPrevPeriodMonth, strLastPeriodMonth, StringComparison.Ordinal) < 0)
+                if (string.Compare(strPrevPeriodMonth, strLastMonthOfYear, StringComparison.Ordinal) < 0)
                 {
                     strLastPeriodMonth = strPrevPeriodMonth;
                     dtToLocal = dtimeLastDayOfPreviousMonth.Date.AddDays(1).AddSeconds(-1);
@@ -418,7 +434,24 @@ public class Rpt_MasterDataControllerPort : ControllerBase
             }
         }
 
-        // 4. Định dạng trả kết quả Data ở Gate (Rpt_MasterDataController.cs:100-117)
+        return (list_Rpt_MasterData, list_Rpt_MasterDataSpec, null);
+    }
+
+    /// <summary>
+    /// Port 1:1 action Search từ gate Rpt_MasterDataController.cs:29-131 (#282).
+    /// </summary>
+    [HttpPost("search")]
+    public async Task<IActionResult> Search([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Rpt_MasterDataSearchReq? req)
+    {
+        var (list_Rpt_MasterData, list_Rpt_MasterDataSpec, error) = await QueryReportDataAsync(req);
+        if (error != null)
+        {
+            return error;
+        }
+
+        var strDLCode = StdParam(req?.DLCPCode);
+
+        // Định dạng trả kết quả Data ở Gate (Rpt_MasterDataController.cs:100-117)
         object? data = null;
         if (!string.IsNullOrEmpty(strDLCode))
         {
@@ -446,6 +479,171 @@ public class Rpt_MasterDataControllerPort : ControllerBase
             Success = true,
             Data = data
         });
+    }
+
+    /// <summary>
+    /// Port 1:1 action ExportExcel từ gate Rpt_MasterDataController.cs:135-248 (#283).
+    /// </summary>
+    [HttpPost("exportexcel")]
+    public async Task<IActionResult> ExportExcel([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Rpt_MasterDataSearchReq? req)
+    {
+        var (list_Rpt_MasterData, list_Rpt_MasterDataSpec, error) = await QueryReportDataAsync(req);
+        if (error != null)
+        {
+            return error;
+        }
+
+        // 1. Kiểm tra danh sách rỗng (gate Rpt_MasterDataController.cs:205-210):
+        // Nếu (list_Rpt_MasterData == null || list_Rpt_MasterData.Count == 0) || (list_Rpt_MasterDataSpec == null || list_Rpt_MasterDataSpec.Count == 0)
+        // -> ném ServiceException("Không có dữ liệu") -> bắt tại catch (:237-241) trả 400 PortResult.Fail("Rpt_MasterData_ExportExcel", "Message", "Không có dữ liệu")
+        if ((list_Rpt_MasterData == null || list_Rpt_MasterData.Count == 0)
+            || (list_Rpt_MasterDataSpec == null || list_Rpt_MasterDataSpec.Count == 0))
+        {
+            return PortResult.Fail("Rpt_MasterData_ExportExcel", "Message", "Không có dữ liệu");
+        }
+
+        // 2. Chuẩn bị đường dẫn thư mục xuất file Excel (gate :216, :228)
+        var webRoot = _env?.WebRootPath;
+        if (string.IsNullOrWhiteSpace(webRoot))
+        {
+            webRoot = _env != null
+                ? Path.Combine(_env.ContentRootPath, "wwwroot")
+                : Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+        }
+
+        var strDLCode = StdParam(req?.DLCPCode);
+        string virtualPath;
+
+        try
+        {
+            // 3. Phân nhánh xuất Excel theo DLCPCode (gate Rpt_MasterDataController.cs:212-235)
+            if (string.Equals(strDLCode, "HTV", StringComparison.OrdinalIgnoreCase))
+            {
+                // Nhánh HTV: 43 cột từ DicColums(), prefix "Rpt_MasterData", sheet "Rpt_MasterData" (gate :214-217)
+                var dicColNames = DicColums();
+                string physicalPath;
+                (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Rpt_MasterData");
+                PortExcel.ExportToExcelFromList(list_Rpt_MasterData, dicColNames, physicalPath, "Rpt_MasterData");
+            }
+            else
+            {
+                // Nhánh Đại lý khác HTV (hoặc null/rỗng): 32 cột từ DicColumsSpec(), prefix "Rpt_MasterDataSpec", sheet "Rpt_MasterDataSpec" (gate :226-229)
+                var dicColNames = DicColumsSpec();
+                string physicalPath;
+                (physicalPath, virtualPath) = PortExcel.GenExcelExportFilePath(webRoot, "Rpt_MasterDataSpec");
+                PortExcel.ExportToExcelFromList(list_Rpt_MasterDataSpec, dicColNames, physicalPath, "Rpt_MasterDataSpec");
+            }
+        }
+        catch (Exception ex)
+        {
+            // Bắt ngoại lệ nếu xuất file lỗi -> trả Fail (gate :237-241)
+            return PortResult.Fail("Rpt_MasterData_ExportExcel", "Exception", ex.Message);
+        }
+
+        // 4. Trả URL tải file với Success = true (gate Rpt_MasterDataController.cs:218-222, :230-234)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Url = PortExcel.GetRequestBaseAddress(Request) + virtualPath
+            }
+        });
+    }
+
+    /// <summary>
+    /// Từ điển 43 cột cho nhánh HTV (Rpt_MasterData) - Gate Rpt_MasterDataController.cs:273-321
+    /// </summary>
+    private static Dictionary<string, string> DicColums()
+    {
+        return new Dictionary<string, string>
+        {
+            { nameof(Rpt_MasterData.QtyRegistrationCardS), "Tổng thẻ hội viên phát hành mới trong kỳ hạng S" },
+            { nameof(Rpt_MasterData.QtyRegistrationCardG), "Tổng thẻ hội viên phát hành mới đặc cách hạng G" },
+            { nameof(Rpt_MasterData.QtyRegistrationCardP), "Tổng thẻ hội viên phát hành mới đặc cách hạng P" },
+            { nameof(Rpt_MasterData.QtyCardUp), "Tổng lượt tăng hạng trong kỳ" },
+            { nameof(Rpt_MasterData.QtyCardDown), "Tổng lượt duy trì hạng trong kỳ" },
+            { nameof(Rpt_MasterData.QtyCardKeep), "Tổng lượt xuống hạng trong kỳ" },
+            { nameof(Rpt_MasterData.QtyMemberCancel), "Tổng hội viên hủy trong kỳ" },
+            { nameof(Rpt_MasterData.QtyCardS), "Tổng thẻ hội viên lũy kế hạng S" },
+            { nameof(Rpt_MasterData.QtyCardG), "Tổng thẻ hội viên lũy kế hạng G" },
+            { nameof(Rpt_MasterData.QtyCardP), "Tổng thẻ hội viên lũy kế hạng P" },
+            { nameof(Rpt_MasterData.QtyCardExceptionG), "Tổng số hội viên lũy kế đặc cách hạng G" },
+            { nameof(Rpt_MasterData.QtyCardExceptionP), "Tổng số hội viên lũy kế đặc cách hạng P" },
+            { nameof(Rpt_MasterData.QtyServiceDMSPaymented), "Tổng lượt dịch vụ khách hàng trả tiền trong kỳ (DMS)" },
+            { nameof(Rpt_MasterData.QtyServiceDMS), "Tổng lượt dịch vụ trong kỳ(DMS)" },
+            { nameof(Rpt_MasterData.QtyCarUseServiceDMS), "Tổng số Xe làm dịch vụ trong kỳ(DMS)" },
+            { nameof(Rpt_MasterData.QtyConsumption), "Tổng lượt dịch vụ tích điểm tiêu dùng trong kỳ" },
+            { nameof(Rpt_MasterData.QtyInCrease), "Tổng lượt dịch vụ tích điểm xét hạng trong kỳ" },
+            { nameof(Rpt_MasterData.QtyServiceTurn), "Tổng lượt dịch vụ không thể tiêu điểm" },
+            { nameof(Rpt_MasterData.AmountPointInCrease), "Tổng doanh thu dịch vụ xét hạng trong kỳ" },
+            { nameof(Rpt_MasterData.AmountPointUse), "Tổng doanh thu dịch vụ tiêu dùng trong kỳ" },
+            { nameof(Rpt_MasterData.QtyPointUse), "Tổng lượt dịch vụ tiêu điểm trong kỳ" },
+            { nameof(Rpt_MasterData.QtyMemberPointUse), "Tổng hội viên tiêu điểm dịch vụ trong kỳ" },
+            { nameof(Rpt_MasterData.QtyMemberUsePromotion), "Tổng số hội viên sử dụng ưu đãi trong kỳ" },
+            { nameof(Rpt_MasterData.AmountConsumptionS), "Tổng Doanh thu (tích điểm tiêu dùng) trong kỳ hạng S" },
+            { nameof(Rpt_MasterData.AmountConsumptionG), "Tổng Doanh thu (tích điểm tiêu dùng) trong kỳ hạng G" },
+            { nameof(Rpt_MasterData.AmountConsumptionP), "Tổng Doanh thu (tích điểm tiêu dùng) trong kỳ hạng P" },
+            { nameof(Rpt_MasterData.AmountPointInCreaseS), "Tổng Doanh thu (tích điểm xét hạng) trong kỳ hạng S" },
+            { nameof(Rpt_MasterData.AmountPointInCreaseG), "Tổng Doanh thu (tích điểm xét hạng) trong kỳ hạng G" },
+            { nameof(Rpt_MasterData.AmountPointInCreaseP), "Tổng Doanh thu (tích điểm xét hạng) trong kỳ hạng P" },
+            { nameof(Rpt_MasterData.PointConsumption), "Tổng điểm tiêu dùng tích dịch vụ trong kỳ" },
+            { nameof(Rpt_MasterData.PointSales), "Tổng điểm tiêu dùng tích xe mới trong kỳ" },
+            { nameof(Rpt_MasterData.PointIntroduction), "Tổng điểm tiêu dùng tích giới thiệu mua trong kỳ" },
+            { nameof(Rpt_MasterData.PointBirthday), "Tổng điểm tiêu dùng tích sinh nhật trong kỳ" },
+            { nameof(Rpt_MasterData.PointUse), "Tổng điểm tiêu dùng tiêu trong kỳ" },
+            { nameof(Rpt_MasterData.PointExpiry), "Tổng số điểm hết hạn trong kỳ" },
+            { nameof(Rpt_MasterData.PointExpiryAll), "Tổng số điểm hết hạn lũy kế" },
+            { nameof(Rpt_MasterData.PointConsumptionAll), "Tổng điểm tiêu dùng lũy kế" },
+            { nameof(Rpt_MasterData.QtyMemberNotBack6M), "Tổng thẻ hội viên > 6 tháng chưa quay lại làm dịch vụ" },
+            { nameof(Rpt_MasterData.QtyMemberNotBack12M), "Tổng thẻ hội viên > 12 tháng chưa quay lại làm dịch vụ" },
+            { nameof(Rpt_MasterData.QtyMemberBack6M), "Tổng thẻ hội viên làm dịch vụ 6 tháng gần nhất" },
+            { nameof(Rpt_MasterData.QtyService), "Tổng lượt DV của HV 12 tháng gần nhất" },
+            { nameof(Rpt_MasterData.PointCancel), "Tổng số điểm Hủy trong kỳ" },
+            { nameof(Rpt_MasterData.PointCancelAll), "Tổng số điểm Hủy lũy kế" },
+        };
+    }
+
+    /// <summary>
+    /// Từ điển 32 cột cho nhánh Đại lý khác HTV (Rpt_MasterDataSpec) - Gate Rpt_MasterDataController.cs:322-359
+    /// </summary>
+    private static Dictionary<string, string> DicColumsSpec()
+    {
+        return new Dictionary<string, string>
+        {
+            { nameof(Rpt_MasterDataSpec.DLCPCode), "Đại lý" },
+            { nameof(Rpt_MasterDataSpec.QtyRegistrationCardS), "Tổng thẻ hội viên phát hành mới trong kỳ hạng S" },
+            { nameof(Rpt_MasterDataSpec.QtyRegistrationCardG), "Tổng thẻ hội viên phát hành mới đặc cách hạng G" },
+            { nameof(Rpt_MasterDataSpec.QtyRegistrationCardP), "Tổng thẻ hội viên phát hành mới đặc cách hạng P" },
+            { nameof(Rpt_MasterDataSpec.QtyServiceDMSPaymented), "Tổng lượt dịch vụ khách hàng trả tiền trong kỳ (DMS)" },
+            { nameof(Rpt_MasterDataSpec.QtyServiceDMS), "Tổng lượt dịch vụ trong kỳ(DMS)" },
+            { nameof(Rpt_MasterDataSpec.QtyCarUseServiceDMS), "Tổng số Xe làm dịch vụ trong kỳ(DMS)" },
+            { nameof(Rpt_MasterDataSpec.QtyConsumption), "Tổng lượt dịch vụ tích điểm tiêu dùng trong kỳ" },
+            { nameof(Rpt_MasterDataSpec.QtyInCrease), "Tổng lượt dịch vụ tích điểm xét hạng trong kỳ" },
+            { nameof(Rpt_MasterDataSpec.QtyServiceTurn), "Tổng lượt dịch vụ không thể tiêu điểm" },
+            { nameof(Rpt_MasterDataSpec.AmountPointInCrease), "Tổng doanh thu dịch vụ xét hạng trong kỳ" },
+            { nameof(Rpt_MasterDataSpec.AmountPointUse), "Tổng doanh thu dịch vụ tiêu dùng trong kỳ" },
+            { nameof(Rpt_MasterDataSpec.QtyPointUse), "Tổng lượt dịch vụ tiêu điểm trong kỳ" },
+            { nameof(Rpt_MasterDataSpec.QtyMemberPointUse), "Tổng hội viên tiêu điểm dịch vụ trong kỳ" },
+            { nameof(Rpt_MasterDataSpec.QtyMemberUsePromotion), "Tổng số hội viên sử dụng ưu đãi trong kỳ" },
+            { nameof(Rpt_MasterDataSpec.AmountConsumptionS), "Tổng Doanh thu (tích điểm tiêu dùng) trong kỳ hạng S" },
+            { nameof(Rpt_MasterDataSpec.AmountConsumptionG), "Tổng Doanh thu (tích điểm tiêu dùng) trong kỳ hạng G" },
+            { nameof(Rpt_MasterDataSpec.AmountConsumptionP), "Tổng Doanh thu (tích điểm tiêu dùng) trong kỳ hạng P" },
+            { nameof(Rpt_MasterDataSpec.AmountPointInCreaseS), "Tổng Doanh thu (tích điểm xét hạng) trong kỳ hạng S" },
+            { nameof(Rpt_MasterDataSpec.AmountPointInCreaseG), "Tổng Doanh thu (tích điểm xét hạng) trong kỳ hạng G" },
+            { nameof(Rpt_MasterDataSpec.AmountPointInCreaseP), "Tổng Doanh thu (tích điểm xét hạng) trong kỳ hạng P" },
+            { nameof(Rpt_MasterDataSpec.PointConsumption), "Tổng điểm tiêu dùng tích dịch vụ trong kỳ" },
+            { nameof(Rpt_MasterDataSpec.PointSales), "Tổng điểm tiêu dùng tích xe mới trong kỳ" },
+            { nameof(Rpt_MasterDataSpec.PointIntroduction), "Tổng điểm tiêu dùng tích giới thiệu mua trong kỳ" },
+            { nameof(Rpt_MasterDataSpec.PointBirthday), "Tổng điểm tiêu dùng tích sinh nhật trong kỳ" },
+            { nameof(Rpt_MasterDataSpec.PointUse), "Tổng điểm tiêu dùng tiêu trong kỳ" },
+            { nameof(Rpt_MasterDataSpec.PointExpiry), "Tổng số điểm hết hạn trong kỳ" },
+            { nameof(Rpt_MasterDataSpec.PointExpiryAll), "Tổng số điểm hết hạn lũy kế" },
+            { nameof(Rpt_MasterDataSpec.PointConsumptionAll), "Tổng điểm tiêu dùng lũy kế" },
+            { nameof(Rpt_MasterDataSpec.QtyService), "Tổng lượt DV của HV 12 tháng gần nhất" },
+            { nameof(Rpt_MasterDataSpec.PointCancel), "Tổng số điểm Hủy trong kỳ" },
+            { nameof(Rpt_MasterDataSpec.PointCancelAll), "Tổng số điểm Hủy lũy kế" },
+        };
     }
 
     /// <summary>
