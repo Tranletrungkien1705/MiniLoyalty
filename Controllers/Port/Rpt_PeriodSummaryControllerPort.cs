@@ -159,5 +159,61 @@ public class Rpt_PeriodSummaryControllerPort : ControllerBase
             }
         });
     }
+
+    /// <summary>
+    /// Port 1:1 action SearchDetail01 — tìm kiếm chi tiết báo cáo đối soát tổng hợp kỳ Rpt_PeriodSummaryDtl_01 (#286).
+    /// Nguồn tra cứu (chỉ đọc):
+    ///   - Gate:     13.ClientGate/V10/idn.Loyalty.WebAPI/Controllers/Rpt_PeriodSummaryController.cs:212-286 (SearchDetail01)
+    ///   - Filter:   Rpt_PeriodSummaryController.cs:649-666 (strWhereClause_Rpt_PeriodSummaryDtl_01)
+    ///   - Service:  13.ClientGate/V10/idn.Loyalty.ClientService/Services/Loyalty/Rpt_PeriodSummaryService.cs:21-27, :52-56 (WA_Rpt_PeriodSummaryDtl_01_Get)
+    ///   - API:      11.BackEnd/V10/idn.Loyalty.Biz.Web/Controllers/ReportController.cs:656-724 (WA_Rpt_PeriodSummaryDtl_01_Get)
+    ///   - Biz LIVE: 11.BackEnd/V10/idn.Loyalty.Biz/Report.cs:5376-5781 (WAS_Rpt_PeriodSummaryDtl_01_Get, Rpt_PeriodSummaryDtl_01_Get, Rpt_PeriodSummaryDtl_01_GetX)
+    ///
+    /// ĐẶC ĐIỂM NGHIỆP VỤ:
+    ///   - Gate SearchDetail01 nhận: DLCPCode, PeriodMonth.
+    ///   - strWhereClause_Rpt_PeriodSummaryDtl_01 (:649-666) chỉ lọc:
+    ///       + DLCode (map từ DLCPCode tại gate :236) với toán tử '=' (nguyên chuỗi, không phân biệt hoa thường) cho cột DLCPCode.
+    ///       + PeriodMonth với toán tử '=' (nguyên chuỗi, không phân biệt hoa thường) cho cột PeriodMonth.
+    ///       + KHÔNG lọc KeyWord, FlagActive hay OrgID.
+    ///   - Sắp xếp: order by rpsd.LogLUDTimeUTC desc (Report.cs:5685, :5726).
+    ///   - Cột HCol: KHÔNG tính lại (giữ nguyên DB theo Report.cs:5721-5726).
+    ///   - Phản hồi: khi không có bản ghi nào, Lst_Rpt_PeriodSummaryDtl_01 trả về null (gate :239, :263-266, :269-273).
+    /// </summary>
+    [HttpPost("searchdetail01")]
+    public async Task<IActionResult> SearchDetail01([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Rpt_PeriodSummarySearchReq? req)
+    {
+        var query = _db.Set<Rpt_PeriodSummaryDtl_01>().AsNoTracking().AsQueryable();
+
+        // 1. Lọc DLCPCode (hoặc DLCode) với toán tử '=' (nguyên chuỗi, không phân biệt hoa thường) — gate :654-657
+        string? dlCode = req?.DLCPCode;
+        if (!string.IsNullOrWhiteSpace(dlCode))
+        {
+            var p_dlCode = PortQuery.Equal(dlCode);
+            query = query.Where(x => EF.Functions.Like(x.DLCPCode.ToLower(), p_dlCode, PortQuery.Esc));
+        }
+
+        // 2. Lọc PeriodMonth với toán tử '=' (nguyên chuỗi, không phân biệt hoa thường) — gate :659-663
+        if (!string.IsNullOrWhiteSpace(req?.PeriodMonth))
+        {
+            var p_month = PortQuery.Equal(req.PeriodMonth);
+            query = query.Where(x => EF.Functions.Like(x.PeriodMonth.ToLower(), p_month, PortQuery.Esc));
+        }
+
+        // 3. Sắp xếp: order by rpsd.LogLUDTimeUTC desc (Report.cs:5685, :5726)
+        var list = await query.OrderByDescending(x => x.LogLUDTimeUTC).ToListAsync();
+
+        // 4. Cột HCol: KHÔNG tính lại, giữ nguyên giá trị DB (Report.cs:5721-5726)
+
+        // 5. Định dạng trả về: Lst_Rpt_PeriodSummaryDtl_01 là null khi rỗng (gate :239, :263-266, :269-273)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Lst_Rpt_PeriodSummaryDtl_01 = list.Count > 0 ? list : null
+            }
+        });
+    }
 }
+
 
