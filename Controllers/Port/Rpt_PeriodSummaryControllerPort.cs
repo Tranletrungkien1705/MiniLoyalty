@@ -66,6 +66,18 @@ public class Rpt_PeriodSummarySearchTransactionDetailReq
     public string? CreateDTimeUTCTo { get; set; }
 }
 
+/// <summary>
+/// DTO yêu cầu tìm kiếm báo cáo chi tiết giảm điểm kỳ RptPE_CrdTransationDeCreaseInstPeriodDtl (#290).
+/// Nguồn: Rpt_PeriodSummaryController.cs:532-608.
+/// </summary>
+public class Rpt_PeriodSummarySearchRptPECrdTransationDeCreaseInstPeriodDtlReq
+{
+    public string? DLCPCode { get; set; }
+    public string? PeriodMonth { get; set; }
+    public string? CreateDTimeUTCFrom { get; set; }
+    public string? CreateDTimeUTCTo { get; set; }
+}
+
 [ApiController]
 [Route("api/rpt_periodsummary")]
 public class Rpt_PeriodSummaryControllerPort : ControllerBase
@@ -718,6 +730,120 @@ public class Rpt_PeriodSummaryControllerPort : ControllerBase
             Data = new
             {
                 Lst_Crd_CardTransaction = allList.Count > 0 ? (object)allList : null
+            }
+        });
+    }
+
+    /// <summary>
+    /// Port 1:1 action SearchRptPECrdTransationDeCreaseInstPeriodDtl — tìm kiếm chi tiết giảm điểm kỳ (#290).
+    /// Nguồn tra cứu (chỉ đọc):
+    ///   - Gate:     13.ClientGate/V10/idn.Loyalty.WebAPI/Controllers/Rpt_PeriodSummaryController.cs:532-608 (SearchRptPECrdTransationDeCreaseInstPeriodDtl)
+    ///   - Filter:   Rpt_PeriodSummaryController.cs:702-736 (strWhereClause_RptPE_CrdTransationDeCreaseInstPeriodDtl)
+    ///   - Service:  13.ClientGate/V10/idn.Loyalty.ClientService/Services/Loyalty/Rpt_PeriodSummaryService.cs:46-50 (WA_RptPE_CrdTransationDeCreaseInstPeriodDtl_Get)
+    ///   - API:      11.BackEnd/V10/idn.Loyalty.Biz.Web/Controllers/ReportController.cs:795-862 (WA_RptPE_CrdTransationDeCreaseInstPeriodDtl_Get)
+    ///   - Biz LIVE: 11.BackEnd/V10/idn.Loyalty.Biz/Report.cs:10941-11050 (WAS_RptPE_CrdTransationDeCreaseInstPeriodDtl_Get),
+    ///               :11051-11190 (RptPE_CrdTransationDeCreaseInstPeriodDtl_Get),
+    ///               :11191-11394 (RptPE_CrdTransationDeCreaseInstPeriodDtl_GetX)
+    ///
+    /// ĐẶC ĐIỂM NGHIỆP VỤ:
+    ///   - Gate nhận: DLCPCode, PeriodMonth, CreateDTimeUTCFrom, CreateDTimeUTCTo (:532).
+    ///   - strWhereClause_RptPE_CrdTransationDeCreaseInstPeriodDtl (:702-736) lọc:
+    ///       + DLCPCode: toán tử '=' trên cột DLCodeTranDC (:707-710).
+    ///       + PeriodMonth: toán tử '=' trên cột PeriodMonth (:729-733).
+    ///       + CreateDTimeUTCFrom: toán tử '>=' trên cột CreateDateUTCDC sau quy đổi StdDTimeBeginDay -> StdDTimeUTC -> StdDate (:712-719).
+    ///       + CreateDTimeUTCTo: toán tử '<=' trên cột CreateDateUTCDC sau quy đổi StdDTimeEndDay -> StdDTimeUTC -> StdDate (:721-728).
+    ///       + KHÔNG lọc KeyWord, FlagActive, OrgID.
+    ///   - Inner join với CrdCardTransaction cct trên rpctipd.RefNoDC == cct.AutoId.ToString() (lấy CardTypeUseDC, CardTypeInitDC, RefNo, CreateDTimeUTC_DC).
+    ///   - Inner join với CrdCardTransaction cct_ic trên rpctipd.RefNoIC == cct_ic.AutoId.ToString() (lấy CreateDTimeUTC_IC).
+    ///   - Inner join với CrdMember cm trên rpctipd.MemberNo == cm.MemberNo (lấy MemberName).
+    ///   - Sắp xếp: order by rpctipd.LogLUDTimeUTC desc (:11252, :11338).
+    ///   - Cột DLCodeTranIC: nếu req.DLCPCode == "HTV" hoặc req.DLCPCode == item.DLCodeTranIC thì giữ nguyên, ngược lại hiển thị "ĐL khác" (:11309-11314).
+    ///   - Format ngày CreateDateUTCIC và CreateDateUTCDC: chuỗi yyyy-MM-dd sau quy đổi giờ VN (+7h) từ CreateDTimeUTC tương ứng (:11012-11020).
+    ///   - Phản hồi: khi không có bản ghi nào, Lst_RptPE_CrdTransationDeCreaseInstPeriodDtl trả về null (gate :562, :585, :593).
+    /// </summary>
+    [HttpPost("searchrptpecrdtransationdecreaseinstperioddtl")]
+    public async Task<IActionResult> SearchRptPECrdTransationDeCreaseInstPeriodDtl([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Rpt_PeriodSummarySearchRptPECrdTransationDeCreaseInstPeriodDtlReq? req)
+    {
+        var query = _db.Set<RptPE_CrdTransationDeCreaseInstPeriodDtl>().AsNoTracking().AsQueryable();
+
+        // 1. Lọc DLCPCode trên cột DLCodeTranDC với toán tử '=' (nguyên chuỗi, không phân biệt hoa thường) — gate :707-710
+        if (!string.IsNullOrWhiteSpace(req?.DLCPCode))
+        {
+            var p_dlCode = PortQuery.Equal(req.DLCPCode);
+            query = query.Where(x => x.DLCodeTranDC != null && EF.Functions.Like(x.DLCodeTranDC.ToLower(), p_dlCode, PortQuery.Esc));
+        }
+
+        // 2. Lọc PeriodMonth trên cột PeriodMonth với toán tử '=' (nguyên chuỗi, không phân biệt hoa thường) — gate :729-733
+        if (!string.IsNullOrWhiteSpace(req?.PeriodMonth))
+        {
+            var p_month = PortQuery.Equal(req.PeriodMonth);
+            query = query.Where(x => EF.Functions.Like(x.PeriodMonth.ToLower(), p_month, PortQuery.Esc));
+        }
+
+        // 3. Lọc CreateDTimeUTCFrom: StdDTimeBeginDay -> StdDTimeUTC -> StdDate, toán tử '>=' trên CreateDateUTCDC — gate :712-719
+        if (!string.IsNullOrWhiteSpace(req?.CreateDTimeUTCFrom) && DateTime.TryParse(req.CreateDTimeUTCFrom, out var dFrom))
+        {
+            var strFrom = dFrom.Date.AddHours(-7).ToString("yyyy-MM-dd");   // StdDTimeBeginDay -> StdDTimeUTC (-7h) -> StdDate (gate :714-716)
+            query = query.Where(x => x.CreateDateUTCDC != null && string.Compare(x.CreateDateUTCDC, strFrom) >= 0);
+        }
+
+        // 4. Lọc CreateDTimeUTCTo: StdDTimeEndDay -> StdDTimeUTC -> StdDate, toán tử '<=' trên CreateDateUTCDC — gate :721-728
+        if (!string.IsNullOrWhiteSpace(req?.CreateDTimeUTCTo) && DateTime.TryParse(req.CreateDTimeUTCTo, out var dTo))
+        {
+            var strTo = dTo.Date.AddDays(1).AddSeconds(-1).AddHours(-7).ToString("yyyy-MM-dd");   // StdDTimeEndDay -> StdDTimeUTC (-7h) -> StdDate (gate :723-725)
+            query = query.Where(x => x.CreateDateUTCDC != null && string.Compare(x.CreateDateUTCDC, strTo) <= 0);
+        }
+
+        // 5. Inner join với CrdCardTransaction (cct, cct_ic) và CrdMember (cm), sắp xếp LogLUDTimeUTC desc — Report.cs:11327-11339
+        var joinedQuery = from rpctipd in query
+                          join cct in _db.Set<CrdCardTransaction>().AsNoTracking()
+                              on rpctipd.RefNoDC equals cct.AutoId.ToString()
+                          join cct_ic in _db.Set<CrdCardTransaction>().AsNoTracking()
+                              on rpctipd.RefNoIC equals cct_ic.AutoId.ToString()
+                          join cm in _db.Set<CrdMember>().AsNoTracking()
+                              on rpctipd.MemberNo equals cm.MemberNo
+                          orderby rpctipd.LogLUDTimeUTC descending
+                          select new
+                          {
+                              Item = rpctipd,
+                              CardTypeUseDC = cct.CardTypeUse,
+                              CardTypeInitDC = cct.CardTypeInit,
+                              RefNo = cct.RefNo,
+                              MemberName = cm.MemberName,
+                              CreateDTimeUTC_DC = cct.CreateDTimeUTC,
+                              CreateDTimeUTC_IC = cct_ic.CreateDTimeUTC
+                          };
+
+        var rawList = await joinedQuery.ToListAsync();
+
+        // 6. Xử lý quyền xem đại lý cho cột DLCodeTranIC và format ngày CreateDateUTCIC / CreateDateUTCDC — Report.cs:11007-11023, :11308-11314
+        var list = rawList.Select(x =>
+        {
+            var item = x.Item;
+            item.CardTypeUseDC = x.CardTypeUseDC;
+            item.CardTypeInitDC = x.CardTypeInitDC;
+            item.RefNo = x.RefNo;
+            item.MemberName = x.MemberName;
+
+            // Format ngày yyyy-MM-dd sau quy đổi giờ VN (+7h)
+            item.CreateDateUTCIC = x.CreateDTimeUTC_IC.HasValue ? x.CreateDTimeUTC_IC.Value.AddHours(7).ToString("yyyy-MM-dd") : null;
+            item.CreateDateUTCDC = x.CreateDTimeUTC_DC.HasValue ? x.CreateDTimeUTC_DC.Value.AddHours(7).ToString("yyyy-MM-dd") : null;
+
+            // Xử lý DLCodeTranIC theo quyền xem đại lý (so với DLCPCode)
+            item.DLCodeTranIC = (req?.DLCPCode == "HTV" || string.Equals(req?.DLCPCode, item.DLCodeTranIC, StringComparison.OrdinalIgnoreCase))
+                ? item.DLCodeTranIC
+                : "ĐL khác";
+
+            return item;
+        }).ToList();
+
+        // 7. Định dạng trả về: Lst_RptPE_CrdTransationDeCreaseInstPeriodDtl là null khi rỗng (gate :562, :585, :593)
+        return Ok(new
+        {
+            Success = true,
+            Data = new
+            {
+                Lst_RptPE_CrdTransationDeCreaseInstPeriodDtl = list.Count > 0 ? (object)list : null
             }
         });
     }
