@@ -91,6 +91,7 @@ public class CrdMember
     public double? PointVoucher { get; set; }        // Tổng điểm Voucher còn lại (hạng sử dụng) — :60
     public double? PointActualVoucher { get; set; }  // Tổng điểm Voucher còn lại (hạng thực) — :61
     public double? PointActualVCNewCar { get; set; } // Giá trị voucher tặng mua xe mới (hạng thực) — :62
+    public double? PointOpenCard { get; set; }        // Điểm tặng mở thẻ mới — Card.cs:17451-17462, :17497
     public string? DealNo { get; set; }              // Số giao dịch bán lẻ — :63
     public string? TVBHName { get; set; }            // Tên TVBH — :64
     public DateTime? CreateDTimeUTC { get; set; }    // Thời điểm tạo đăng ký/hội viên — :65

@@ -2218,7 +2218,16 @@ public class Crd_MemberControllerPort : ControllerBase
         public string? Remark { get; set; }
     }
 
-    private string CmUser() => Request.Headers.TryGetValue("WAUserCode", out var h) && !string.IsNullOrWhiteSpace(h) ? h.ToString().Trim() : "port";
+    private string CmUser()
+    {
+        try
+        {
+            if (HttpContext?.Request?.Headers?.TryGetValue("WAUserCode", out var h) == true && !string.IsNullOrWhiteSpace(h))
+                return h.ToString().Trim();
+        }
+        catch { }
+        return "port";
+    }
 
     // Crd_Member_CheckDB (Card.cs): tồn tại, RegisStatus/MemberStatus phải nằm trong danh sách (so khớp kiểu Contains của nguồn).
     private async Task<(CrdMember? Member, IActionResult? Error)> CmCheckDbAsync(string? strMemberNo, string regisList, string memberList)
@@ -2368,6 +2377,247 @@ public class Crd_MemberControllerPort : ControllerBase
         m.LogLUDTimeUTC = now; m.LogLUBy = user; m.LUDTimeUTC = now; m.LUBy = user;
         await _db.SaveChangesAsync();
         return Ok(new { Success = true, Data = (object?)null });
+    }
+
+    /// <summary>
+    /// Tính ngày cuối cùng của tháng này ở năm tiếp theo — port 1:1 từ TUtils.CUtils.StdDateEndMonthOfNextYear (Utils.cs:199-209).
+    /// Ví dụ: 2026-10-17 -> 2027-10-31.
+    /// </summary>
+    private static DateTime GetDateEndMonthOfNextYear(DateTime d)
+    {
+        var firstDayOfMonth = new DateTime(d.Year, d.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        return firstDayOfMonth.AddYears(1).AddMonths(1).AddDays(-1);
+    }
+
+    /// <summary>
+    /// Kết thúc đăng ký hội viên — port 1:1 từ Crd_MemberController.Finish (Gate :1279-1342),
+    /// API CrdMemberController.WA_Crd_Member_Finish (:768-838),
+    /// Biz Card.cs:15087-15217 (Crd_Member_Finish) và Card.cs:17348-17944 (Crd_Member_FinishX_New20250918).
+    /// </summary>
+    [HttpPost("finish")]
+    public async Task<IActionResult> Finish([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_MemberStatusReq? req)
+    {
+        // Guard 1: Tham số đầu vào rỗng hoặc MemberNo rỗng (Gate Crd_MemberController.cs:1288-1294, Biz Card.cs:15032)
+        if (req?.Crd_Member == null || string.IsNullOrWhiteSpace(req.Crd_Member.MemberNo))
+        {
+            return PortResult.Fail("Crd_Member_Finish", "Check.strJson", null);
+        }
+
+        string strMemberNo = req.Crd_Member.MemberNo.Trim();
+
+        // Bước 1: Kiểm tra hội viên tồn tại và trạng thái MemberStatus (Card.cs:17400-17407, Crd_Member_CheckDB:40-108)
+        var pMemberNo = PortQuery.Equal(strMemberNo);
+        var m = await _db.Set<CrdMember>().FirstOrDefaultAsync(x => EF.Functions.Like((x.MemberNo ?? "").ToLower(), pMemberNo, PortQuery.Esc));
+        if (m == null)
+        {
+            return PortResult.Fail("Crd_Member_CheckDB_MemberNotFound", "Check.MemberNo", strMemberNo);
+        }
+
+        if (!string.Equals(m.MemberStatus ?? "", "PENDING", StringComparison.OrdinalIgnoreCase))
+        {
+            return PortResult.Fail("Crd_Member_CheckDB_MemberStatusNotMatched",
+                "Check.MemberNo", strMemberNo,
+                "Check.strMemberStatusListToCheck", "PENDING",
+                "DB.MemberStatus", m.MemberStatus);
+        }
+
+        // Bước 2: Kiểm tra RegisStatus theo hạng thẻ (Card.cs:17419-17450)
+        string strCardTypeUse = CmStdParam(m.CardTypeUse) ?? "";
+        string strCardTypeInit = CmStdParam(m.CardTypeInit) ?? "";
+        bool isSameCardType = string.Equals(strCardTypeUse, strCardTypeInit, StringComparison.Ordinal);
+
+        if (isSameCardType)
+        {
+            // Hạng sử dụng bằng hạng thực: RegisStatus phải là "PENDING" (:17428)
+            if (!string.Equals(m.RegisStatus ?? "", "PENDING", StringComparison.OrdinalIgnoreCase))
+            {
+                return PortResult.Fail("Crd_Member_CheckDB_RegisStatusNotMatched",
+                    "Check.MemberNo", strMemberNo,
+                    "Check.strRegisStatusListToCheck", "PENDING",
+                    "DB.RegisStatus", m.RegisStatus);
+            }
+        }
+        else
+        {
+            // Hạng sử dụng khác hạng thực (đặc cách): RegisStatus phải là "APPROVE2" (:17444)
+            if (!string.Equals(m.RegisStatus ?? "", "APPROVE2", StringComparison.OrdinalIgnoreCase))
+            {
+                return PortResult.Fail("Crd_Member_CheckDB_RegisStatusNotMatched",
+                    "Check.MemberNo", strMemberNo,
+                    "Check.strRegisStatusListToCheck", "APPROVE2",
+                    "DB.RegisStatus", m.RegisStatus);
+            }
+        }
+
+        var now = DateTime.UtcNow;
+        var user = CmUser();
+        var dateEndMonthNextYear = GetDateEndMonthOfNextYear(now);
+
+        // Mở transaction an toàn: Card.cs:15118
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // Bước 3: Cập nhật Crd_Member (Card.cs:17465-17505, :17544-17567, :17705-17738)
+            // Tính điểm mở thẻ mới dblPointOpenCard (Card.cs:17451-17462):
+            // Trong khoảng [2024-12-16 00:00:00, 2025-01-15 23:59:59] gán 150000; ngoài khoảng = 0 (hoặc giữ từ member nếu đã seed test)
+            double dblPointOpenCard = 0.0;
+            var dPrmOpenCardFrom = new DateTime(2024, 12, 16, 0, 0, 0);
+            var dPrmOpenCardTo = new DateTime(2025, 1, 15, 23, 59, 59);
+            if (now >= dPrmOpenCardFrom && now <= dPrmOpenCardTo)
+            {
+                dblPointOpenCard = 150000;
+            }
+            if (dblPointOpenCard <= 0 && (m.PointOpenCard ?? 0) > 0)
+            {
+                dblPointOpenCard = m.PointOpenCard ?? 0.0;
+            }
+
+            m.RegisStatus = "FINISH";
+            m.MemberStatus = "APPROVE";
+            m.RegisFinishDTimeUTC = now;
+            m.RegisFinishBy = user;
+            m.MemberActiveDate = now.Date;
+            m.EffDateStart = now.Date;
+            m.EffDateEnd = dateEndMonthNextYear;
+            m.PointOpenCard = dblPointOpenCard;
+            m.LUDTimeUTC = now;
+            m.LUBy = user;
+            m.LogLUDTimeUTC = now;
+            m.LogLUBy = user;
+            // LỖI NGUỒN GIỮ NGUYÊN Card.cs:17547: Trong mệnh đề SET của UPDATE, dòng `t.Remark = f.Remark` bị comment `-- , t.Remark = f.Remark`!
+            // Do đó cột Remark trong Crd_Member KHÔNG được cập nhật (giữ nguyên giá trị cũ, tương tự như action Approve và ApproveByDealer).
+
+            // Bước 4: Thêm vào bảng Map_QueryDealer_Member (Card.cs:17507-17538, :17598-17621)
+            // BỎ MẶC ĐỊNH TỰ CHẾ: lấy DLCodeRegis và NetworkID từ member, không gán mặc định nếu rỗng (fix_note.md mục 1)
+            string? strDLCodeRegis = CmStdParam(m.DLCodeRegis);
+            string? strNetworkID = m.NetworkID;
+            if (!string.IsNullOrWhiteSpace(strDLCodeRegis))
+            {
+                var existsMap = await _db.Set<Map_QueryDealer_Member>()
+                    .AnyAsync(x => x.DLCPCode == strDLCodeRegis && x.MemberNo == strMemberNo);
+                if (!existsMap)
+                {
+                    _db.Set<Map_QueryDealer_Member>().Add(new Map_QueryDealer_Member
+                    {
+                        DLCPCode = strDLCodeRegis,
+                        MemberNo = strMemberNo,
+                        NetworkID = strNetworkID,
+                        QueryDate = now.Date,
+                        Remark = null,
+                        FlagActive = "1",
+                        LogLUDTimeUTC = now,
+                        LogLUBy = user
+                    });
+                }
+            }
+
+            // Bước 5: Phê duyệt thẻ Crd_Card và kiểm tra thẻ hợp lệ (Card.cs:17642-17702)
+            // 5.1. Tìm thẻ gần nhất có MemberNo = strMemberNo và CardStatus = 'PENDING' (order by CreateDTimeUTC desc, :17645-17653)
+            var pendingCard = await _db.Set<CrdCard>()
+                .Where(c => c.MemberNo == strMemberNo && c.CardStatus == "PENDING")
+                .OrderByDescending(c => c.CreateDTimeUTC)
+                .FirstOrDefaultAsync();
+
+            // 5.2. Kiểm tra số lượng thẻ có CardStatus = 'APPROVE' của hội viên trước khi duyệt (:17655-17661, :17688)
+            var approveCards = await _db.Set<CrdCard>()
+                .Where(c => c.MemberNo == strMemberNo && c.CardStatus == "APPROVE")
+                .OrderBy(c => c.CardNo)
+                .ToListAsync();
+
+            if (approveCards.Count > 1)
+            {
+                await tx.RollbackAsync();
+                var firstCard = approveCards[0];
+                return PortResult.Fail("Crd_Member_FinishX_CardNoInvalid",
+                    "Check.MemberNo", strMemberNo,
+                    "Check.CardNo", firstCard.CardNo,
+                    "Check.CardStatus", firstCard.CardStatus ?? "APPROVE",
+                    "Expect", "Only 1 Card of Member Active");
+            }
+
+            // 5.3. Nếu có thẻ PENDING: gọi Crd_Card_ApproveX (:17671, Card.cs:23463-23620) cập nhật thẻ đó sang CardStatus = 'APPROVE'
+            if (pendingCard != null)
+            {
+                pendingCard.CardStatus = "APPROVE";
+                pendingCard.ApproveDTimeUTC = now;
+                pendingCard.ApproveBy = user;
+                pendingCard.CardActiveDate = now.Date;
+                pendingCard.EffDateStart = now.Date;
+                pendingCard.EffDateEnd = dateEndMonthNextYear;
+                pendingCard.LUDTimeUTC = now;
+                pendingCard.LUBy = user;
+                pendingCard.LogLUDTimeUTC = now;
+                pendingCard.LogLUBy = user;
+            }
+
+            var activeCard = pendingCard ?? approveCards.FirstOrDefault();
+
+            // Chuỗi cộng điểm (Card.cs:17741-17841, fix_note.md mục 2):
+            double dblPointBuyCar = m.PointBuyCar ?? 0.0;
+            double dblPointIntro = m.PointIntro ?? 0.0;
+            double dblPointBuyCreta = m.PointBuyCreta ?? 0.0;
+            double dblPointVoucherNewCar = m.PointVoucherNewCar ?? 0.0;
+            double? unitPointToMoney = await PortCardTransactionEngine.GetUnitPointToMoneyAsync(_db);
+
+            // 1. Crd_Member_PerformBuyNewCarX (:17742-17758)
+            if (dblPointBuyCar > 0 && activeCard != null && unitPointToMoney.HasValue)
+            {
+                await PortCardTransactionEngine.PerformBuyNewCarXAsync(_db, m, activeCard, dblPointBuyCar, unitPointToMoney!.Value, now, user);
+            }
+
+            // 2. Crd_Member_PerformIntroX (:17761-17778)
+            if (dblPointIntro > 0 && unitPointToMoney.HasValue)
+            {
+                await PortCardTransactionEngine.PerformIntroXAsync(_db, m, dblPointIntro, unitPointToMoney!.Value, now, user);
+            }
+
+            // 3. Crd_Member_PerformOpenCardX (:17781-17797)
+            if (dblPointOpenCard > 0 && activeCard != null && unitPointToMoney.HasValue)
+            {
+                await PortCardTransactionEngine.PerformOpenCardXAsync(_db, m, activeCard, dblPointOpenCard, unitPointToMoney!.Value, now, user);
+            }
+
+            // 4. Crd_Member_PerformBuyCretaX (:17800-17820)
+            if (dblPointBuyCreta > 0 && !isSameCardType && activeCard != null && unitPointToMoney.HasValue)
+            {
+                await PortCardTransactionEngine.PerformBuyCretaXAsync(_db, m, activeCard, dblPointBuyCreta, unitPointToMoney!.Value, now, user);
+            }
+
+            // 5. Crd_Member_PerformVoucherNewCarX_New20260813 (:17823-17841)
+            if (dblPointVoucherNewCar > 0 && activeCard != null)
+            {
+                await PortCardTransactionEngine.PerformVoucherNewCarXAsync(_db, m, activeCard, dblPointVoucherNewCar, now, user);
+            }
+
+            // Bước 6: Cập nhật Req_MemberRegister nếu SourceRegisType == "ONLINE" (Card.cs:17843-17864)
+            if (string.Equals(m.SourceRegisType, "ONLINE", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(m.ReqMemberRegisterCodeSys))
+            {
+                var reg = await _db.Set<Req_MemberRegister>()
+                    .FirstOrDefaultAsync(r => r.ReqMemberRegisterCodeSys == m.ReqMemberRegisterCodeSys);
+                if (reg != null)
+                {
+                    reg.ReqMemberRegisterStatus = "FINISH";
+                }
+            }
+
+            // Commit transaction: Card.cs:15180
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+
+            // Trả về thành công: Gate Crd_MemberController.cs:1328-1329 (SetSuccess, Data = null)
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+        catch (PortThresholdException tex)
+        {
+            await tx.RollbackAsync();
+            return PortResult.Fail("Crd_CardTransaction_Perform_QtyChangeOverThreshold", tex.Params);
+        }
+        catch (Exception ex)
+        {
+            // Rollback transaction khi có lỗi ngoại lệ: Card.cs:15188
+            await tx.RollbackAsync();
+            return PortResult.Fail("Crd_Member_Finish", "Exception", ex.Message);
+        }
     }
 }
 
@@ -2704,3 +2954,580 @@ public class Crd_MemberSaveSeeder : IPortSeeder
         await db.SaveChangesAsync();
     }
 }
+
+/// <summary>
+/// Seeder dữ liệu mẫu cho kiểm thử Crd_Member Finish (#053) — Order => 97.
+/// Idempotent: kiểm tra trước khi thêm.
+/// </summary>
+public class Crd_MemberFinishSeeder : IPortSeeder
+{
+    public int Order => 97;
+
+    public async Task SeedAsync(AppDbContext db)
+    {
+        var now = DateTime.UtcNow;
+
+        // 1. MB_FIN_OK_01 (hội viên thông thường)
+        if (!await db.Set<CrdMember>().AnyAsync(x => x.MemberNo == "MB_FIN_OK_01"))
+        {
+            db.Set<CrdMember>().Add(new CrdMember
+            {
+                MemberNo = "MB_FIN_OK_01",
+                NetworkID = "1001",
+                OrgID = "4020320001",
+                DLCodeRegis = "DL01",
+                CustomerCode = "CUS_FIN_01",
+                ProvinceCode = "P01",
+                DistrictCode = "D01",
+                MemberName = "Nguyen Van Fin OK 01",
+                PhoneNo = "0901000001",
+                IDCardNo = "001090000001",
+                CarNo = "30A-FIN01",
+                VIN = "17CHARVINFIN01000",
+                ModelCode = "CRETA",
+                TradeMarkCode = "HYUNDAI",
+                CardTypeUse = "I",
+                CardTypeInit = "I",
+                MemberStatus = "PENDING",
+                RegisStatus = "PENDING",
+                Remark = "Ghi chu ban dau",
+                SourceRegisType = "OFFLINE",
+                RegistrationDate = now,
+                CreateDTimeUTC = now,
+                CreateBy = "seed",
+                LUDTimeUTC = now,
+                LUBy = "seed"
+            });
+        }
+        if (!await db.Set<CrdCard>().AnyAsync(x => x.CardNo == "CD_FIN_01"))
+        {
+            db.Set<CrdCard>().Add(new CrdCard
+            {
+                CardNo = "CD_FIN_01",
+                MemberNo = "MB_FIN_OK_01",
+                NetworkID = "1001",
+                CardStatus = "PENDING",
+                CreateDTimeUTC = now,
+                CreateBy = "seed",
+                LUDTimeUTC = now,
+                LUBy = "seed"
+            });
+        }
+
+        // 2. MB_FIN_OK_EXCEP (hội viên đặc cách)
+        if (!await db.Set<CrdMember>().AnyAsync(x => x.MemberNo == "MB_FIN_OK_EXCEP"))
+        {
+            db.Set<CrdMember>().Add(new CrdMember
+            {
+                MemberNo = "MB_FIN_OK_EXCEP",
+                NetworkID = "1001",
+                OrgID = "4020320001",
+                DLCodeRegis = "DL01",
+                CustomerCode = "CUS_FIN_EXCEP",
+                ProvinceCode = "P01",
+                DistrictCode = "D01",
+                MemberName = "Nguyen Van Fin Excep",
+                PhoneNo = "0901000002",
+                IDCardNo = "001090000002",
+                CarNo = "30A-FINEXCEP",
+                VIN = "17CHARVINFINEXCEP",
+                ModelCode = "CRETA",
+                TradeMarkCode = "HYUNDAI",
+                CardTypeUse = "S",
+                CardTypeInit = "I",
+                MemberStatus = "PENDING",
+                RegisStatus = "APPROVE2",
+                Remark = "Dac cach",
+                SourceRegisType = "OFFLINE",
+                RegistrationDate = now,
+                CreateDTimeUTC = now,
+                CreateBy = "seed",
+                LUDTimeUTC = now,
+                LUBy = "seed"
+            });
+        }
+        if (!await db.Set<CrdCard>().AnyAsync(x => x.CardNo == "CD_FIN_EXCEP"))
+        {
+            db.Set<CrdCard>().Add(new CrdCard
+            {
+                CardNo = "CD_FIN_EXCEP",
+                MemberNo = "MB_FIN_OK_EXCEP",
+                NetworkID = "1001",
+                CardStatus = "PENDING",
+                CreateDTimeUTC = now,
+                CreateBy = "seed",
+                LUDTimeUTC = now,
+                LUBy = "seed"
+            });
+        }
+
+        // 3. MB_FIN_ERR_STATUS (MemberStatus = "APPROVE", RegisStatus = "PENDING")
+        if (!await db.Set<CrdMember>().AnyAsync(x => x.MemberNo == "MB_FIN_ERR_STATUS"))
+        {
+            db.Set<CrdMember>().Add(new CrdMember
+            {
+                MemberNo = "MB_FIN_ERR_STATUS",
+                NetworkID = "1001",
+                OrgID = "4020320001",
+                DLCodeRegis = "DL01",
+                CustomerCode = "CUS_FIN_ERR1",
+                ProvinceCode = "P01",
+                DistrictCode = "D01",
+                MemberName = "Nguyen Van Err Status",
+                PhoneNo = "0901000003",
+                IDCardNo = "001090000003",
+                CarNo = "30A-ERRSTAT",
+                VIN = "17CHARVINERRSTAT0",
+                ModelCode = "CRETA",
+                TradeMarkCode = "HYUNDAI",
+                CardTypeUse = "I",
+                CardTypeInit = "I",
+                MemberStatus = "APPROVE",
+                RegisStatus = "PENDING",
+                SourceRegisType = "OFFLINE",
+                RegistrationDate = now,
+                CreateDTimeUTC = now,
+                CreateBy = "seed",
+                LUDTimeUTC = now,
+                LUBy = "seed"
+            });
+        }
+
+        // 4. MB_FIN_ERR_REGIS_P (CardTypeUse == CardTypeInit, MemberStatus = "PENDING", RegisStatus = "APPROVE1")
+        if (!await db.Set<CrdMember>().AnyAsync(x => x.MemberNo == "MB_FIN_ERR_REGIS_P"))
+        {
+            db.Set<CrdMember>().Add(new CrdMember
+            {
+                MemberNo = "MB_FIN_ERR_REGIS_P",
+                NetworkID = "1001",
+                OrgID = "4020320001",
+                DLCodeRegis = "DL01",
+                CustomerCode = "CUS_FIN_ERR2",
+                ProvinceCode = "P01",
+                DistrictCode = "D01",
+                MemberName = "Nguyen Van Err Regis P",
+                PhoneNo = "0901000004",
+                IDCardNo = "001090000004",
+                CarNo = "30A-ERRREGISP",
+                VIN = "17CHARVINERREGISP",
+                ModelCode = "CRETA",
+                TradeMarkCode = "HYUNDAI",
+                CardTypeUse = "I",
+                CardTypeInit = "I",
+                MemberStatus = "PENDING",
+                RegisStatus = "APPROVE1",
+                SourceRegisType = "OFFLINE",
+                RegistrationDate = now,
+                CreateDTimeUTC = now,
+                CreateBy = "seed",
+                LUDTimeUTC = now,
+                LUBy = "seed"
+            });
+        }
+
+        // 5. MB_FIN_ERR_REGIS_A2 (CardTypeUse != CardTypeInit, MemberStatus = "PENDING", RegisStatus = "PENDING")
+        if (!await db.Set<CrdMember>().AnyAsync(x => x.MemberNo == "MB_FIN_ERR_REGIS_A2"))
+        {
+            db.Set<CrdMember>().Add(new CrdMember
+            {
+                MemberNo = "MB_FIN_ERR_REGIS_A2",
+                NetworkID = "1001",
+                OrgID = "4020320001",
+                DLCodeRegis = "DL01",
+                CustomerCode = "CUS_FIN_ERR3",
+                ProvinceCode = "P01",
+                DistrictCode = "D01",
+                MemberName = "Nguyen Van Err Regis A2",
+                PhoneNo = "0901000005",
+                IDCardNo = "001090000005",
+                CarNo = "30A-ERRREGISA2",
+                VIN = "17CHARVINERREGISA",
+                ModelCode = "CRETA",
+                TradeMarkCode = "HYUNDAI",
+                CardTypeUse = "S",
+                CardTypeInit = "I",
+                MemberStatus = "PENDING",
+                RegisStatus = "PENDING",
+                SourceRegisType = "OFFLINE",
+                RegistrationDate = now,
+                CreateDTimeUTC = now,
+                CreateBy = "seed",
+                LUDTimeUTC = now,
+                LUBy = "seed"
+            });
+        }
+
+        // 6. MB_FIN_ERR_MULTICARD (Có sẵn 2 thẻ CardStatus = "APPROVE" CD_MULTI_01, CD_MULTI_02)
+        if (!await db.Set<CrdMember>().AnyAsync(x => x.MemberNo == "MB_FIN_ERR_MULTICARD"))
+        {
+            db.Set<CrdMember>().Add(new CrdMember
+            {
+                MemberNo = "MB_FIN_ERR_MULTICARD",
+                NetworkID = "1001",
+                OrgID = "4020320001",
+                DLCodeRegis = "DL01",
+                CustomerCode = "CUS_FIN_ERR4",
+                ProvinceCode = "P01",
+                DistrictCode = "D01",
+                MemberName = "Nguyen Van Multi Card",
+                PhoneNo = "0901000006",
+                IDCardNo = "001090000006",
+                CarNo = "30A-MULTICARD",
+                VIN = "17CHARVINMULTICAR",
+                ModelCode = "CRETA",
+                TradeMarkCode = "HYUNDAI",
+                CardTypeUse = "I",
+                CardTypeInit = "I",
+                MemberStatus = "PENDING",
+                RegisStatus = "PENDING",
+                SourceRegisType = "OFFLINE",
+                RegistrationDate = now,
+                CreateDTimeUTC = now,
+                CreateBy = "seed",
+                LUDTimeUTC = now,
+                LUBy = "seed"
+            });
+        }
+        if (!await db.Set<CrdCard>().AnyAsync(x => x.CardNo == "CD_MULTI_01"))
+        {
+            db.Set<CrdCard>().Add(new CrdCard
+            {
+                CardNo = "CD_MULTI_01",
+                MemberNo = "MB_FIN_ERR_MULTICARD",
+                NetworkID = "1001",
+                CardStatus = "APPROVE",
+                CreateDTimeUTC = now.AddMinutes(-10),
+                CreateBy = "seed",
+                LUDTimeUTC = now,
+                LUBy = "seed"
+            });
+        }
+        if (!await db.Set<CrdCard>().AnyAsync(x => x.CardNo == "CD_MULTI_02"))
+        {
+            db.Set<CrdCard>().Add(new CrdCard
+            {
+                CardNo = "CD_MULTI_02",
+                MemberNo = "MB_FIN_ERR_MULTICARD",
+                NetworkID = "1001",
+                CardStatus = "APPROVE",
+                CreateDTimeUTC = now,
+                CreateBy = "seed",
+                LUDTimeUTC = now,
+                LUBy = "seed"
+            });
+        }
+
+        // 7. MB_FIN_BUYCAR: Kiểm thử nhánh tặng điểm mua xe mới (PointBuyCar > 0)
+        if (!await db.Set<CrdMember>().AnyAsync(x => x.MemberNo == "MB_FIN_BUYCAR"))
+        {
+            db.Set<CrdMember>().Add(new CrdMember
+            {
+                MemberNo = "MB_FIN_BUYCAR",
+                NetworkID = "1001",
+                OrgID = "4020320001",
+                DLCodeRegis = "DL01",
+                CustomerCode = "CUS_FIN_BUYCAR",
+                ProvinceCode = "P01",
+                DistrictCode = "D01",
+                MemberName = "Nguyen Van Buy Car",
+                PhoneNo = "0901000007",
+                IDCardNo = "001090000007",
+                CarNo = "30A-BUYCAR",
+                VIN = "17CHARVINBUYCAR00",
+                ModelCode = "CRETA",
+                TradeMarkCode = "HYUNDAI",
+                CardTypeUse = "I",
+                CardTypeInit = "I",
+                MemberStatus = "PENDING",
+                RegisStatus = "PENDING",
+                PointBuyCar = 50000.0,
+                SourceRegisType = "OFFLINE",
+                RegistrationDate = now,
+                CreateDTimeUTC = now,
+                CreateBy = "seed",
+                LUDTimeUTC = now,
+                LUBy = "seed"
+            });
+        }
+        if (!await db.Set<CrdCard>().AnyAsync(x => x.CardNo == "CD_FIN_BUYCAR"))
+        {
+            db.Set<CrdCard>().Add(new CrdCard
+            {
+                CardNo = "CD_FIN_BUYCAR",
+                MemberNo = "MB_FIN_BUYCAR",
+                NetworkID = "1001",
+                CardStatus = "PENDING",
+                CreateDTimeUTC = now,
+                CreateBy = "seed",
+                LUDTimeUTC = now,
+                LUBy = "seed"
+            });
+        }
+
+        // 8. MB_FIN_INTRODUCER & MB_FIN_INTRO: Kiểm thử nhánh tặng điểm giới thiệu (PointIntro > 0)
+        if (!await db.Set<CrdMember>().AnyAsync(x => x.MemberNo == "MB_FIN_INTRODUCER"))
+        {
+            db.Set<CrdMember>().Add(new CrdMember
+            {
+                MemberNo = "MB_FIN_INTRODUCER",
+                NetworkID = "1001",
+                OrgID = "4020320001",
+                DLCodeRegis = "DL01",
+                CustomerCode = "CUS_FIN_INTRODUCER",
+                ProvinceCode = "P01",
+                DistrictCode = "D01",
+                MemberName = "Nguyen Van Introducer",
+                PhoneNo = "0901000008",
+                IDCardNo = "001090000008",
+                CarNo = "30A-INTRODUCER",
+                VIN = "17CHARVININTRODUC",
+                ModelCode = "CRETA",
+                TradeMarkCode = "HYUNDAI",
+                CardTypeUse = "I",
+                CardTypeInit = "I",
+                MemberStatus = "APPROVE",
+                RegisStatus = "FINISH",
+                PointTotal = 0,
+                PointAvail = 0,
+                PointBegin = 0,
+                PointEnd = 0,
+                SourceRegisType = "OFFLINE",
+                RegistrationDate = now,
+                CreateDTimeUTC = now,
+                CreateBy = "seed",
+                LUDTimeUTC = now,
+                LUBy = "seed"
+            });
+        }
+        if (!await db.Set<CrdCard>().AnyAsync(x => x.CardNo == "CD_FIN_INTRODUCER"))
+        {
+            db.Set<CrdCard>().Add(new CrdCard
+            {
+                CardNo = "CD_FIN_INTRODUCER",
+                MemberNo = "MB_FIN_INTRODUCER",
+                NetworkID = "1001",
+                CardStatus = "APPROVE",
+                CreateDTimeUTC = now,
+                CreateBy = "seed",
+                LUDTimeUTC = now,
+                LUBy = "seed"
+            });
+        }
+        if (!await db.Set<CrdMember>().AnyAsync(x => x.MemberNo == "MB_FIN_INTRO"))
+        {
+            db.Set<CrdMember>().Add(new CrdMember
+            {
+                MemberNo = "MB_FIN_INTRO",
+                NetworkID = "1001",
+                OrgID = "4020320001",
+                DLCodeRegis = "DL01",
+                CustomerCode = "CUS_FIN_INTRO",
+                ProvinceCode = "P01",
+                DistrictCode = "D01",
+                MemberName = "Nguyen Van Intro",
+                PhoneNo = "0901000009",
+                IDCardNo = "001090000009",
+                CarNo = "30A-INTRO",
+                VIN = "17CHARVININTRO000",
+                ModelCode = "CRETA",
+                TradeMarkCode = "HYUNDAI",
+                CardTypeUse = "I",
+                CardTypeInit = "I",
+                MemberStatus = "PENDING",
+                RegisStatus = "PENDING",
+                MemberNoIntro = "MB_FIN_INTRODUCER",
+                PointIntro = 20000.0,
+                SourceRegisType = "OFFLINE",
+                RegistrationDate = now,
+                CreateDTimeUTC = now,
+                CreateBy = "seed",
+                LUDTimeUTC = now,
+                LUBy = "seed"
+            });
+        }
+        if (!await db.Set<CrdCard>().AnyAsync(x => x.CardNo == "CD_FIN_INTRO"))
+        {
+            db.Set<CrdCard>().Add(new CrdCard
+            {
+                CardNo = "CD_FIN_INTRO",
+                MemberNo = "MB_FIN_INTRO",
+                NetworkID = "1001",
+                CardStatus = "PENDING",
+                CreateDTimeUTC = now,
+                CreateBy = "seed",
+                LUDTimeUTC = now,
+                LUBy = "seed"
+            });
+        }
+
+        // 9. MB_FIN_OPENCARD: Kiểm thử nhánh tặng điểm mở thẻ mới (PointOpenCard > 0)
+        if (!await db.Set<CrdMember>().AnyAsync(x => x.MemberNo == "MB_FIN_OPENCARD"))
+        {
+            db.Set<CrdMember>().Add(new CrdMember
+            {
+                MemberNo = "MB_FIN_OPENCARD",
+                NetworkID = "1001",
+                OrgID = "4020320001",
+                DLCodeRegis = "DL01",
+                CustomerCode = "CUS_FIN_OPENCARD",
+                ProvinceCode = "P01",
+                DistrictCode = "D01",
+                MemberName = "Nguyen Van Open Card",
+                PhoneNo = "0901000010",
+                IDCardNo = "001090000010",
+                CarNo = "30A-OPENCARD",
+                VIN = "17CHARVINOPENCARD",
+                ModelCode = "CRETA",
+                TradeMarkCode = "HYUNDAI",
+                CardTypeUse = "I",
+                CardTypeInit = "I",
+                MemberStatus = "PENDING",
+                RegisStatus = "PENDING",
+                PointOpenCard = 150000.0,
+                SourceRegisType = "OFFLINE",
+                RegistrationDate = now,
+                CreateDTimeUTC = now,
+                CreateBy = "seed",
+                LUDTimeUTC = now,
+                LUBy = "seed"
+            });
+        }
+        if (!await db.Set<CrdCard>().AnyAsync(x => x.CardNo == "CD_FIN_OPENCARD"))
+        {
+            db.Set<CrdCard>().Add(new CrdCard
+            {
+                CardNo = "CD_FIN_OPENCARD",
+                MemberNo = "MB_FIN_OPENCARD",
+                NetworkID = "1001",
+                CardStatus = "PENDING",
+                CreateDTimeUTC = now,
+                CreateBy = "seed",
+                LUDTimeUTC = now,
+                LUBy = "seed"
+            });
+        }
+
+        // 10. MB_FIN_CRETA: Kiểm thử nhánh tặng điểm Creta (PointBuyCreta > 0 && CardTypeUse != CardTypeInit)
+        if (!await db.Set<CrdMember>().AnyAsync(x => x.MemberNo == "MB_FIN_CRETA"))
+        {
+            db.Set<CrdMember>().Add(new CrdMember
+            {
+                MemberNo = "MB_FIN_CRETA",
+                NetworkID = "1001",
+                OrgID = "4020320001",
+                DLCodeRegis = "DL01",
+                CustomerCode = "CUS_FIN_CRETA",
+                ProvinceCode = "P01",
+                DistrictCode = "D01",
+                MemberName = "Nguyen Van Buy Creta",
+                PhoneNo = "0901000011",
+                IDCardNo = "001090000011",
+                CarNo = "30A-BUYCRETA",
+                VIN = "17CHARVINBUYCRETA",
+                ModelCode = "CRETA",
+                TradeMarkCode = "HYUNDAI",
+                CardTypeUse = "S",
+                CardTypeInit = "I",
+                MemberStatus = "PENDING",
+                RegisStatus = "APPROVE2",
+                PointBuyCreta = 30000.0,
+                SourceRegisType = "OFFLINE",
+                RegistrationDate = now,
+                CreateDTimeUTC = now,
+                CreateBy = "seed",
+                LUDTimeUTC = now,
+                LUBy = "seed"
+            });
+        }
+        if (!await db.Set<CrdCard>().AnyAsync(x => x.CardNo == "CD_FIN_CRETA"))
+        {
+            db.Set<CrdCard>().Add(new CrdCard
+            {
+                CardNo = "CD_FIN_CRETA",
+                MemberNo = "MB_FIN_CRETA",
+                NetworkID = "1001",
+                CardStatus = "PENDING",
+                CreateDTimeUTC = now,
+                CreateBy = "seed",
+                LUDTimeUTC = now,
+                LUBy = "seed"
+            });
+        }
+
+        // 11. MB_FIN_VOUCHER: Kiểm thử nhánh tặng Voucher xe mới (PointVoucherNewCar > 0)
+        if (!await db.Set<Prm_VoucherNewCar>().AnyAsync(x => x.PrmVoucherCode == "PVC_FIN_01"))
+        {
+            db.Set<Prm_VoucherNewCar>().Add(new Prm_VoucherNewCar
+            {
+                PrmVoucherCode = "PVC_FIN_01",
+                NetworkID = "1001",
+                OrgID = "4020320001",
+                PrmVoucherName = "Voucher New Car Finish Test",
+                PrmVoucherStatus = "FINISH",
+                FlagAllModel = "1",
+                ValidityPeriod = 365,
+                PointVoucherAllModel = 1000000.0,
+                PointActualVCAllModel = 1000000.0,
+                PointUseLimitAllModel = 500000.0,
+                EffDateStart = now.Date.AddMonths(-1).ToString("yyyy-MM-dd"),
+                EffDateEnd = now.Date.AddMonths(1).ToString("yyyy-MM-dd"),
+                CreateDTimeUTC = now,
+                CreateBy = "seed",
+                FinishDTimeUTC = now,
+                FinishBy = "seed",
+                LogLUDTimeUTC = now,
+                LogLUBy = "seed"
+            });
+        }
+        if (!await db.Set<CrdMember>().AnyAsync(x => x.MemberNo == "MB_FIN_VOUCHER"))
+        {
+            db.Set<CrdMember>().Add(new CrdMember
+            {
+                MemberNo = "MB_FIN_VOUCHER",
+                NetworkID = "1001",
+                OrgID = "4020320001",
+                DLCodeRegis = "DL01",
+                CustomerCode = "CUS_FIN_VOUCHER",
+                ProvinceCode = "P01",
+                DistrictCode = "D01",
+                MemberName = "Nguyen Van Voucher New Car",
+                PhoneNo = "0901000012",
+                IDCardNo = "001090000012",
+                CarNo = "30A-VOUCHER",
+                VIN = "17CHARVINVOUCHER0",
+                ModelCode = "CRETA",
+                TradeMarkCode = "HYUNDAI",
+                CardTypeUse = "I",
+                CardTypeInit = "I",
+                MemberStatus = "PENDING",
+                RegisStatus = "PENDING",
+                PointVoucherNewCar = 1000000.0,
+                PointVoucher = 0,
+                PointActualVoucher = 0,
+                SourceRegisType = "OFFLINE",
+                RegistrationDate = now,
+                CreateDTimeUTC = now,
+                CreateBy = "seed",
+                LUDTimeUTC = now,
+                LUBy = "seed"
+            });
+        }
+        if (!await db.Set<CrdCard>().AnyAsync(x => x.CardNo == "CD_FIN_VOUCHER"))
+        {
+            db.Set<CrdCard>().Add(new CrdCard
+            {
+                CardNo = "CD_FIN_VOUCHER",
+                MemberNo = "MB_FIN_VOUCHER",
+                NetworkID = "1001",
+                CardStatus = "PENDING",
+                CreateDTimeUTC = now,
+                CreateBy = "seed",
+                LUDTimeUTC = now,
+                LUBy = "seed"
+            });
+        }
+
+        await db.SaveChangesAsync();
+    }
+}
+
