@@ -4,7 +4,7 @@ Nguồn mẫu số: `D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.Web
 
 **Mẫu số (N)**: 337
 
-**Tiến độ hiện tại**: 263/337 (78.04%)
+**Tiến độ hiện tại**: 264/337 (78.34%)
 
 Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã có` (đã port từ trước, có bằng chứng) · `Bỏ` (scaffold/không nghiệp vụ, ghi lý do) · `Cần xem tay`.
 
@@ -45,7 +45,7 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 33 | Crd_MemberChangeInfoController/Add | Đã làm | 89ffbaf |
 | 34 | Crd_MemberChangeInfoController/Delete | Đã làm | ea0e47a |
 | 35 | Crd_MemberChangeInfoController/Reject | Đã làm | e9be730 |
-| 36 | Crd_MemberChangeInfoController/Approve | Chưa làm | - |
+| 36 | Crd_MemberChangeInfoController/Approve | Đã làm | 017c05b |
 | 37 | Crd_MemberChangeInfoController/Finish | Chưa làm | - |
 | 38 | Crd_MemberChangeInfoController/Export | Chưa làm | - |
 | 39 | Crd_MemberController/Search | Đã làm | febb049 |
