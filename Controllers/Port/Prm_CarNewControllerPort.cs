@@ -576,6 +576,151 @@ public class Prm_CarNewControllerPort : ControllerBase
             return PortResult.Fail("Prm_CarNew_Appr", "Exception", ex.Message);
         }
     }
+
+    // Dùng chung cho Finish/Cancel: Prm_CarNew_CheckDB (Promotion.cs:64-99) + cập nhật trạng thái (Promotion.cs:1785-1976, 2099-2296).
+    private async Task<IActionResult> ChangeStatusAsync(Prm_CarNewApproveReq? req, string funcErrCode, string statusListToCheck, string newStatus)
+    {
+        var codeSys = req?.PRMCNCodeSys;
+        if (string.IsNullOrWhiteSpace(codeSys))
+        {
+            return PortResult.Fail("invalid_PRMCNCodeSys", "Check.PRMCNCodeSys", codeSys);
+        }
+
+        string? strPRMCNCodeSys = StdParam(codeSys);
+        string strRemark = (req?.Remark ?? "").Trim();
+
+        var waUserCodeHeader = Request.Headers["WAUserCode"].FirstOrDefault();
+        string strWAUserCode = !string.IsNullOrWhiteSpace(waUserCodeHeader)
+            ? waUserCodeHeader
+            : (!string.IsNullOrWhiteSpace(req?.WAUserCode) ? req.WAUserCode : "port");
+
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            var pat = PortQuery.Equal(strPRMCNCodeSys ?? "");
+            var existing = await _db.Set<Prm_CarNew>()
+                .FirstOrDefaultAsync(x => EF.Functions.Like((x.PRMCNCodeSys ?? "").ToLower(), pat, PortQuery.Esc));
+
+            if (existing == null)
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Prm_CarNew_CheckDB_CarNewNotFound", "Check.PRMCNCodeSys", strPRMCNCodeSys);
+            }
+
+            var okStatuses = statusListToCheck.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (!okStatuses.Contains(existing.PRMCNStatus ?? "", StringComparer.OrdinalIgnoreCase))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Prm_CarNew_CheckDB_StatusNotMatched",
+                    "Check.PRMCNCodeSys", strPRMCNCodeSys,
+                    "Check.strStatusListToCheck", statusListToCheck,
+                    "DB.Status", existing.PRMCNStatus);
+            }
+
+            var dtimeSys = DateTime.UtcNow;
+
+            // LỖI NGUỒN GIỮ NGUYÊN: LUDTimeUTC/LUBy có trong bảng tạm nhưng KHÔNG nằm trong mệnh đề SET => không đổi.
+            existing.LogLUDTimeUTC = dtimeSys;
+            existing.LogLUBy = strWAUserCode;
+            existing.Remark = strRemark;
+            existing.PRMCNStatus = newStatus;
+            if (newStatus == "FINISH")
+            {
+                existing.FinishDTimeUTC = dtimeSys;
+                existing.FinishBy = strWAUserCode;
+            }
+            else
+            {
+                existing.CancelDTimeUTC = dtimeSys;
+                existing.CancelBy = strWAUserCode;
+            }
+            await _db.SaveChangesAsync();
+
+            if (newStatus == "FINISH")
+            {
+                // Promotion.cs:1886-1971 (Update EffDateStart): chương trình FINISH trước đó của cùng đại lý đang hiệu lực hôm nay.
+                var todayStr = dtimeSys.ToString("yyyy-MM-dd");
+                var patDlcp = PortQuery.Equal(existing.DLCPCode ?? "");
+                var prev = await _db.Set<Prm_CarNew>()
+                    .Where(t => t.PRMCNCodeSys != existing.PRMCNCodeSys
+                             && EF.Functions.Like((t.DLCPCode ?? "").ToLower(), patDlcp, PortQuery.Esc)
+                             && t.PRMCNStatus == "FINISH"
+                             && string.Compare(t.EffDateStart, todayStr) <= 0
+                             && string.Compare(t.EffDateEnd, todayStr) >= 0)
+                    .OrderBy(t => t.EffDateStart)
+                    .FirstOrDefaultAsync();
+                if (prev != null)
+                {
+                    var dateEffDateStart = DateTime.Parse(existing.EffDateStart, System.Globalization.CultureInfo.InvariantCulture);
+                    var dateToday = DateTime.Parse(todayStr, System.Globalization.CultureInfo.InvariantCulture);
+                    prev.EffDateEnd = (dateEffDateStart <= dateToday ? dateToday : dateEffDateStart).AddDays(-1).ToString("yyyy-MM-dd");
+                    await _db.SaveChangesAsync();
+                }
+            }
+
+            await tx.CommitAsync();
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return PortResult.Fail(funcErrCode, "Exception", ex.Message);
+        }
+    }
+
+    [HttpPost("finish")]
+    public Task<IActionResult> Finish([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Prm_CarNewApproveReq? req)
+        => ChangeStatusAsync(req, "Prm_CarNew_Finish", "APPROVE", "FINISH");
+
+    [HttpPost("cancel")]
+    public Task<IActionResult> Cancel([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Prm_CarNewApproveReq? req)
+        => ChangeStatusAsync(req, "Prm_CarNew_Cancel", "PENDING, APPROVE", "CANCEL");
+
+    // Gate Delete(strJson) :469-535 => WA_Prm_CarNew_Save với FlagIsDelete = "1"; mã client gửi (không sinh mã mới).
+    [HttpPost("delete")]
+    public async Task<IActionResult> Delete([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Prm_CarNewSaveReq? req)
+    {
+        if (req?.Prm_CarNew == null)
+        {
+            return PortResult.Fail("Prm_CarNew_Save", "Check.strJson", null);
+        }
+
+        string? strPRMCNCodeSys = StdParam(req.Prm_CarNew.PRMCNCodeSys);
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            var prmPat = PortQuery.Equal(strPRMCNCodeSys ?? "");
+            var existing = await _db.Set<Prm_CarNew>()
+                .FirstOrDefaultAsync(x => EF.Functions.Like((x.PRMCNCodeSys ?? "").ToLower(), prmPat, PortQuery.Esc));
+            if (existing == null)
+            {
+                await tx.CommitAsync();
+                return Ok(new { Success = true, Data = (object?)null });
+            }
+            if (!string.Equals(existing.PRMCNStatus, "PENDING", StringComparison.OrdinalIgnoreCase))
+            {
+                await tx.RollbackAsync();
+                return PortResult.Fail("Prm_CarNew_Save_InvalidPRMCNStatus",
+                    "Check.DB.PRMCNStatus", existing.PRMCNStatus,
+                    "Check.PRMCNStatus.Expected", "PENDING");
+            }
+
+            _db.Set<Prm_CarNewSpec>().RemoveRange(await _db.Set<Prm_CarNewSpec>()
+                .Where(x => EF.Functions.Like((x.PRMCNCodeSys ?? "").ToLower(), prmPat, PortQuery.Esc)).ToListAsync());
+            _db.Set<Prm_CarNewDtl>().RemoveRange(await _db.Set<Prm_CarNewDtl>()
+                .Where(x => EF.Functions.Like((x.PRMCNCodeSys ?? "").ToLower(), prmPat, PortQuery.Esc)).ToListAsync());
+            _db.Set<Prm_CarNew>().RemoveRange(await _db.Set<Prm_CarNew>()
+                .Where(x => EF.Functions.Like((x.PRMCNCodeSys ?? "").ToLower(), prmPat, PortQuery.Esc)).ToListAsync());
+            await _db.SaveChangesAsync();
+            await tx.CommitAsync();
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return PortResult.Fail("Prm_CarNew_Save", "Exception", ex.Message);
+        }
+    }
 }
 
 public class Prm_CarNewApproveSeeder : IPortSeeder
