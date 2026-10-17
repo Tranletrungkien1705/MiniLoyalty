@@ -701,6 +701,65 @@ public class Prm_CarRecommendControllerPort : ControllerBase
             return PortResult.Fail("Prm_CarRecommend_Save", "Exception", ex.Message);
         }
     }
+
+    // ===================== #263: CalcPrm =====================
+    // Gate Prm_CarRecommendController.cs:639 (CalcPrm(string DLCPCode, string ModelCode)) -> WA_Prm_CarRecommend_CalcPrm -> Promotion.Calc.cs (Prm_CarRecommend_CalcPrmX :627).
+    public class Prm_CarRecommendCalcPrmReq
+    {
+        public string? DLCPCode { get; set; }
+        public string? ModelCode { get; set; }
+    }
+
+    [HttpPost("calcprm")]
+    public async Task<IActionResult> CalcPrm([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Prm_CarRecommendCalcPrmReq? req)
+    {
+        if (string.IsNullOrEmpty(req?.DLCPCode))
+        {
+            return PortResult.Fail("invalid_DLCPCode", "Check.DLCPCode", req?.DLCPCode);
+        }
+        if (string.IsNullOrEmpty(req.ModelCode))
+        {
+            return PortResult.Fail("invalid_ModelCode", "Check.ModelCode", req.ModelCode);
+        }
+        string? strDLCPCode = StdParam(req.DLCPCode);
+        string? strModelCode = StdParam(req.ModelCode);
+
+        // Mst_CarModel_CheckDB(strModelCode, FlagExist "1", FlagActive "1") (Master.Loyalty.cs:1843-1906).
+        var patModel = PortQuery.Equal(strModelCode ?? "");
+        var model = await _context.Set<Mst_CarModel>().AsNoTracking()
+            .FirstOrDefaultAsync(m => EF.Functions.Like((m.ModelCode ?? "").ToLower(), patModel, PortQuery.Esc));
+        if (model == null)
+        {
+            return PortResult.Fail("Mst_CarModel_CheckDB_CarModelNotFound", "Check.ModelCode", strModelCode);
+        }
+        if (!"1".Contains(model.FlagActive ?? ""))
+        {
+            return PortResult.Fail("Mst_CarModel_CheckDB_FlagActiveNotMatched",
+                "Check.ModelCode", strModelCode, "Check.strFlagActiveListToCheck", "1", "DB.FlagActive", model.FlagActive);
+        }
+
+        // #tbl_Prm_CarRecommend_Active: top 1 chương trình FINISH của đại lý có EffDateStart <= hôm nay <= EffDateEnd (không có order by).
+        var todayStr = DateTime.UtcNow.ToString("yyyy-MM-dd");
+        var patDlcp = PortQuery.Equal(strDLCPCode ?? "");
+        var active = await _context.Set<Prm_CarRecommend>().AsNoTracking()
+            .Where(t => EF.Functions.Like((t.DLCPCode ?? "").ToLower(), patDlcp, PortQuery.Esc)
+                     && t.PRMCRStatus == "FINISH"
+                     && string.Compare(t.EffDateStart, todayStr) <= 0 && string.Compare(todayStr, t.EffDateEnd) <= 0)
+            .OrderBy(t => t.PRMCRCodeSys)
+            .FirstOrDefaultAsync();
+
+        if (active == null)
+        {
+            return Ok(new { Success = true, Data = new { Prm_CarRecommend = (object?)null, PointVal = 0 } });
+        }
+
+        if (active.FlagAllModel != "1")
+        {
+            // LỖI NGUỒN GIỮ NGUYÊN (gate): Lst_Prm_CarRecommendDtl luôn null => Lst_Prm_CarRecommendDtl[0] ném NullReferenceException.
+            throw new NullReferenceException("Object reference not set to an instance of an object.");
+        }
+        return Ok(new { Success = true, Data = new { Prm_CarRecommend = active, PointVal = active.PointValAllModel } });
+    }
 }
 
 public class Prm_CarRecommendSearchReq
