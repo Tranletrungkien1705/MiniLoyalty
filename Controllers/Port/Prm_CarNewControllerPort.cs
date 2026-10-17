@@ -721,6 +721,65 @@ public class Prm_CarNewControllerPort : ControllerBase
             return PortResult.Fail("Prm_CarNew_Save", "Exception", ex.Message);
         }
     }
+
+    // ===================== #255: CalcPrm =====================
+    // Gate Prm_CarNewController.cs (CalcPrm(string DLCPCode, string ModelCode)) -> WA_Prm_CarNew_CalcPrm -> Promotion.Calc.cs:29-380 (Prm_CarNew_CalcPrmX :149).
+    public class Prm_CarNewCalcPrmReq
+    {
+        public string? DLCPCode { get; set; }
+        public string? ModelCode { get; set; }
+    }
+
+    [HttpPost("calcprm")]
+    public async Task<IActionResult> CalcPrm([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Prm_CarNewCalcPrmReq? req)
+    {
+        if (string.IsNullOrEmpty(req?.DLCPCode))
+        {
+            return PortResult.Fail("invalid_DLCPCode", "Check.DLCPCode", req?.DLCPCode);
+        }
+        if (string.IsNullOrEmpty(req.ModelCode))
+        {
+            return PortResult.Fail("invalid_ModelCode", "Check.ModelCode", req.ModelCode);
+        }
+        string? strDLCPCode = StdParam(req.DLCPCode);
+        string? strModelCode = StdParam(req.ModelCode);
+
+        // Mst_CarModel_CheckDB(strModelCode, FlagExist "1", FlagActive "1") (Master.Loyalty.cs:1843-1906).
+        var patModel = PortQuery.Equal(strModelCode ?? "");
+        var model = await _db.Set<Mst_CarModel>().AsNoTracking()
+            .FirstOrDefaultAsync(m => EF.Functions.Like((m.ModelCode ?? "").ToLower(), patModel, PortQuery.Esc));
+        if (model == null)
+        {
+            return PortResult.Fail("Mst_CarModel_CheckDB_CarModelNotFound", "Check.ModelCode", strModelCode);
+        }
+        if (!"1".Contains(model.FlagActive ?? ""))
+        {
+            return PortResult.Fail("Mst_CarModel_CheckDB_FlagActiveNotMatched",
+                "Check.ModelCode", strModelCode, "Check.strFlagActiveListToCheck", "1", "DB.FlagActive", model.FlagActive);
+        }
+
+        // #tbl_Prm_CarNew_Active: top 1 chương trình FINISH của đại lý có EffDateStart <= hôm nay <= EffDateEnd (không có order by).
+        var todayStr = DateTime.UtcNow.ToString("yyyy-MM-dd");
+        var patDlcp = PortQuery.Equal(strDLCPCode ?? "");
+        var active = await _db.Set<Prm_CarNew>().AsNoTracking()
+            .Where(t => EF.Functions.Like((t.DLCPCode ?? "").ToLower(), patDlcp, PortQuery.Esc)
+                     && t.PRMCNStatus == "FINISH"
+                     && string.Compare(t.EffDateStart, todayStr) <= 0 && string.Compare(todayStr, t.EffDateEnd) <= 0)
+            .OrderBy(t => t.PRMCNCodeSys)
+            .FirstOrDefaultAsync();
+
+        if (active == null)
+        {
+            return Ok(new { Success = true, Data = new { Prm_CarNew = (object?)null, PointVal = 0 } });
+        }
+
+        if (active.FlagAllModel != "1")
+        {
+            // LỖI NGUỒN GIỮ NGUYÊN (gate): Lst_Prm_CarNewDtl luôn null => Lst_Prm_CarNewDtl[0] ném NullReferenceException.
+            throw new NullReferenceException("Object reference not set to an instance of an object.");
+        }
+        return Ok(new { Success = true, Data = new { Prm_CarNew = active, PointVal = active.PointValAllModel } });
+    }
 }
 
 public class Prm_CarNewApproveSeeder : IPortSeeder
