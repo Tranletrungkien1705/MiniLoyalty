@@ -5,7 +5,9 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using MiniLoyalty.Data;
+using MiniLoyalty.Models;
 using MiniLoyalty.Models.Port;
 
 namespace MiniLoyalty.Controllers.Port;
@@ -62,6 +64,20 @@ public class Crd_MemberColumnChangeGetReq
 }
 
 /// <summary>
+/// DTO nhận tham số cho Crd_MemberChangeInfoController/Save (#032).
+/// Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Crd_MemberChangeInfoController.cs:516-578
+/// API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\CrdMemberChangeInfoController.cs:169-239
+/// Biz: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\Card.cs:29560-29659 (WAS_), 29399-29558 (Save), 28667-29397 (SaveX)
+/// </summary>
+
+// Gate :546-561 chỉ chuyển Crd_MemberChangeInfo; FlagIsDelete và Lst_Crd_MemberChangeInfoDtl không bao giờ được gán (=> null).
+public class Crd_MemberChangeInfoSaveReq
+{
+
+    public Crd_MemberChangeInfo? Crd_MemberChangeInfo { get; set; }
+}
+
+/// <summary>
 /// Port 1:1 Crd_MemberChangeInfoController — Crd_MemberChangeInfo (#027).
 /// Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Crd_MemberChangeInfoController.cs:33-144
 /// API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\CrdMemberChangeInfoController.cs:23-93
@@ -72,10 +88,12 @@ public class Crd_MemberColumnChangeGetReq
 public class Crd_MemberChangeInfoControllerPort : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly IConfiguration? _config;
 
-    public Crd_MemberChangeInfoControllerPort(AppDbContext db)
+    public Crd_MemberChangeInfoControllerPort(AppDbContext db, IConfiguration? config = null)
     {
         _db = db;
+        _config = config;
     }
 
     /// <summary>
@@ -785,5 +803,419 @@ public class Crd_MemberChangeInfoControllerPort : ControllerBase
                 Lst_Crd_MemberColumnChange = (list != null && list.Count > 0) ? list : null
             }
         });
+    }
+
+    private static string? StdParam(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim().ToUpperInvariant();
+    private static string? StdStr(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim().Normalize();
+
+    /// <summary>
+    /// Lưu / Sửa / Xóa đề nghị thay đổi thông tin hội viên (Action Save, #032).
+    /// Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Crd_MemberChangeInfoController.cs:516-578
+    /// API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\CrdMemberChangeInfoController.cs:169-239
+    /// Biz: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\Card.cs:29560-29659 (WAS_), 29399-29558 (Save), 28667-29397 (SaveX)
+    /// </summary>
+    [HttpPost("save")]
+    public async Task<IActionResult> Save([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_MemberChangeInfoSaveReq? req)
+    {
+        // 1. Kiểm tra rỗng / null ở tầng Gate (Gate :525-532, Ca 1)
+        if (req == null || req.Crd_MemberChangeInfo == null)
+        {
+            return PortResult.Fail("Crd_MemberChangeInfo_Save", "Check.strJson", null);
+        }
+
+        var headerInput = req.Crd_MemberChangeInfo;
+
+        // 2. Chuẩn hoá tham số đầu vào (Card.cs:28726-28737)
+        var bIsDelete = false;
+
+        var strRequestNo = StdParam(headerInput.RequestNo);
+        var strMemberNo = StdParam(headerInput.MemberNo);
+        var strDLCodeRequest = StdParam(headerInput.DLCodeRequest);
+        var strRequestType = StdParam(headerInput.RequestType);
+        var strRemark = StdStr(headerInput.Remark);
+        var strRemarkHTV = StdStr(headerInput.RemarkHTV);
+        var strAttachFilePath = StdStr(headerInput.AttachFilePath);
+        var strAttachFileName = StdStr(headerInput.AttachFileName);
+        var strAttachFileBase64 = StdStr(headerInput.AttachFileBase64);
+
+        double dbAttachFileSize = 0;
+        if (!string.IsNullOrWhiteSpace(headerInput.AttachFileSize))
+        {
+            if (double.TryParse(headerInput.AttachFileSize, out var fs))
+            {
+                dbAttachFileSize = fs;
+            }
+        }
+
+        List<Crd_MemberChangeInfoDtl>? reqDtl = null;
+        var dtimeSys = DateTime.UtcNow;
+        var strOrgID = headerInput.OrgID ?? "1001";
+        var strNetworkID = _config?["Biz_NetworkID"] ?? "1001";
+        var strWAUserCode = Request.Headers.TryGetValue("WAUserCode", out var hdrUser) && !string.IsNullOrWhiteSpace(hdrUser)
+            ? hdrUser.ToString().Trim()
+            : "port";
+
+        // 3. Khởi tạo transaction an toàn (Card.cs:29442)
+        await using var tx = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // 4. Kiểm tra bản ghi tồn tại qua Crd_MemberChangeInfo_CheckDB (Card.cs:28747-28786)
+            var p_RequestNo = PortQuery.Equal(strRequestNo ?? "");
+            var existingRecord = await _db.Set<Crd_MemberChangeInfo>()
+                .FirstOrDefaultAsync(x => EF.Functions.Like((x.RequestNo ?? "").ToLower(), p_RequestNo, PortQuery.Esc));
+
+            string? strCreateDTimeUTC = null;
+            string? strCreateBy = null;
+
+            if (existingRecord == null)
+            {
+                // Chưa tồn tại trong DB
+                if (bIsDelete)
+                {
+                    // Xóa bản ghi không tồn tại -> thành công ngay (goto MyCodeLabel_Done, Ca 11, Card.cs:28757-28760)
+                    await tx.CommitAsync();
+                    return Ok(new { Success = true, Data = (object?)null });
+                }
+            }
+            else
+            {
+                // Đã tồn tại trong DB: chỉ cho phép sửa/xóa khi RequestStatus là PENDING hoặc CANCEL (Card.cs:28768-28779, Ca 2)
+                var currentStatus = existingRecord.RequestStatus ?? "";
+                if (!string.Equals(currentStatus, "PENDING", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(currentStatus, "CANCEL", StringComparison.OrdinalIgnoreCase))
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Crd_MemberChangeInfo_SaveX_InvalidRequestStatus",
+                        "Check.DB.RequestStatus", currentStatus,
+                        "Check.RequestStatus.Expected", "PENDING");
+                }
+
+                // Giữ nguyên CreateDTimeUTC và CreateBy của bản ghi cũ từ DB (Card.cs:28783-28784)
+                strCreateDTimeUTC = existingRecord.CreateDTimeUTC;
+                strCreateBy = existingRecord.CreateBy;
+            }
+
+            strCreateDTimeUTC = string.IsNullOrEmpty(strCreateDTimeUTC) ? dtimeSys.ToString("yyyy-MM-dd HH:mm:ss") : strCreateDTimeUTC;
+            strCreateBy = string.IsNullOrEmpty(strCreateBy) ? strWAUserCode : strCreateBy;
+
+            // 5. Kiểm tra guard nghiệp vụ khi !bIsDelete (Card.cs:28793-28872)
+            string strApproveDLCode = "";
+
+            if (!bIsDelete)
+            {
+                // Guard MemberNo rỗng (Card.cs:28796-28805)
+                if (string.IsNullOrEmpty(strMemberNo))
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Crd_MemberChangeInfo_SaveX_InvalidMemberNo", "Check.MemberNo", strMemberNo);
+                }
+
+                // Crd_Member_CheckDB: kiểm tra hội viên tồn tại và MemberStatus = 'APPROVE' (Card.cs:28810-28817, Ca 3)
+                var p_MemberNo = PortQuery.Equal(strMemberNo);
+                var member = await _db.CrdMembers
+                    .FirstOrDefaultAsync(x => EF.Functions.Like((x.MemberNo ?? "").ToLower(), p_MemberNo, PortQuery.Esc));
+
+                if (member == null)
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Crd_Member_CheckDB_MemberNotFound", "Check.MemberNo", strMemberNo);
+                }
+
+                if (!string.Equals(member.MemberStatus, "APPROVE", StringComparison.OrdinalIgnoreCase))
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Crd_Member_CheckDB_MemberStatusNotMatched",
+                        "Check.MemberNo", strMemberNo,
+                        "Check.strMemberStatusListToCheck", "APPROVE",
+                        "DB.MemberStatus", member.MemberStatus);
+                }
+
+                // Guard DLCodeRequest rỗng (Card.cs:28819-28828)
+                if (string.IsNullOrEmpty(strDLCodeRequest))
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Crd_MemberChangeInfo_SaveX_InvalidDLCodeRequest", "Check.DLCodeRequest", strDLCodeRequest);
+                }
+
+                // Mst_DealerCP_CheckDB: kiểm tra đại lý tồn tại và FlagActive = '1' (Card.cs:28833-28839, Ca 4)
+                var p_DLCodeRequest = PortQuery.Equal(strDLCodeRequest);
+                var dealer = await _db.Set<Mst_DealerCP>()
+                    .FirstOrDefaultAsync(x => EF.Functions.Like((x.DLCPCode ?? "").ToLower(), p_DLCodeRequest, PortQuery.Esc));
+
+                if (dealer == null)
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Mst_DealerCP_CheckDB_DLNotFound", "Check.DLCPCode", strDLCodeRequest);
+                }
+
+                if (dealer.FlagActive != "1")
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Mst_DealerCP_CheckDB_FlagActiveNotMatched",
+                        "Check.DLCPCode", strDLCodeRequest,
+                        "Check.strFlagActiveListToCheck", "1",
+                        "DB.FlagActive", dealer.FlagActive);
+                }
+
+                // Guard RequestType: phải thuộc CHANGEINFO, CANCELMEMBER, CANCELMEMBERNOTQUERY (Card.cs:28841-28856, Ca 5)
+                if (string.IsNullOrEmpty(strRequestType) ||
+                    (!string.Equals(strRequestType, "CHANGEINFO", StringComparison.OrdinalIgnoreCase) &&
+                     !string.Equals(strRequestType, "CANCELMEMBER", StringComparison.OrdinalIgnoreCase) &&
+                     !string.Equals(strRequestType, "CANCELMEMBERNOTQUERY", StringComparison.OrdinalIgnoreCase)))
+                {
+                    await tx.RollbackAsync();
+                    return PortResult.Fail("Crd_MemberChangeInfo_SaveX_InvalidRequestType", "Check.RequestType", strRequestType);
+                }
+
+                // Nếu RequestType = CHANGEINFO: kiểm tra đại lý tra cứu hội viên Map_QueryDealer_Member_CheckDB (Card.cs:28858-28871)
+                if (string.Equals(strRequestType, "CHANGEINFO", StringComparison.OrdinalIgnoreCase))
+                {
+                    var mapQuery = await _db.Set<Map_QueryDealer_Member>()
+                        .FirstOrDefaultAsync(x => EF.Functions.Like((x.DLCPCode ?? "").ToLower(), p_DLCodeRequest, PortQuery.Esc) &&
+                                                  EF.Functions.Like((x.MemberNo ?? "").ToLower(), p_MemberNo, PortQuery.Esc));
+
+                    if (mapQuery == null)
+                    {
+                        await tx.RollbackAsync();
+                        return PortResult.Fail("Map_QueryDealer_Member_CheckDB_DLNotFound",
+                            "Check.DLCPCode", strDLCodeRequest,
+                            "Check.MemberNo", strMemberNo);
+                    }
+
+                    if (mapQuery.FlagActive != "1")
+                    {
+                        await tx.RollbackAsync();
+                        return PortResult.Fail("Map_QueryDealer_Member_CheckDB_FlagActiveNotMatched",
+                            "Check.DLCPCode", strDLCodeRequest,
+                            "Check.MemberNo", strMemberNo,
+                            "Check.strFlagActiveListToCheck", "1",
+                            "DB.FlagActive", mapQuery.FlagActive);
+                    }
+                }
+
+                // 6. Khóa đơn vị duyệt ApproveDLCode (Card.cs:28892-28931)
+                if (existingRecord == null)
+                {
+                    if (string.Equals(strRequestType, "CHANGEINFO", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Truy vấn Crd_CardTransaction lấy lượt xét hạng gần nhất của hội viên (Card.cs:28904-28925)
+                        var lastTx = await _db.Set<CrdCardTransaction>()
+                            .Where(cct => EF.Functions.Like((cct.MemberNo ?? "").ToLower(), p_MemberNo, PortQuery.Esc)
+                                && (cct.DealPointType == "CONSUMPTION" || cct.DealPointType == "SERVICETURN")
+                                && cct.DLCode != "HTV" && cct.DLCode != "SUPPORT")
+                            .OrderByDescending(cct => cct.CreateDTimeUTC)
+                            .FirstOrDefaultAsync();
+
+                        if (lastTx != null && !string.IsNullOrEmpty(lastTx.DLCode))
+                        {
+                            strApproveDLCode = StdParam(lastTx.DLCode) ?? "";
+                        }
+                    }
+                    else
+                    {
+                        // CANCELMEMBER / CANCELMEMBERNOTQUERY: để ApproveDLCode rỗng (Card.cs:28900-28901)
+                        strApproveDLCode = "";
+                    }
+                }
+                else
+                {
+                    // Bản ghi sửa: giữ nguyên ApproveDLCode cũ từ DB (Card.cs:28927-28930)
+                    strApproveDLCode = StdParam(existingRecord.ApproveDLCode) ?? "";
+                }
+
+                // 7. Kiểm tra bảng chi tiết Crd_MemberChangeInfoDtl (Card.cs:28997-29070)
+                var dtlsInput = reqDtl;
+                if (string.Equals(strRequestType, "CHANGEINFO", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (dtlsInput == null || dtlsInput.Count < 1)
+                    {
+                        await tx.RollbackAsync();
+                        return PortResult.Fail("Crd_MemberChangeInfo_Save_Input_Crd_MemberChangeInfoDtlTblInvalid", "Check.TableName", "Crd_MemberChangeInfoDtl");
+                    }
+                }
+
+                if (dtlsInput != null && dtlsInput.Count > 0)
+                {
+                    foreach (var dtl in dtlsInput)
+                    {
+                        var colCode = StdParam(dtl.ColumnCode);
+                        if (string.IsNullOrEmpty(colCode))
+                        {
+                            await tx.RollbackAsync();
+                            return PortResult.Fail("Crd_MemberColumnChange_CheckDB_Crd_MemberColumnChangeNotFound", "Check.ColumnCode", dtl.ColumnCode);
+                        }
+
+                        // Kiểm tra ColumnCode trong Crd_MemberColumnChange (Card.cs:29053-29060, Ca 7)
+                        var p_ColCode = PortQuery.Equal(colCode);
+                        var colExists = await _db.Set<Crd_MemberColumnChange>()
+                            .AnyAsync(x => EF.Functions.Like((x.ColumnCode ?? "").ToLower(), p_ColCode, PortQuery.Esc));
+
+                        if (!colExists)
+                        {
+                            await tx.RollbackAsync();
+                            return PortResult.Fail("Crd_MemberColumnChange_CheckDB_Crd_MemberColumnChangeNotFound", "Check.ColumnCode", dtl.ColumnCode);
+                        }
+                    }
+                }
+            }
+
+            // 8. Thực thi lưu dữ liệu SQL (Card.cs:29109-29249)
+            // Xóa cũ: xóa sạch trong Crd_MemberChangeInfoDtl và Crd_MemberChangeInfo theo RequestNo (Card.cs:29112-29134)
+            var oldDtls = await _db.Set<Crd_MemberChangeInfoDtl>()
+                .Where(x => EF.Functions.Like((x.RequestNo ?? "").ToLower(), p_RequestNo, PortQuery.Esc))
+                .ToListAsync();
+            if (oldDtls.Count > 0)
+            {
+                _db.Set<Crd_MemberChangeInfoDtl>().RemoveRange(oldDtls);
+            }
+
+            var oldHeaders = await _db.Set<Crd_MemberChangeInfo>()
+                .Where(x => EF.Functions.Like((x.RequestNo ?? "").ToLower(), p_RequestNo, PortQuery.Esc))
+                .ToListAsync();
+            if (oldHeaders.Count > 0)
+            {
+                _db.Set<Crd_MemberChangeInfo>().RemoveRange(oldHeaders);
+            }
+            await _db.SaveChangesAsync();
+
+            // Thêm mới (nếu !bIsDelete) (Card.cs:29136-29249)
+            var insertedDtls = new List<Crd_MemberChangeInfoDtl>();
+            if (!bIsDelete)
+            {
+                var newHeader = new Crd_MemberChangeInfo
+                {
+                    RequestNo = strRequestNo ?? "",
+                    NetworkID = strNetworkID,
+                    OrgID = strOrgID,
+                    MemberNo = strMemberNo,
+                    DLCodeRequest = strDLCodeRequest,
+                    ApproveDLCode = strApproveDLCode,
+                    RequestType = strRequestType,
+                    RequestStatus = "PENDING",
+                    Remark = strRemark,
+                    RemarkHTV = strRemarkHTV,
+                    AttachFilePath = strAttachFilePath,
+                    AttachFileName = strAttachFileName,
+                    AttachFileSize = dbAttachFileSize > 0 ? dbAttachFileSize.ToString() : null,
+                    CreateDTimeUTC = strCreateDTimeUTC,
+                    CreateBy = strCreateBy,
+                    LUDTimeUTC = dtimeSys.ToString("yyyy-MM-dd HH:mm:ss"),
+                    LUBy = strCreateBy,
+                    ApproveDTimeUTC = null,
+                    ApproveBy = null,
+                    FinishDTimeUTC = null,
+                    FinishBy = null,
+                    RejectDTimeUTC = null,
+                    RejectBy = null,
+                    LogLUDTimeUTC = dtimeSys.ToString("yyyy-MM-dd HH:mm:ss"),
+                    LogLUBy = strWAUserCode
+                };
+                _db.Set<Crd_MemberChangeInfo>().Add(newHeader);
+
+                if (reqDtl != null && reqDtl.Count > 0)
+                {
+                    foreach (var dtl in reqDtl)
+                    {
+                        var newDtl = new Crd_MemberChangeInfoDtl
+                        {
+                            RequestNo = strRequestNo ?? "",
+                            NetworkID = strNetworkID,
+                            OrgID = strOrgID,
+                            ColumnCode = StdParam(dtl.ColumnCode) ?? "",
+                            ColumnValueOld = StdStr(dtl.ColumnValueOld),
+                            ColumnValueNew = StdStr(dtl.ColumnValueNew),
+                            Remark = StdStr(dtl.Remark),
+                            RequestDtlStatus = "PENDING",
+                            LogLUDTimeUTC = dtimeSys.ToString("yyyy-MM-dd HH:mm:ss"),
+                            LogLUBy = strWAUserCode
+                        };
+                        insertedDtls.Add(newDtl);
+                        _db.Set<Crd_MemberChangeInfoDtl>().Add(newDtl);
+                    }
+                }
+                await _db.SaveChangesAsync();
+
+                // 9. Kiểm tra sau khi lưu (Check After Save, Card.cs:29252-29375)
+                // Ràng buộc CarNo và VIN: gom nhóm theo ColumnCode in ('CarNo', 'VIN') (Card.cs:29260-29294, Ca 8)
+                var carNoVinList = insertedDtls
+                    .Where(x => string.Equals(x.ColumnCode, "CARNO", StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(x.ColumnCode, "VIN", StringComparison.OrdinalIgnoreCase))
+                    .GroupBy(x => x.ColumnCode)
+                    .Select(g => g.Key)
+                    .ToList();
+
+                if (carNoVinList.Count > 1)
+                {
+                    await tx.RollbackAsync();
+                    var firstRaw = reqDtl?.FirstOrDefault(x =>
+                        string.Equals(x.ColumnCode, "CARNO", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(x.ColumnCode, "CarNo", StringComparison.OrdinalIgnoreCase))?.ColumnCode ?? "CarNo";
+                    return PortResult.Fail("Crd_MemberChangeInfo_SaveX_InvalidCarNo_VIN",
+                        "Check.CardNo", firstRaw,
+                        "Expect", "Only 1 CarNo or VIN in Crd_MemberChangeInfoDtl");
+                }
+
+                // Ràng buộc hủy hội viên: chỉ cho phép tối đa 1 đề nghị PENDING huỷ hội viên (Card.cs:29298-29375)
+                if (string.Equals(strRequestType, "CANCELMEMBER", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(strRequestType, "CANCELMEMBERNOTQUERY", StringComparison.OrdinalIgnoreCase))
+                {
+                    var p_MemberNo = PortQuery.Equal(strMemberNo ?? "");
+                    var cancelPending = await _db.Set<Crd_MemberChangeInfo>()
+                        .Where(t => EF.Functions.Like((t.MemberNo ?? "").ToLower(), p_MemberNo, PortQuery.Esc) &&
+                                    t.RequestType == strRequestType &&
+                                    t.RequestStatus == "PENDING")
+                        .ToListAsync();
+
+                    if (cancelPending.Count > 1)
+                    {
+                        await tx.RollbackAsync();
+                        return PortResult.Fail("Crd_MemberChangeInfo_SaveX_InvalidRequestStatus_RequestType",
+                            "Check.MemberNo", cancelPending[0].MemberNo,
+                            "Check.RequestType", cancelPending[0].RequestType,
+                            "Check.RequestStatus", cancelPending[0].RequestStatus,
+                            "Expect", "Only 1 RequestStatus P, A in Crd_MemberChangeInfo with Type CancelMember");
+                    }
+                }
+            }
+
+            // Commit transaction an toàn (Card.cs:29521)
+            await tx.CommitAsync();
+            return Ok(new { Success = true, Data = (object?)null });
+        }
+        catch (Exception)
+        {
+            await tx.RollbackAsync();
+            throw;
+        }
+    }
+}
+
+/// <summary>
+/// Seeder bổ sung cho Crd_MemberChangeInfoController/Save (#032).
+/// Order => 97 (dải 10-99 chưa dùng theo P3).
+/// Idempotent. Đảm bảo cấu hình cột VIN tồn tại trong Crd_MemberColumnChange để ca 8 vượt qua guard cột và kiểm tra ràng buộc sau lưu CarNo_VIN.
+/// </summary>
+public class Crd_MemberChangeInfoSaveSeeder : IPortSeeder
+{
+    public int Order => 97;
+
+    public async Task SeedAsync(AppDbContext db)
+    {
+        if (!await db.Set<Crd_MemberColumnChange>().AnyAsync(x => x.ColumnCode == "VIN"))
+        {
+            db.Set<Crd_MemberColumnChange>().Add(new Crd_MemberColumnChange
+            {
+                ColumnCode = "VIN",
+                OrgID = "1001",
+                NetworkID = "1001",
+                ColumnName = "Số khung (VIN)",
+                FlagLinkMst = "0",
+                MasterName = null,
+                Remark = "Cấu hình đổi số khung VIN",
+                LogLUBy = "seed",
+                LogLUDTimeUTC = "2026-08-01 05:00:00"
+            });
+            await db.SaveChangesAsync();
+        }
     }
 }
