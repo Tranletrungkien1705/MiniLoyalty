@@ -89,6 +89,17 @@ public class Crd_MemberChangeInfoAddReq
 }
 
 /// <summary>
+/// DTO nhận tham số cho Crd_MemberChangeInfoController/Delete (#034).
+/// Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Crd_MemberChangeInfoController.cs:707-770
+/// API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\CrdMemberChangeInfoController.cs:169-239
+/// Biz: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\Card.cs:29560-29659 (WAS_), 29399-29558 (Save), 28667-29397 (SaveX)
+/// </summary>
+public class Crd_MemberChangeInfoDeleteReq
+{
+    public Crd_MemberChangeInfo? Crd_MemberChangeInfo { get; set; }
+}
+
+/// <summary>
 /// Port 1:1 Crd_MemberChangeInfoController — Crd_MemberChangeInfo (#027).
 /// Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Crd_MemberChangeInfoController.cs:33-144
 /// API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\CrdMemberChangeInfoController.cs:23-93
@@ -885,6 +896,25 @@ public class Crd_MemberChangeInfoControllerPort : ControllerBase
     }
 
     /// <summary>
+    /// Xóa đề nghị thay đổi thông tin hội viên (Action Delete, #034).
+    /// Gate: D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Crd_MemberChangeInfoController.cs:707-770
+    /// API: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\CrdMemberChangeInfoController.cs:169-239
+    /// Biz: D:\idocNet\2022.7.Loyalty\11.BackEnd\V10\idn.Loyalty.Biz\Card.cs:29560-29659 (WAS_), 29399-29558 (Save), 28667-29397 (SaveX)
+    /// </summary>
+    [HttpPost("delete")]
+    public async Task<IActionResult> Delete([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Crd_MemberChangeInfoDeleteReq? req)
+    {
+        // 1. Kiểm tra rỗng / null ở tầng Gate (Gate :716-723, :759-762)
+        if (req == null || req.Crd_MemberChangeInfo == null)
+        {
+            return PortResult.Fail("Crd_MemberChangeInfo_Save", "Check.strJson", null);
+        }
+
+        // 2. Gọi hàm SaveCoreAsync với bIsDelete = true (Gate :751-754, Card.cs:28726)
+        return await SaveCoreAsync(req.Crd_MemberChangeInfo, null, bIsDelete: true);
+    }
+
+    /// <summary>
     /// Nghiệp vụ lưu cốt lõi dùng chung giữa Save (#032) và Add (#033) (Card.cs:28667-29397 Crd_MemberChangeInfo_SaveX).
     /// </summary>
     private async Task<IActionResult> SaveCoreAsync(Crd_MemberChangeInfo headerInput, List<Crd_MemberChangeInfoDtl>? reqDtl, bool bIsDelete)
@@ -1281,3 +1311,119 @@ public class Crd_MemberChangeInfoSaveSeeder : IPortSeeder
         }
     }
 }
+
+/// <summary>
+/// Seeder bổ sung cho Crd_MemberChangeInfoController/Delete (#034).
+/// Order => 92 (dải 10-99 chưa dùng theo P3).
+/// Idempotent. Cung cấp dữ liệu mẫu kiểm thử xóa đề nghị trạng thái PENDING (REQ_DEL_01) kèm bản ghi con Crd_MemberChangeInfoDtl và trạng thái CANCEL (REQ_DEL_CANCEL).
+/// </summary>
+public class Crd_MemberChangeInfoDeleteSeeder : IPortSeeder
+{
+    public int Order => 92;
+
+    public async Task SeedAsync(AppDbContext db)
+    {
+        // 1. Đảm bảo hội viên MB001 tồn tại trong Crd_Member để GetByRequestNo round-trip query không bị loại bỏ
+        if (!await db.CrdMembers.AnyAsync(m => m.MemberNo == "MB001"))
+        {
+            db.CrdMembers.Add(new CrdMember
+            {
+                MemberNo = "MB001",
+                NetworkID = "1001",
+                OrgID = "ORG01",
+                MemberName = "Nguyen Van A",
+                CarNo = "30A-12345",
+                PhoneNo = "0901234567",
+                VIN = "VIN001",
+                AmountEnd = 1000,
+                CardTypeUse = "STANDARD",
+                CreateBy = "seed",
+                LUBy = "seed"
+            });
+            await db.SaveChangesAsync();
+        }
+
+        // 2. Seed đề nghị PENDING (REQ_DEL_01) phục vụ Ca 1
+        if (!await db.Set<Crd_MemberChangeInfo>().AnyAsync(r => r.RequestNo == "REQ_DEL_01"))
+        {
+            db.Set<Crd_MemberChangeInfo>().Add(new Crd_MemberChangeInfo
+            {
+                RequestNo = "REQ_DEL_01",
+                MemberNo = "MB001",
+                NetworkID = "1001",
+                OrgID = "ORG01",
+                DLCodeRequest = "VN040",
+                RequestType = "CHANGEINFO",
+                RequestStatus = "PENDING",
+                ApproveDLCode = "VN040",
+                CreateDTimeUTC = "2026-08-01 08:00:00",
+                FinishDTimeUTC = null,
+                LogLUDTimeUTC = "2026-08-01 08:00:00",
+                CreateBy = "seed",
+                LUBy = "seed"
+            });
+            await db.SaveChangesAsync();
+        }
+
+        // Seed chi tiết cho REQ_DEL_01 trong Crd_MemberChangeInfoDtl
+        if (!await db.Set<Crd_MemberChangeInfoDtl>().AnyAsync(d => d.RequestNo == "REQ_DEL_01"))
+        {
+            db.Set<Crd_MemberChangeInfoDtl>().Add(new Crd_MemberChangeInfoDtl
+            {
+                RequestNo = "REQ_DEL_01",
+                ColumnCode = "PhoneNo",
+                ColumnValueOld = "0901234567",
+                ColumnValueNew = "0912345678",
+                Remark = "Thay doi SDT cho REQ_DEL_01",
+                RequestDtlStatus = "PENDING",
+                NetworkID = "1001",
+                OrgID = "ORG01",
+                LogLUBy = "seed",
+                LogLUDTimeUTC = "2026-08-01 08:00:00"
+            });
+            await db.SaveChangesAsync();
+        }
+
+        // 3. Seed đề nghị CANCEL (REQ_DEL_CANCEL) phục vụ Ca 2
+        if (!await db.Set<Crd_MemberChangeInfo>().AnyAsync(r => r.RequestNo == "REQ_DEL_CANCEL"))
+        {
+            db.Set<Crd_MemberChangeInfo>().Add(new Crd_MemberChangeInfo
+            {
+                RequestNo = "REQ_DEL_CANCEL",
+                MemberNo = "MB001",
+                NetworkID = "1001",
+                OrgID = "ORG01",
+                DLCodeRequest = "VN040",
+                RequestType = "CHANGEINFO",
+                RequestStatus = "CANCEL",
+                ApproveDLCode = "VN040",
+                CreateDTimeUTC = "2026-08-02 08:00:00",
+                FinishDTimeUTC = null,
+                LogLUDTimeUTC = "2026-08-02 08:00:00",
+                CreateBy = "seed",
+                LUBy = "seed"
+            });
+            await db.SaveChangesAsync();
+        }
+
+        // Seed chi tiết cho REQ_DEL_CANCEL trong Crd_MemberChangeInfoDtl
+        if (!await db.Set<Crd_MemberChangeInfoDtl>().AnyAsync(d => d.RequestNo == "REQ_DEL_CANCEL"))
+        {
+            db.Set<Crd_MemberChangeInfoDtl>().Add(new Crd_MemberChangeInfoDtl
+            {
+                RequestNo = "REQ_DEL_CANCEL",
+                ColumnCode = "PhoneNo",
+                ColumnValueOld = "0901234567",
+                ColumnValueNew = "0988888888",
+                Remark = "Thay doi SDT cho REQ_DEL_CANCEL",
+                RequestDtlStatus = "CANCEL",
+                NetworkID = "1001",
+                OrgID = "ORG01",
+                LogLUBy = "seed",
+                LogLUDTimeUTC = "2026-08-02 08:00:00"
+            });
+            await db.SaveChangesAsync();
+        }
+    }
+}
+
