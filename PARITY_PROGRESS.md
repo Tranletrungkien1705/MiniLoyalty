@@ -26,11 +26,11 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 14 | Crd_CardTransactionController/Export | Đã làm | 75d4ee0 |
 | 15 | Crd_CardTransactionInCreaseController/Search | Đã làm | 9d65ffb |
 | 16 | Crd_CardTransactionInCreaseController/Export | Đã làm | d4a9c50 |
-| 17 | Crd_CardTransactionServiceTurnController/Search | Chưa làm | - |
-| 18 | Crd_CardTransactionServiceTurnController/Export | Chưa làm | - |
+| 17 | Crd_CardTransactionServiceTurnController/Search | Cần xem tay | Phu thuoc Crd_DealSerRO/Dtl chua port |
+| 18 | Crd_CardTransactionServiceTurnController/Export | Cần xem tay | Phu thuoc #17 |
 | 19 | Crd_DealSerROController/Search | Đã làm | 2c23b83 |
-| 20 | Crd_DealSerROController/Calc | Chưa làm | - |
-| 21 | Crd_DealSerROController/Add | Chưa làm | - |
+| 20 | Crd_DealSerROController/Calc | Cần xem tay | Crd_DealSerRO_AddX ~2400 dong |
+| 21 | Crd_DealSerROController/Add | Cần xem tay | Crd_DealSerRO_AddX ~2400 dong |
 | 22 | Crd_DealUsePromotionController/Save | Đã làm | cb05505 |
 | 23 | Crd_DealUsePromotionController/Search | Đã làm | f31e3e1 |
 | 24 | Crd_DealUsePromotionController/GetForMemberNo | Đã làm | e741824 |
@@ -46,7 +46,7 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 34 | Crd_MemberChangeInfoController/Delete | Đã làm | ea0e47a |
 | 35 | Crd_MemberChangeInfoController/Reject | Đã làm | e9be730 |
 | 36 | Crd_MemberChangeInfoController/Approve | Đã làm | 017c05b |
-| 37 | Crd_MemberChangeInfoController/Finish | Chưa làm | - |
+| 37 | Crd_MemberChangeInfoController/Finish | Cần xem tay | Phu thuoc Crd_Member_UpdateX_New20230104 + DMS CarSv |
 | 38 | Crd_MemberChangeInfoController/Export | Đã làm | 3da4949 |
 | 39 | Crd_MemberController/Search | Đã làm | febb049 |
 | 40 | Crd_MemberController/GetByMemberNo | Đã làm | 9569b01 |
@@ -56,28 +56,28 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 44 | Crd_MemberController/GetRegisterByMemberNo | Đã làm | 2baa16d |
 | 45 | Crd_MemberController/GetCalcPointBuyCreta | Đã làm | 85b280a |
 | 46 | Crd_MemberController/Save | Đã làm | 2b9e0b6 |
-| 47 | Crd_MemberController/SaveAndApprove | Chưa làm | - |
+| 47 | Crd_MemberController/SaveAndApprove | Cần xem tay | Phu thuoc chuoi Finish #53 |
 | 48 | Crd_MemberController/Update | Đã làm | 0840dd6 |
 | 49 | Crd_MemberController/Delete | Đã làm | f8ef5b6 |
 | 50 | Crd_MemberController/Cancel | Đã làm | f8ef5b6 |
 | 51 | Crd_MemberController/Approve | Đã làm | f8ef5b6 |
 | 52 | Crd_MemberController/ApproveByDealer | Đã làm | f8ef5b6 |
-| 53 | Crd_MemberController/Finish | Chưa làm | - |
+| 53 | Crd_MemberController/Finish | Cần xem tay | Chuoi Perform* + Crd_CardTransaction_Perform chua port |
 | 54 | Crd_MemberController/Export | Đã làm | 6968ad3 |
 | 55 | Crd_MemberDiscountTransactionController/Search | Đã làm | e152a91 |
 | 56 | Crd_MemberVoucherTransactionController/Search | Đã làm | 5a0c9ba |
 | 57 | Crd_MemberVoucherTransactionController/Report | Đã làm | 951514c |
 | 58 | Crd_MemberVoucherTransactionController/ExportRpt | Đã làm | 2198650 |
 | 59 | FileController/UploadFile | Đã làm | 894eb51 |
-| 60 | HomeController/Index | Chưa làm | - |
-| 61 | HomeController/About | Chưa làm | - |
-| 62 | HomeController/Contact | Chưa làm | - |
+| 60 | HomeController/Index | Bỏ | Chi return View() (MVC mac dinh) |
+| 61 | HomeController/About | Bỏ | Chi return View() (MVC mac dinh) |
+| 62 | HomeController/Contact | Bỏ | Chi return View() (MVC mac dinh) |
 | 63 | InvF_TempPrintController/GetByTempPrintType | Đã làm | d643394 |
 | 64 | InvF_TempPrintController/GetAllActive | Đã làm | 83b1588 |
 | 65 | Map_DealerCP_OrgController/GetByDLCPCode | Đã làm | b6bc9a4 |
 | 66 | Map_QueryDealer_MemberController/Search | Đã làm | 904a579 |
 | 67 | Map_QueryDealer_MemberController/SearchForRePort | Đã làm | f3f9453 |
-| 68 | Map_QueryDealer_MemberController/Create | Chưa làm | - |
+| 68 | Map_QueryDealer_MemberController/Create | Cần xem tay | Sau luu goi DMS ngoai |
 | 69 | Map_QueryDealer_MemberController/ExportExcel | Đã làm | 8c79bfa |
 | 70 | Mst_BirthPolicyController/Search | Đã làm | 87e7bc8 |
 | 71 | Mst_BirthPolicyController/GetAllActive | Đã làm | 1f45cdd |
@@ -124,11 +124,11 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 112 | Mst_DealerCPController/GetByDLCPCode | Đã làm | 2dc6a66 |
 | 113 | Mst_DealerCPController/GetByOrgID | Đã làm | 35489ef |
 | 114 | Mst_DealerCPController/CreateOld | Đã làm | 03e9623 |
-| 115 | Mst_DealerCPController/Create | Chưa làm | - |
+| 115 | Mst_DealerCPController/Create | Cần xem tay | Phu thuoc Mst_NNT/Sys_User ability |
 | 116 | Mst_DealerCPController/Update | Đã làm | 578ef34 |
 | 117 | Mst_DealerCPController/Delete | Đã làm | f46f3d7 |
 | 118 | Mst_DealerCPController/DeleteMultiple | Đã làm | ccda090 |
-| 119 | Mst_DealerCPController/Import | Chưa làm | - |
+| 119 | Mst_DealerCPController/Import | Cần xem tay | Phu thuoc Mst_NNT/Sys_User ability |
 | 120 | Mst_DealerCPController/Export | Đã làm | 0b1c1c8 |
 | 121 | Mst_DealerCPController/ExportTemplate | Đã làm | 1884d03 |
 | 122 | Mst_DepartmentController/Search | Đã làm | ec584e6 |
@@ -168,9 +168,9 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 156 | Mst_GovIDTypeController/Search | Đã làm | 0cab8a8 |
 | 157 | Mst_GovIDTypeController/GetByGovIDType | Đã làm | e05732a |
 | 158 | Mst_GovIDTypeController/GetAllActive | Đã làm | fbe0e15 |
-| 159 | Mst_GovIDTypeController/Create | Chưa làm | - |
-| 160 | Mst_GovIDTypeController/Update | Chưa làm | - |
-| 161 | Mst_GovIDTypeController/Delete | Chưa làm | - |
+| 159 | Mst_GovIDTypeController/Create | Bỏ | Thieu backend: chi gate + dich vu ngoai MstSv |
+| 160 | Mst_GovIDTypeController/Update | Bỏ | Thieu backend: chi gate + dich vu ngoai MstSv |
+| 161 | Mst_GovIDTypeController/Delete | Bỏ | Thieu backend: chi gate + dich vu ngoai MstSv |
 | 162 | Mst_GradeController/Search | Đã làm | 3b851aa |
 | 163 | Mst_GradeController/GetAllActive | Đã làm | 6c2dc39 |
 | 164 | Mst_LeaveDayController/Search | Đã làm | c6b0984 |
@@ -190,8 +190,8 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 178 | Mst_OrgController/Search | Đã làm | 775577b |
 | 179 | Mst_OrgController/GetAllActive | Đã làm | 84327c2 |
 | 180 | Mst_OrgController/GetAllOrg_bk | Bỏ | - |
-| 181 | Mst_OrgController/GetAllOrg | Chưa làm | - |
-| 182 | Mst_OrgController/GetOrgsNotInSolution | Chưa làm | - |
+| 181 | Mst_OrgController/GetAllOrg | Cần xem tay | Phu thuoc iNOS master server |
+| 182 | Mst_OrgController/GetOrgsNotInSolution | Cần xem tay | Phu thuoc iNOS master server |
 | 183 | Mst_ParamPromotionController/Search | Đã làm | 2972960 |
 | 184 | Mst_ParamPromotionController/GetAllActive | Đã làm | 1a3a9bb |
 | 185 | Mst_ParamPromotionController/GetByPrProgramCode | Đã làm | 010812f |
@@ -290,7 +290,7 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 278 | ReqMemberRegisterController/ApproveOld | Đã làm | 6ca4719 |
 | 279 | ReqMemberRegisterController/Cancel | Đã làm | 6ca4719 |
 | 280 | ReqMemberRegisterController/Reject | Đã làm | 6ca4719 |
-| 281 | ReqMemberRegisterController/SyncCarSV | Chưa làm | - |
+| 281 | ReqMemberRegisterController/SyncCarSV | Bỏ | Chi dong bo DMS CarSv (dich vu ngoai) |
 | 282 | Rpt_MasterDataController/Search | Đã làm | ed607a5 |
 | 283 | Rpt_MasterDataController/ExportExcel | Đã làm | 7edce65 |
 | 284 | Rpt_PeriodSummaryController/Search | Đã làm | 70325f8 |
@@ -306,9 +306,9 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 294 | Rpt_PeriodSummaryController/ExportExcelTransaction | Đã làm | 6d00d67 |
 | 295 | Rpt_PeriodSummaryController/ExportExcelTransactionDetail | Đã làm | 41e59da |
 | 296 | Rpt_PeriodSummaryController/ExportExcelTransactionExceptionally | Đã làm | 1cb1454 |
-| 297 | Rpt_PeriodSummaryController/PrintPDFRptDtl | Chưa làm | - |
-| 298 | ServicesController/GetDLS_DealerCustomer | Chưa làm | - |
-| 299 | ServicesController/GetCarSv_Ser_CustomerCar | Chưa làm | - |
+| 297 | Rpt_PeriodSummaryController/PrintPDFRptDtl | Bỏ | Phu thuoc ReportBro server ngoai (PostReport) |
+| 298 | ServicesController/GetDLS_DealerCustomer | Bỏ | Chi goi DMS (dich vu ngoai) |
+| 299 | ServicesController/GetCarSv_Ser_CustomerCar | Bỏ | Chi goi DMS (dich vu ngoai) |
 | 300 | Sys_AccessController/Search | Đã làm | 38aae33 |
 | 301 | Sys_AccessController/Get | Đã làm | ad3a9fe |
 | 302 | Sys_AccessController/GetByGroupCode | Đã làm | e0454d7 |
@@ -335,7 +335,7 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 323 | Sys_UserController/Search | Đã làm | c99eb93 |
 | 324 | Sys_UserController/GetByUserCode | Đã làm | dc6f0cb |
 | 325 | Sys_UserController/GetByMST | Đã làm | 06f6450 |
-| 326 | Sys_UserController/CheckUserExistAccCenter | Chưa làm | - |
+| 326 | Sys_UserController/CheckUserExistAccCenter | Bỏ | Chi goi AccountService ngoai (inos.common) |
 | 327 | Sys_UserController/GetForCurrentUser | Đã làm | a92d7c0 |
 | 328 | Sys_UserController/GetAllActive | Đã làm | 51f3210 |
 | 329 | Sys_UserController/Create | Đã làm | 90f1c7f |
