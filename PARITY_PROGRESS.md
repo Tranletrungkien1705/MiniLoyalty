@@ -4,7 +4,7 @@ Nguồn mẫu số: `D:\idocNet\2022.7.Loyalty\13.ClientGate\V10\idn.Loyalty.Web
 
 **Mẫu số (N)**: 337
 
-**Tiến độ hiện tại**: 298/337 (88.43%)
+**Tiến độ hiện tại**: 299/337 (88.72%)
 
 Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã có` (đã port từ trước, có bằng chứng) · `Bỏ` (scaffold/không nghiệp vụ, ghi lý do) · `Cần xem tay`.
 
@@ -293,7 +293,7 @@ Trạng thái: `Chưa làm` · `Đã làm` (có commit, review PASS) · `Đã c�
 | 281 | ReqMemberRegisterController/SyncCarSV | Chưa làm | - |
 | 282 | Rpt_MasterDataController/Search | Chưa làm | - |
 | 283 | Rpt_MasterDataController/ExportExcel | Chưa làm | - |
-| 284 | Rpt_PeriodSummaryController/Search | Chưa làm | - |
+| 284 | Rpt_PeriodSummaryController/Search | Đã làm | 70325f8 |
 | 285 | Rpt_PeriodSummaryController/SearchDetail | Chưa làm | - |
 | 286 | Rpt_PeriodSummaryController/SearchDetail01 | Chưa làm | - |
 | 287 | Rpt_PeriodSummaryController/SearchTransaction | Chưa làm | - |
