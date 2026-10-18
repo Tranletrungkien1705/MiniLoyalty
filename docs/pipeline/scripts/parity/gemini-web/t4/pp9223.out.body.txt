@@ -1,0 +1,41 @@
+Gemini
+search
+Cuộc trò chuyện mới
+Thư viện
+Đã lên lịch
+Tuỳ chỉnh
+Mới
+Sổ ghi chú
+Sổ ghi chú mới
+Tất cả
+Xác Nhận Ngắn Gọn
+Đề Bài Port ReqMemberRegisterController
+Lỗi Thiếu Nguồn ReqMemberRegister
+Tạo Đề Bài Prm_CarNew Finish
+System Connection Check
+Lỗi Cổng Crm_CarRecommend Cần Xem Tay
+Port Prm_CarRecommendController GetByPRMCRCodeSys Conflict
+Xử lý Hạng Mục Crd_CardTransactionServiceTurnController
+Porting Prm_CarRecommendController Search Endpoint
+A Friendly Greeting
+Port Hạng Mục Prm_CarRecommend Thất Bại
+Lặp lại từ PONGB
+vũ nghĩa
+Trò chuyện với Gemini
+Bạn đã nói Tra loi 1 tu: OK
+
+Tra loi 1 tu: OK
+
+Gemini đã nói
+
+OK
+
+
+
+
+Gemini
+Tự động
+
+Gemini là một AI và có thể mắc sai sót.
+
+Nâng cấp

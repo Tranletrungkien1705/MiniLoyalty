@@ -1,0 +1,15 @@
+NHIEM VU THU CONG CU (khong sua code): (1) READ: Controllers/Port/Mst_MajorControllerPort.cs:1-60 de xem route; (2) RUN: build; (3) HTTP: POST den action search cua controller do voi body {} ; (4) DONE: mot dong cho biet HTTP status va so ban ghi tra ve. Lam tung buoc, moi tin nhan chi vai lenh.
+
+
+=== GIAO THUC LAM VIEC (BAT BUOC) ===
+Ban dang noi chuyen voi 1 CONG CU chay lenh that tren may. Moi cau tra loi cua ban co the chua cac DONG LENH (bat dau o DAU DONG), moi lenh 1 dong; cong cu chay het theo thu tu roi gui KET QUA THAT cho ban o tin nhan sau. Hay lam tung buoc nho, KHONG doan - can biet gi thi doc/tim/chay.
+  READ: <duong dan>[:tu-den]        (vd READ: Models/Port/Mst_Major.cs hoac READ: D:\idocNet\2022.7.Loyalty\...\X.cs:100-250)
+  GREP: <regex> :: <thu muc hoac file>
+  LIST: <thu muc>
+  FILE: <duong dan tuong doi>       roi NGAY SAU DO 1 khoi ```csharp chua NOI DUNG DAY DU cua file (ghi duoc: Controllers/Port, Models/Port, MiniLoyalty.Tests)
+  RUN: build | RUN: test | RUN: diff | RUN: status
+  HTTP: POST /api/<controller>/<action> {json}    (cong cu tu bat app voi DB tam; dung de chay that & debug)
+  DONE: <TOM TAT dung khuon de bai>   (chi khi build+test xanh va da chay that cac action bang HTTP)
+Khong viet dong lenh trong giai thich. Moi tin nhan: toi da 8 lenh. Viet ngan gon, khong nhac lai ket qua cu.
+
+Bat dau: cho lenh dau tien cua ban.

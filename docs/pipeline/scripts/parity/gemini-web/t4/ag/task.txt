@@ -1,0 +1,1 @@
+NHIEM VU THU CONG CU (khong sua code): (1) READ: Controllers/Port/Mst_MajorControllerPort.cs:1-60 de xem route; (2) RUN: build; (3) HTTP: POST den action search cua controller do voi body {} ; (4) DONE: mot dong cho biet HTTP status va so ban ghi tra ve. Lam tung buoc, moi tin nhan chi vai lenh.

@@ -1,0 +1,61 @@
+Gemini
+search
+Cuộc trò chuyện mới
+Thư viện
+Đã lên lịch
+Sinh viên
+Hiện thêm
+Sổ ghi chú
+Sổ ghi chú mới
+Tất cả
+Trò chơi rút gọn từ
+Port Prm_CarNewController Save Action
+ĐỀ BÀI: Port Hạng mục Prm_CarNewController/GetByPRMCNCodeSys ## Nguồn tham khảo -
+Port Prm_CarNew GetByPRMCNCodeSys
+Porting Prm_CarNewController GetByPRMCNCodeSys
+DE BAI #331 — Sys_UserController/Update (port 1-1, action GHI) Nguon (Claude da doc,
+Tài liệu API Sys_UserInGroupController
+Port Prm_CarNewController Search API
+RESPONSE TO DEBAI #015 TOM TAT TRA LOI P1: 1) StdDTimeBeginDay/StdDTimeEndDay
+Tài Liệu API Mst_SkillGroupController
+Tài liệu API Mst_ParamPromotionController
+Port Crd Card Transaction Increase
+Tài liệu API Mst_ResignReasonController
+Từ chối đọc tệp
+Fix Crd Card Transaction Increase Port
+Porting Crd_CardTransactionInCrease API Endpoint
+Kiểm Tra API Mst Major
+Đọc Route Controller Major
+Đọc Controller Port Mst Major
+Port Crd_CardTransactionInCreaseController/Search TRANG_THAI: CAN_XEM_TAY CONFLICT: Yêu cầu
+Xác Nhận Ngắn Gọn
+Lỗi Định Dạng Phản Hồi
+Lời Chào Mở Đầu
+Phản Hồi Từ Khóa PONG3
+Sai Lệnh Trả Lời
+Trò Chơi Ping Pong
+Soạn Đề Bài Crd_CardTransactionInCrease
+Xác Nhận Mã Bí Mật
+Crd_CardTransactionController/Export SOURCE: - Gate: D:\idocNet\2022.7.Loyalty\1
+SOAN DE BAI CHO HANG MUC Crd_CardRankController/SearchForMember (#008) # NGUON - Gate
+SOẠN ĐỀ BÀI (DEBAI.md) CHO HẠNG MỤC Sys_UserController/CreateCP --- # N
+Soạn Đề Bài Sys_Group ExportTemplate
+Sys_UserController/Create (Port 329) NGUON: `idn.Loyalty.WebAPI/Controllers/Sys_UserController.
+Porting `Crd_CardTransactionController/SearchDetailCrdDealUsePromotion` (1-1 MiniLoyalty, .NET 8)
+tu nguyen
+Pro
+Trò chuyện với Gemini
+Bạn đã nói Tra loi 1 tu: PONGA
+
+Tra loi 1 tu: PONGA
+
+Gemini đã nói
+
+PONG
+
+
+
+
+Flash-Lite
+
+Gemini là một AI và có thể mắc sai sót.

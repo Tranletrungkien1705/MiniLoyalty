@@ -1,0 +1,6 @@
+KET QUA CONG CU:
+
+RUN build:
+Build succeeded.
+
+Tiep tuc (lenh tiep theo, hoac DONE:).

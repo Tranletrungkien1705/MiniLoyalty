@@ -1,0 +1,248 @@
+Gemini
+search
+Cuộc trò chuyện mới
+Thư viện
+Đã lên lịch
+Sinh viên
+Hiện thêm
+Sổ ghi chú
+Sổ ghi chú mới
+Tất cả
+Kiểm Tra API Mst Major
+Đọc Route Controller Major
+Đọc Controller Port Mst Major
+Tài liệu API Mst_ResignReasonController
+Port Crd_CardTransactionInCreaseController/Search TRANG_THAI: CAN_XEM_TAY CONFLICT: Yêu cầu
+Xác Nhận Ngắn Gọn
+Lỗi Định Dạng Phản Hồi
+Lời Chào Mở Đầu
+Phản Hồi Từ Khóa PONG3
+Sai Lệnh Trả Lời
+Trò Chơi Ping Pong
+RESPONSE TO DEBAI #015 TOM TAT TRA LOI P1: 1) StdDTimeBeginDay/StdDTimeEndDay
+Soạn Đề Bài Crd_CardTransactionInCrease
+Xác Nhận Mã Bí Mật
+Crd_CardTransactionController/Export SOURCE: - Gate: D:\idocNet\2022.7.Loyalty\1
+SOAN DE BAI CHO HANG MUC Crd_CardRankController/SearchForMember (#008) # NGUON - Gate
+SOẠN ĐỀ BÀI (DEBAI.md) CHO HẠNG MỤC Sys_UserController/CreateCP --- # N
+Soạn Đề Bài Sys_Group ExportTemplate
+Sys_UserController/Create (Port 329) NGUON: `idn.Loyalty.WebAPI/Controllers/Sys_UserController.
+Porting `Crd_CardTransactionController/SearchDetailCrdDealUsePromotion` (1-1 MiniLoyalty, .NET 8)
+DEBAI.md — Crd_CardTransactionController/SearchDetailCrdDealUsePromotion # NGUỌN NGUYÊN VĂ
+DE BAI #328 — Sys_UserController/GetAllActive (port 1-1) — them action vao controller co san Nguon
+DE BAI #315 — Sys_GroupController/Export (port 1-1) Nguồn (Claude đã đọc, dẫn nguyên văn gate
+Soạn đề bài cho Sys_UserController/GetForCurrentUser (#327) # NGUỒN - Gate: `D:\idoc
+agent viet code cho hang muc Crd_CardTransactionController/Search (dong #12) FILE: Controllers/Port/Crd_Card
+Agent Code Implementation (Port 1-1 MiniLoyalty, .NET 8) - Crd_CardTransactionController/Search FILE: Models/
+DE BAI #012 — Crd_CardTransactionController/Search (port 1-1) — tao bang Crd_CardTransaction + C
+Soạn đề bài Crd_CardRankController Search
+Đề bài Sys_UserController CheckUserExistAccCenter
+DE BAI #001 — Crd_CardController/Search (port 1-1) — tạo entity Crd_Card + Crd_
+DEBAI.md — Sys_GroupController/Import (Port 1-1, Action GHI qua file Excel) Nguồn (gate Sys_
+Soạn đề bài Mst_ResignReason ExportTemplate
+tu nguyen
+Pro
+Trò chuyện với Gemini
+Bạn đã nói NHIEM VU THU CONG CU (khong sua code): (1) READ: Controllers/Port/Mst_MajorControllerPort.cs:1-60 de…
+
+NHIEM VU THU CONG CU (khong sua code): (1) READ: Controllers/Port/Mst_MajorControllerPort.cs:1-60 de xem route; (2) RUN: build; (3) HTTP: POST den action search cua controller do voi body {} ; (4) DONE: mot dong cho biet HTTP status va so ban ghi tra ve. Lam tung buoc, moi tin nhan chi vai lenh.
+
+
+
+
+
+
+
+=== GIAO THUC LAM VIEC (BAT BUOC) ===
+
+Ban dang noi chuyen voi 1 CONG CU chay lenh that tren may. Moi cau tra loi cua ban co the chua cac DONG LENH (bat dau o DAU DONG), moi lenh 1 dong; cong cu chay het theo thu tu roi gui KET QUA THAT cho ban o tin nhan sau. Hay lam tung buoc nho, KHONG doan - can biet gi thi doc/tim/chay.
+
+READ: <duong dan>[:tu-den] (vd READ: Models/Port/Mst_Major.cs hoac READ: D:\idocNet\2022.7.Loyalty\...\X.cs:100-250)
+
+GREP: <regex> :: <thu muc hoac file>
+
+LIST: <thu muc>
+
+FILE: <duong dan tuong doi> roi NGAY SAU DO 1 khoi ```csharp chua NOI DUNG DAY DU cua file (ghi duoc: Controllers/Port, Models/Port, MiniLoyalty.Tests)
+
+RUN: build | RUN: test | RUN: diff | RUN: status
+
+HTTP: POST /api/<controller>/<action> {json} (cong cu tu bat app voi DB tam; dung de chay that & debug)
+
+DONE: <TOM TAT dung khuon de bai> (chi khi build+test xanh va da chay that cac action bang HTTP)
+
+Khong viet dong lenh trong giai thich. Moi tin nhan: toi da 8 lenh. Viet ngan gon, khong nhac lai ket qua cu.
+
+
+
+
+Bat dau: cho lenh dau tien cua ban.
+
+Gemini đã nói
+
+READ: Controllers/Port/Mst_MajorControllerPort.cs:1-60
+
+Bạn đã nói KET QUA CONG CU: READ Controllers/Port/Mst_MajorControllerPort.cs:1-60 (1-60/167): 1| using Sys…
+
+KET QUA CONG CU:
+
+
+
+
+READ Controllers/Port/Mst_MajorControllerPort.cs:1-60 (1-60/167):
+
+1| using System;
+
+2| using System.Collections.Generic;
+
+3| using System.Linq;
+
+4| using System.Threading.Tasks;
+
+5| using Microsoft.AspNetCore.Mvc;
+
+6| using Microsoft.EntityFrameworkCore;
+
+7| using MiniLoyalty.Data;
+
+8| using MiniLoyalty.Models.Port;
+
+9|
+
+10| namespace MiniLoyalty.Controllers.Port;
+
+11|
+
+12| // ============================================================================================
+
+13| // PORT 1:1 — màn danh mục chuyên ngành (Mst_Major) của dự án nguồn 2022.7.Loyalty (#168, #169).
+
+14| //
+
+15| // Nguồn controller (tầng gate):
+
+16| // Mst_MajorController.cs:25-105 Search -> WA_Mst_Major_Get
+
+17| // Mst_MajorController.cs:107-167 GetAllActive -> WA_Mst_Major_Get (#169)
+
+18| // Mst_MajorController.cs:171-186 strWhereClause_Mst_Major (mệnh đề lọc Search)
+
+19| // Mst_MajorController.cs:188-199 strWhereClause_Mst_Major_Active (mệnh đề lọc GetAllActive)
+
+20| // Nguồn API:
+
+21| // MstMajorController.cs:17-88 WA_Mst_Major_Get
+
+22| // Nguồn biz:
+
+23| // MasterData.cs:40476-40566 WAS_Mst_Major_Get
+
+24| // MasterData.cs:40346-40474 Mst_Major_Get
+
+25| // MasterData.cs:40189-40344 Mst_Major_GetX (SQL :40242-40295)
+
+26| //
+
+27| // GIỮ ĐÚNG NGUỒN:
+
+28| // * Endpoint là POST (nguồn [AcceptVerbs("POST")]).
+
+29| // * Lọc KeyWord: like '%kw%' trên MajorName (Mst_MajorController.cs:176-179).
+
+30| // CHỈ lọc MajorName — KHÔNG lọc MajorCode/MajorDesc/MajorGroupCode.
+
+31| // * Lọc FlagActive: toán tử '=' (Mst_MajorController.cs:180-183) — KHÔNG IN.
+
+32| // Không tách dấu phẩy; "0,1" -> so sánh bằng chuỗi "0,1" -> 0 dòng.
+
+33| // * OrgID truyền vào (:25, :55) nhưng strWhereClause_Mst_Major (:171-186) KHÔNG dùng OrgID
+
+34| // và SQL biz (:40244-40330) cũng KHÔNG lọc OrgID/NetworkID -> không lọc.
+
+35| // * Chia trang theo mm.MajorCode asc (MasterData.cs:40251), select cuối sắp theo t.MyIdxSeq asc (MasterData.cs:40290).
+
+36| // * MyIdxSeq 0-based identity (MasterData.cs:40245).
+
+37| // * PageSize = 0 -> DataList rỗng, PageCount = 0 (gate :80-88).
+
+38| // * DDL: khong co DDL trong repo — PK = MajorCode (suy từ join, DDL chưa xác minh).
+
+39| //
+
+40| // Bỏ qua có chủ đích (loại Đ):
+
+41| // - CheckGatewayAuthentication: gate :34, API :40-45
+
+42| // - CheckAuthorize: gate :35 (hệ thống đích chưa có hệ phân quyền)
+
+43| // - Tài khoản viết cứng GwUserCode/GwPassword tại gate :62-63 — KHÔNG chép giá trị (bài học A.10)
+
+44| // - Ghi RequestLog/ReturnLog: MasterData.cs:40386-40394, 40463-40471
+
+45| // - Sys_User_CheckAuthentication, Sys_Access_CheckDenyV30, drAbilityOfUser: MasterData.cs:40397-40408, 40228, 40240
+
+46| // ============================================================================================
+
+47|
+
+48| /// <summary>Port 1:1 <c>Mst_MajorSearch</c> — tham số lọc + phân trang của màn (Mst_MajorController.cs:25, :52-57).</summary>
+
+49| public class MstMajorSearchReq
+
+50| {
+
+51| public string? OrgID { get; set; } // Tổ chức — gate nhận (:25, :55) nhưng strWhereClause_Mst_Major (:171-186) KHÔNG dùng OrgID -> không lọc
+
+52| public string? KeyWord { get; set; } // Từ khoá tìm theo tên chuyên ngành (MajorName) — :25, :54, :176-179
+
+53| public string? FlagActive { get; set; } // Cờ hoạt động, toán tử '=' — :25, :56, :180-183
+
+54| public int Ft_PageIndex { get; set; } = 0; // Trang (0-based) — :25, :46
+
+55| public int Ft_PageSize { get; set; } = 10; // Số dòng/trang — :25, :47
+
+56| }
+
+57|
+
+58| [ApiController]
+
+59| [Route("api/mst_major")]
+
+60| [Produces("application/json")]
+
+
+
+
+Tiep tuc (lenh tiep theo, hoac DONE:).
+
+Gemini đã nói
+
+RUN: build
+
+Bạn đã nói KET QUA CONG CU: RUN build: Build succeeded. Tiep tuc (lenh tiep theo, hoac DONE:).
+
+KET QUA CONG CU:
+
+
+
+
+RUN build:
+
+Build succeeded.
+
+
+
+
+Tiep tuc (lenh tiep theo, hoac DONE:).
+
+Gemini đã nói
+
+HTTP: POST /api/mst_major/search {}
+
+
+
+
+Flash-Lite
+
+Gemini là một AI và có thể mắc sai sót.

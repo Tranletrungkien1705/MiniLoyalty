@@ -1,0 +1,91 @@
+Gemini
+search
+Cuộc trò chuyện mới
+Thư viện
+Đã lên lịch
+Sinh viên
+Hiện thêm
+Sổ ghi chú
+Sổ ghi chú mới
+Tất cả
+Kiểm Tra API Mst Major
+Đọc Route Controller Major
+Đọc Controller Port Mst Major
+Tài liệu API Mst_ResignReasonController
+Port Crd_CardTransactionInCreaseController/Search TRANG_THAI: CAN_XEM_TAY CONFLICT: Yêu cầu
+Xác Nhận Ngắn Gọn
+Lỗi Định Dạng Phản Hồi
+Lời Chào Mở Đầu
+Phản Hồi Từ Khóa PONG3
+Sai Lệnh Trả Lời
+Trò Chơi Ping Pong
+RESPONSE TO DEBAI #015 TOM TAT TRA LOI P1: 1) StdDTimeBeginDay/StdDTimeEndDay
+Soạn Đề Bài Crd_CardTransactionInCrease
+Xác Nhận Mã Bí Mật
+Crd_CardTransactionController/Export SOURCE: - Gate: D:\idocNet\2022.7.Loyalty\1
+SOAN DE BAI CHO HANG MUC Crd_CardRankController/SearchForMember (#008) # NGUON - Gate
+SOẠN ĐỀ BÀI (DEBAI.md) CHO HẠNG MỤC Sys_UserController/CreateCP --- # N
+Soạn Đề Bài Sys_Group ExportTemplate
+Sys_UserController/Create (Port 329) NGUON: `idn.Loyalty.WebAPI/Controllers/Sys_UserController.
+Porting `Crd_CardTransactionController/SearchDetailCrdDealUsePromotion` (1-1 MiniLoyalty, .NET 8)
+DEBAI.md — Crd_CardTransactionController/SearchDetailCrdDealUsePromotion # NGUỌN NGUYÊN VĂ
+DE BAI #328 — Sys_UserController/GetAllActive (port 1-1) — them action vao controller co san Nguon
+DE BAI #315 — Sys_GroupController/Export (port 1-1) Nguồn (Claude đã đọc, dẫn nguyên văn gate
+Soạn đề bài cho Sys_UserController/GetForCurrentUser (#327) # NGUỒN - Gate: `D:\idoc
+agent viet code cho hang muc Crd_CardTransactionController/Search (dong #12) FILE: Controllers/Port/Crd_Card
+Agent Code Implementation (Port 1-1 MiniLoyalty, .NET 8) - Crd_CardTransactionController/Search FILE: Models/
+DE BAI #012 — Crd_CardTransactionController/Search (port 1-1) — tao bang Crd_CardTransaction + C
+Soạn đề bài Crd_CardRankController Search
+Đề bài Sys_UserController CheckUserExistAccCenter
+DE BAI #001 — Crd_CardController/Search (port 1-1) — tạo entity Crd_Card + Crd_
+DEBAI.md — Sys_GroupController/Import (Port 1-1, Action GHI qua file Excel) Nguồn (gate Sys_
+Soạn đề bài Mst_ResignReason ExportTemplate
+Porting Sys_UserInGroup Controller and Save Action
+tu nguyen
+Pro
+Trò chuyện với Gemini
+Bạn đã nói NHIEM VU THU CONG CU (khong sua code): (1) READ: Controllers/Port/Mst_MajorControllerPort.cs:1-60 de…
+
+NHIEM VU THU CONG CU (khong sua code): (1) READ: Controllers/Port/Mst_MajorControllerPort.cs:1-60 de xem route; (2) RUN: build; (3) HTTP: POST den action search cua controller do voi body {} ; (4) DONE: mot dong cho biet HTTP status va so ban ghi tra ve. Lam tung buoc, moi tin nhan chi vai lenh.
+
+
+
+
+
+
+
+=== GIAO THUC LAM VIEC (BAT BUOC) ===
+
+Ban dang noi chuyen voi 1 CONG CU chay lenh that tren may. Moi cau tra loi cua ban co the chua cac DONG LENH (bat dau o DAU DONG), moi lenh 1 dong; cong cu chay het theo thu tu roi gui KET QUA THAT cho ban o tin nhan sau. Hay lam tung buoc nho, KHONG doan - can biet gi thi doc/tim/chay.
+
+READ: <duong dan>[:tu-den] (vd READ: Models/Port/Mst_Major.cs hoac READ: D:\idocNet\2022.7.Loyalty\...\X.cs:100-250)
+
+GREP: <regex> :: <thu muc hoac file>
+
+LIST: <thu muc>
+
+FILE: <duong dan tuong doi> roi NGAY SAU DO 1 khoi ```csharp chua NOI DUNG DAY DU cua file (ghi duoc: Controllers/Port, Models/Port, MiniLoyalty.Tests)
+
+RUN: build | RUN: test | RUN: diff | RUN: status
+
+HTTP: POST /api/<controller>/<action> {json} (cong cu tu bat app voi DB tam; dung de chay that & debug)
+
+DONE: <TOM TAT dung khuon de bai> (chi khi build+test xanh va da chay that cac action bang HTTP)
+
+Khong viet dong lenh trong giai thich. Moi tin nhan: toi da 8 lenh. Viet ngan gon, khong nhac lai ket qua cu.
+
+
+
+
+Bat dau: cho lenh dau tien cua ban.
+
+Gemini đã nói
+
+READ: Controllers/Port/Mst_MajorControllerPort.cs:1-60
+
+
+
+
+Flash-Lite
+
+Gemini là một AI và có thể mắc sai sót.

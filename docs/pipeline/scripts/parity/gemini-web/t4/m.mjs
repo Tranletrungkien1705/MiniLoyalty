@@ -1,0 +1,11 @@
+import { chromium } from 'playwright-core';
+const b = await chromium.connectOverCDP('http://127.0.0.1:9222');
+const p = await b.contexts()[0].newPage();
+await p.goto('https://gemini.google.com/app'); await p.waitForTimeout(4000);
+await p.keyboard.press('Escape');
+console.log('BTN:', await p.locator('bard-mode-switcher button, [data-test-id="bard-mode-menu-button"]').first().innerText().catch(e=>'none '+e.message.slice(0,60)));
+await p.locator('bard-mode-switcher button, [data-test-id="bard-mode-menu-button"]').first().click().catch(()=>{});
+await p.waitForTimeout(1500);
+console.log(await p.locator('.cdk-overlay-container').innerText().catch(()=>'no overlay'));
+await p.screenshot({path:'t4/m.png'});
+await p.close(); await b.close();

@@ -1,0 +1,12 @@
+[2026-10-16T21:08:44.066Z] lane=0/1
+[2026-10-16T21:08:44.075Z] session=- CHAT MOI
+[2026-10-16T21:09:14.080Z] CDP_DEAD browserType.connectOverCDP: Timeout 30000ms exceeded.
+Call log:
+[2m  - <ws preparing> retrieving websocket url from http://127.0.0.1:9224[22m
+[2m  - <ws connecting> ws://127.0.0.1:9224/devtools/browser/67cd34ae-29c2-41db-bbde-838d6503c627[22m
+[2m  - <ws connected> ws://127.0.0.1:9224/devtools/browser/67cd34ae-29c2-41db-bbde-838d6503c627[22m
+
+[2026-10-16T21:28:38.402Z] lane=0/1
+[2026-10-16T21:28:38.406Z] session=- CHAT MOI
+[2026-10-16T21:28:42.634Z] da gui, so tra loi truoc = 0
+[2026-10-16T21:28:54.707Z] OK len=2 blocks=0
