@@ -2,7 +2,7 @@
 # Dung: Start-Process -WindowStyle Hidden powershell -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File scripts\pipe\supervisor.ps1'
 # Dung tay: tao file repos\SUPERVISOR_STOP. Nhat ky: repos\supervisor.log. Bao cao cuoi: docs\FINAL_REPORT.md
 param([string[]]$Queue = @('MiniContract', 'MiniWMS', 'MiniService', 'MiniGate'), [datetime]$Deadline = [datetime]'2026-10-20T23:00:00', [int]$EverySec = 300,
-  [string[]]$Router = @('agy', 'agy2', 'agy3', 'agy4', 'agy5', 'agy6'), [string[]]$Gweb = @('gweb'), [switch]$Push)
+  [string[]]$Router = @('agy', 'agy2', 'agy3', 'agy4', 'agy5', 'agy6'), [string[]]$Gweb = @('gweb', 'gweb2', 'gweb3'), [switch]$Push)
 $Root = 'C:\Users\Public\Pictures\kientran_private'; $Repos = "$Root\repos"; $Utf8 = [Text.UTF8Encoding]::new($false); $Log = "$Repos\supervisor.log"
 function L([string]$m) { [IO.File]::AppendAllText($Log, ("[{0:yyyy-MM-dd HH:mm:ss}] {1}`r`n" -f (Get-Date), $m), $Utf8) }
 function Stat([string]$p) {
@@ -14,10 +14,28 @@ function Stat([string]$p) {
   $fd = [regex]::Match($t, 'Feeder: (\d+) \| auto-loop: (\d+)')
   [pscustomobject]@{ Done = [int]$m.Groups[1].Value; Total = [int]$m.Groups[2].Value; Bo = [int]$m.Groups[3].Value; Todo = [int]$m.Groups[4].Value; Busy = ($cur.Length -gt 0); Feeders = [int]$fd.Groups[1].Value; Loop = [int]$fd.Groups[2].Value }
 }
+# Cau CodeGPT (cong 54112) la tien trinh cua VS Code: chet -> mo lai VS Code (extension tu dung cau)
+function Ensure-Bridge {
+  if (Get-NetTCPConnection -State Listen -LocalPort 54112 -EA SilentlyContinue) { return }
+  if (-not (Get-Process Code -EA SilentlyContinue)) { Start-Process "$env:LOCALAPPDATA\Programs\Microsoft VS Code\Code.exe" | Out-Null; L 'BRIDGE mo VS Code cho CodeGPT' }
+}
+# codegpt treo/ERROR >=2 lan tren cung 1 hang muc -> ghi codegpt_skip.txt (slot khac lam), codegpt van chay hang muc khac
+function Guard-Codegpt([string]$p) {
+  $rl = "$Repos\$p\.parity-run\run.log"; if (-not (Test-Path $rl)) { return }
+  $sk = "$Repos\$p\.parity-run\codegpt_skip.txt"; $cur = ''; $cnt = @{}
+  foreach ($ln in (Get-Content $rl -Tail 3000 -Encoding UTF8)) {
+    if ($ln -match '\[codegpt\] BAT DAU #\d+ (\S+)') { $cur = $Matches[1] }
+    elseif ($ln -match '\[codegpt\]\s+agent -> (ERROR|TREO|TIMEOUT)' -and $cur) { $cnt[$cur] = 1 + [int]$cnt[$cur] }
+  }
+  $have = @(); if (Test-Path $sk) { $have = @(Get-Content $sk) }
+  foreach ($k in $cnt.Keys) { if ($cnt[$k] -ge 2 -and $have -notcontains $k) { Add-Content $sk $k; L "CODEGPT bo qua $k ($($cnt[$k]) lan loi)" } }
+}
 function Start-Proj([string]$p) {
-  $a = @{ Project = $p; Direct = @(); Router = $Router; Gweb = $Gweb; Other = @() }
+  $a = @{ Project = $p; Direct = @(); Router = $Router; Gweb = $Gweb; Other = @('codegpt') }
   if ($p -eq 'MiniGate') { $a.SharedCtrl = $true }
-  & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\pipe\start-all-slots.ps1" @a 2>&1 | Out-Null
+  New-Item -ItemType Directory -Force "$Repos\$p\.parity-run" | Out-Null; New-Item -ItemType File -Force "$Repos\$p\.parity-run\gweb_all.txt" | Out-Null   # gweb nhan ca hang muc ghi
+  Ensure-Bridge
+  & "$Root\scripts\pipe\start-all-slots.ps1" @a | Out-Null   # goi trong tien trinh (splat vao powershell -File se mat mang tham so)
   L "START $p router=$($Router -join ',') gweb=$($Gweb -join ',')"
 }
 function Report([string]$why) {
@@ -38,9 +56,10 @@ while ($true) {
     $target = $null
     foreach ($p in $Queue) { $s = Stat $p; if ($s -and ($s.Todo -gt 0 -or $s.Busy)) { $target = $p; $ts = $s; break } }
     if (-not $target) { Report 'hang doi da xong'; break }
-    $minSince = ((Get-Date) - $lastStart).TotalMinutes
+    Guard-Codegpt $target; Ensure-Bridge
+    $minSince =((Get-Date) - $lastStart).TotalMinutes
     if ($curProj -ne $target) { Start-Proj $target; $curProj = $target; $lastStart = Get-Date; L "CHUYEN sang $target ($($ts.Todo) con lai)" }
-    elseif (($ts.Feeders -lt 3 -or $ts.Loop -lt 1) -and $minSince -gt 20) { Start-Proj $target; $lastStart = Get-Date; L "HOI SINH $target (feeder=$($ts.Feeders) loop=$($ts.Loop))" }
+    elseif (($ts.Feeders -lt ($Router.Count + $Gweb.Count + 1) -or $ts.Loop -lt 1) -and $minSince -gt 20) { Start-Proj $target; $lastStart = Get-Date; L "HOI SINH $target (feeder=$($ts.Feeders) loop=$($ts.Loop))" }
     else {
       # ket: khong co commit moi >3h va todo>0 -> khoi dong lai
       $last = [datetime](& git -C "$Repos\$target" log -1 --format=%cI parity/auto 2>$null)

@@ -7,5 +7,6 @@ while (-not (Test-Path "$Run\STOP")) {
   try { & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\pipe\slot-watch.ps1" -Project $Project 2>&1 | Out-Null } catch { }
   try { & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\pipe\auto-commit.ps1" -Project $Project 2>&1 | Out-Null } catch { }
   try { & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\pipe\status.ps1" -Project $Project 2>&1 | Out-Null } catch { }
+  try { & powershell -NoProfile -ExecutionPolicy Bypass -File "$Root\scripts\pipe\gweb-stats.ps1" 2>&1 | Out-Null } catch { }
   Start-Sleep $EverySec
 }

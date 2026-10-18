@@ -118,8 +118,9 @@ function Claim-Next {
   foreach ($t in $todo) {
     if (($t.Name -split '/')[0] -in $otherCtrl -and $env:PIPE_SHARED_CTRL -ne '1') { continue }   # PIPE_SHARED_CTRL=1: nhieu worker cung controller (MobileGate: da so la chuyen tiep, hiem xung dot file)
     # gweb (Flash-Lite) chua du suc cho hang muc nhieu bang / bao cao (that bai #15): chi nhan Mst_/Map_/Sys_/Prm_/Req (tru khi chi dinh -Item)
-    if ($Worker -like 'gweb*' -and -not $Item -and ($t.Name -match '^(Crd_|Rpt_|RptPE_)' -or ((Test-Path (Join-Path $Run 'gweb_skip.txt')) -and @(Get-Content (Join-Path $Run 'gweb_skip.txt')) -contains $t.Name) -or $t.Name -match '/(Save|Calc.*|Add.*|Approve.*|Appr.*|Cancel.*|Finish|Reject.*|Perform.*|Import|Create.*|Update.*|Delete.*|Sync.*|Print.*|Upload.*)$')) { continue }   # gweb chi nhan hang muc DOC (Search/Get/Export); ghi nhieu buoc de agy/codegpt
-    $cf = "$Claims\{0:D3}.claim" -f $t.No
+    if ($Worker -like 'gweb*' -and -not $Item -and ($t.Name -match '^(Crd_|Rpt_|RptPE_)' -or ((Test-Path (Join-Path $Run 'gweb_skip.txt')) -and @(Get-Content (Join-Path $Run 'gweb_skip.txt')) -contains $t.Name) -or ($t.Name -match '/(Save|Calc.*|Add.*|Approve.*|Appr.*|Cancel.*|Finish|Reject.*|Perform.*|Import|Create.*|Update.*|Delete.*|Sync.*|Print.*|Upload.*)$' -and -not (Test-Path (Join-Path $Run 'gweb_all.txt'))))) { continue }   # gweb chi nhan hang muc DOC (Search/Get/Export) tru khi co file gweb_all.txt (cho gweb nhan ca hang muc ghi; auto-commit van chan ket qua sai)
+    if ($Worker -eq 'codegpt' -and -not $Item -and (Test-Path (Join-Path $Run 'codegpt_skip.txt')) -and @(Get-Content (Join-Path $Run 'codegpt_skip.txt')) -contains $t.Name) { continue }   # hang muc codegpt treo >=2 lan: nhuong slot khac
+    $cf ="$Claims\{0:D3}.claim" -f $t.No
     try { $fs = [IO.File]::Open($cf, 'CreateNew', 'Write'); $b = $Utf8.GetBytes((@{ worker = $Worker; item = $t.Name; no = $t.No; at = (Get-Date).ToString('s') } | ConvertTo-Json -Compress)); $fs.Write($b, 0, $b.Length); $fs.Close() } catch { continue }
     [IO.File]::WriteAllText("$Run\affinity_$Worker.txt", ($t.Name -split '/')[0], $Utf8)
     return $t

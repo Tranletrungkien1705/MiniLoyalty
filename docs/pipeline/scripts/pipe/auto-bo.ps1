@@ -26,7 +26,14 @@ foreach ($cf in Get-ChildItem "$Run\current_*.json" -EA SilentlyContinue) {
   $rf = "$Run\result_$w.json"; $r = if (Test-Path $rf) { Get-Content $rf -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
   $running = [bool]($procs | Where-Object { $_ -match "-Worker\s+$w\b" -and $_ -match '-Action\s+(run|fix)' })
   if ($r -and $r.status -eq 'CHO_CLAUDE' -and $r.item -eq $c.item) {
-    if (@(@($r.changed) | Where-Object { $_ -and $_ -notmatch 'NO_BACKEND\.flag$|\.parity-run' }).Count -gt 0) { continue }   # co code that -> Claude review (bo qua file co NO_BACKEND.flag agent tao nham trong worktree)
+    if (@(@($r.changed) | Where-Object { $_ -and $_ -notmatch 'NO_BACKEND\.flag$|\.parity-run' }).Count -gt 0) {
+      # co code that: auto-commit chot neu dat tieu chi. Qua 25 phut ma van cho (khong chot duoc: file ngoai pham vi / build do / ma loi la) -> KHONG cho Claude: tra ve kho lam lai (toi da 2 lan), lan 3 -> Bo "can xem tay"
+      $rAge = ((Get-Date) - (Get-Item $rf).LastWriteTime).TotalMinutes
+      if ($rAge -lt 25) { continue }
+      $k = "$($c.no)"; $n = 1 + $(if ($rel.ContainsKey($k)) { $rel[$k] } else { 0 })
+      if ($n -gt 2) { Drop-Bo $w "Ket qua khong qua duoc auto-commit sau 2 lan lam lai - can xem tay"; Remove-Item $rf -Force -EA SilentlyContinue; Log "BO(can xem tay) #$($c.no) $($c.item) ($w) - auto-commit tu choi 3 lan"; continue }
+      $rel[$k] = $n; Save-Rel; Release $w $c "cho chot qua 25 phut khong duoc auto-commit (lan $n)"; continue
+    }   # (bo qua file co NO_BACKEND.flag agent tao nham trong worktree)
     $dir = $c.dir; $cfl = "$Run\conflicts\$($c.no)_conflict.md"
     $ev = $false
     if (Test-Path $cfl) { $ev = ((Get-Content $cfl -Raw -Encoding UTF8) -match $fwdRx) }
@@ -42,6 +49,7 @@ foreach ($cf in Get-ChildItem "$Run\current_*.json" -EA SilentlyContinue) {
     $age = ((Get-Date) - $newest.LastWriteTime).TotalMinutes
     if ($age -gt 20 -and -not ($r -and $r.status -eq 'CHO_CLAUDE')) {
       $k = "$($c.no)"; $n = 1 + $(if ($rel.ContainsKey($k)) { $rel[$k] } else { 0 })
+      if ($r -and $r.status -eq 'AGENT_DOWN') { Release $w $c "agent loi ha tang (quota/router/Chrome) - tra kho, khong tinh vao so lan"; continue }   # loi ha tang khong phai loi hang muc: khong de dan toi Bo
       if ($n -gt 3) { Drop-Bo $w "Ket nhieu lan (khong tien trinh) - can xem tay"; Remove-Item $rf -Force -EA SilentlyContinue; Log "BO(ket) #$($c.no) $($c.item) ($w)"; continue }
       $rel[$k] = $n; Save-Rel; Release $w $c ("ket $([int]$age) phut khong tien trinh, trang thai " + $(if ($r) { $r.status } else { 'khong ro' }))
     }

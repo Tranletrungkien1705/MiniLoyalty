@@ -19,9 +19,10 @@ import { fileURLToPath } from 'node:url';
 const [WT, taskFile, outDir, maxStepsArg = '14', session = 'agent', preamble = '', portBaseArg = '8700'] = process.argv.slice(2);
 if (!WT || !taskFile || !outDir) { console.error('usage: node gw-agent.mjs <worktree> <taskFile> <outDir> [maxSteps] [session] [preamble] [portBase]'); process.exit(5); }
 const here = path.dirname(fileURLToPath(import.meta.url));
-const SRC = 'D:\\idocNet\\2022.7.Loyalty', ROOT = 'C:\\Users\\Public\\Pictures\\kientran_private';
-const READ_OK = [WT, ROOT + '\\docs', SRC, ROOT + '\\repos\\MiniLoyalty\\.parity-run'].map((p) => path.resolve(p).toLowerCase());
-const WRITE_OK = /^(Controllers\/Port|Models\/Port|MiniLoyalty\.Tests)\/[A-Za-z0-9_]+\.cs$/;
+const PROJ = (path.basename(path.resolve(WT)).match(/^(Mini[A-Za-z]+?)(-[A-Za-z0-9]+)?$/) || [])[1] || 'MiniLoyalty';   // MiniContract-gweb2 -> MiniContract
+const SRC = 'D:\\idocNet', ROOT = 'C:\\Users\\Public\\Pictures\\kientran_private';   // nguon cu: doc-chi
+const READ_OK = [WT, ROOT + '\\docs', SRC, ROOT + '\\repos\\' + PROJ + '\\.parity-run'].map((p) => path.resolve(p).toLowerCase());
+const WRITE_OK = new RegExp('^(Controllers/Port|Models/Port|' + PROJ + '\\.Tests)/[A-Za-z0-9_]+\\.cs$');
 const maxSteps = Number(maxStepsArg);
 fs.mkdirSync(outDir, { recursive: true });
 const tlog = path.join(outDir, 'gw_agent.log');
@@ -32,7 +33,9 @@ const clip = (s, n) => (s.length > n ? s.slice(0, n) + `\n...[cat ${s.length - n
 const resolveP = (p) => {
   p = p.trim().replace(/^["'`]+|["'`]+$/g, '');
   if (/^@dir[\\/]/i.test(p)) return path.join(path.resolve(outDir), p.slice(5).replace(/\//g, '\\'));
-  p = p.replace(/MiniLoyalty\.parity-run/i, 'MiniLoyalty\\.parity-run').replace(/\//g, '\\');
+  p = p.replace(/(Mini[A-Za-z]+)\.parity-run/i, '$1\\.parity-run').replace(/\//g, '\\');
+  const pr = path.resolve(outDir).toLowerCase().indexOf('\\.parity-run\\');
+  if (/^\.parity-run\\/i.test(p) && pr >= 0) return path.join(path.resolve(outDir).slice(0, pr), p);   // nhat ky o repo chinh, khong o worktree
   return path.isAbsolute(p) ? p : path.join(WT, p);
 };
 
@@ -76,14 +79,14 @@ async function runTool(line, blocks, blockIdx) {
     if (kind === 'LIST') { const p = resolveP(arg.trim()); if (!okRead(p) || !fs.existsSync(p)) return `LIST ${arg}: khong duoc/khong co`; return `LIST ${arg}:\n` + fs.readdirSync(p).slice(0, 200).join('\n'); }
     if (kind === 'FILE') {
       const rel = arg.trim().replace(/\\/g, '/').replace(/[`*]/g, '');
-      if (!WRITE_OK.test(rel)) return `FILE ${rel}: TU CHOI (chi Controllers/Port, Models/Port, MiniLoyalty.Tests)`;
+      if (!WRITE_OK.test(rel)) return `FILE ${rel}: TU CHOI (chi Controllers/Port, Models/Port, ${PROJ}.Tests)`;
       const b = blocks[blockIdx.i]; if (b == null) return `FILE ${rel}: thieu khoi code ngay sau dong FILE`; blockIdx.i++;
       fs.writeFileSync(path.join(WT, rel.replace(/\//g, '\\')), b.trimEnd() + '\r\n', 'utf8'); st.dirty = true; st.buildOk = false; st.tested = false; st.wrote++; return `FILE ${rel}: da ghi (${b.length} ky tu)`;
     }
     if (kind === 'RUN') {
       const c = arg.trim().toLowerCase().replace(/^(dotnet|git)\s+/, '').replace(/^(build|test|diff|status)\b.*$/, '$1');
       if (c === 'build') { stopApp(); const o = sh('dotnet', ['build', '-c', 'Release', '-clp:ErrorsOnly', '--nologo'], WT); const e = [...new Set(o.split('\n').filter((x) => /error|Build succeeded/.test(x)).map((x) => x.replace(/\s*\[[A-Za-z]:[^\]]*\]\s*$/, '').replace(/^.*?(Controllers|Models)\\Port\\/, '$1\\Port\\')))].slice(0, 40); st.buildOk = /Build succeeded/.test(o) && !/error CS/.test(o); if (st.buildOk) st.dirty = false; return 'RUN build:\n' + (e.join('\n') || clip(o, 3000)); }
-      if (c === 'test') { stopApp(); const o = sh('dotnet', ['test', 'MiniLoyalty.Tests', '-c', 'Release', '--nologo'], WT, 600000); st.tested = /Passed!/.test(o) && !/Failed!/.test(o); return 'RUN test:\n' + clip(o.split('\n').filter((x) => /Passed!|Failed|error|Total|\[FAIL\]/.test(x)).join('\n') || o, 3500); }
+      if (c === 'test') { stopApp(); const o = sh('dotnet', ['test', PROJ + '.Tests', '-c', 'Release', '--nologo'], WT, 600000); st.tested = /Passed!/.test(o) && !/Failed!/.test(o); return 'RUN test:\n' + clip(o.split('\n').filter((x) => /Passed!|Failed|error|Total|\[FAIL\]/.test(x)).join('\n') || o, 3500); }
       if (c === 'diff') return 'RUN diff:\n' + clip(sh('git', ['diff', 'HEAD', '--stat'], WT), 3000);
       if (c === 'status') return 'RUN status:\n' + clip(sh('git', ['status', '--short'], WT), 2000);
       return `RUN ${arg}: TU CHOI (chi build|test|diff|status)`;

@@ -48,3 +48,11 @@ Xem `docs\LESSONS_AGENTS.md`. Tóm tắt: regex QUOTA không bắt "429" trần;
 - codegpt: nguyên nhân lỗi là *một hạng mục* (#127) khiến run treo >600 s phía server (81 msg, không kết thúc), không phải bridge hỏng. Supervisor ghi hạng mục lỗi ≥2 lần vào `codegpt_skip.txt` rồi codegpt làm hạng mục khác. Feeder là vòng lặp tự chạy lại.
 - gweb: `gweb_all.txt` trong `.parity-run` cho gweb nhận cả hạng mục ghi (trước chỉ đọc); auto-commit vẫn chặn kết quả sai.
 - Settings: thêm `Bash(git:*)`, `PowerShell(git:*)`.
+
+## 8. Cập nhật 2026-10-19 00:15 (sửa lỗi gốc, vận hành không Claude)
+- **gweb hỏng im lặng cho mọi dự án ≠ Loyalty**: `gemini-web\gw-agent.mjs` gắn cứng MiniLoyalty (quyền đọc nhật ký, thư mục test) → Gemini không đọc được `source_excerpt.txt`, tự kết luận "BỎ". Đã tổng quát theo tên worktree (`PROJ`). Hai mục bị Bỏ nhầm (#77, #133) đã mở lại.
+- **Khởi động slot**: `supervisor.ps1` gọi `start-all-slots.ps1` trong tiến trình (splat qua `powershell -File` làm mất tham số → gweb/codegpt không có feeder).
+- **9router**: khởi động bằng `scripts\pipe\start-router.ps1` (node server.js, `HOSTNAME=127.0.0.1`, `INITIAL_PASSWORD` từ `9router\dashboard-password.txt`). KHÔNG dùng `cli.js` (crash 0xC0000005 khi chạy ẩn, mở 0.0.0.0).
+- **Bảng gweb trên dashboard** (`/dashboard/usage|quota`): `apply-gweb-panel.ps1` chèn `gweb-inject.js` vào `server.js` của 9router (bản gốc lưu `.bak`; `-Undo` để gỡ; chạy lại sau khi 9router cập nhật). Dữ liệu: `repos\gweb-stats.json` (do `gweb-stats.ps1`, auto-loop gọi). Đã kiểm trên trình duyệt đăng nhập thật.
+- **Không kẹt chờ Claude**: kết quả CHO_CLAUDE có code mà auto-commit không chốt được sau 25 phút → trả về kho làm lại (≤2 lần, lần 3 Bỏ "cần xem tay"). Lỗi hạ tầng (AGENT_DOWN: quota/router/Chrome) trả kho, không tính vào số lần.
+- Supervisor hồi sinh feeder khi số feeder < (router + gweb + 1).

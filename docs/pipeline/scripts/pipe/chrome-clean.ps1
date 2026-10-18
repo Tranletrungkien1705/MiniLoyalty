@@ -11,7 +11,8 @@ foreach ($p in $Ports) {
     $stamp = "$env:TEMP\chrome_relaunch_$p.txt"
     if (-not (Test-Path $stamp) -or (((Get-Date) - (Get-Item $stamp).LastWriteTime).TotalMinutes -gt 3)) {
       Set-Content $stamp (Get-Date -Format s)
-      Start-Process 'C:\Program Files\Google\Chrome\Application\chrome.exe' -ArgumentList "--remote-debugging-port=$p", "--user-data-dir=C:\Users\Public\Pictures\kientran_private\$($prof[$p])", '--no-first-run', '--disable-session-crashed-bubble', 'https://gemini.google.com/app'
+      $hl = @(); if (Test-Path "$PSScriptRoot\chrome-headless.txt") { $hl = @('--headless=new', '--window-size=1280,900') }   # co file chrome-headless.txt -> Chrome chay an, khong cua so
+      Start-Process 'C:\Program Files\Google\Chrome\Application\chrome.exe' -ArgumentList ($hl + @("--remote-debugging-port=$p", "--user-data-dir=C:\Users\Public\Pictures\kientran_private\$($prof[$p])", '--no-first-run', '--disable-session-crashed-bubble', 'https://gemini.google.com/app'))
       "port $p : Chrome chet -> mo lai"
     }
     continue
