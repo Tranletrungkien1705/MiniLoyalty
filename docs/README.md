@@ -38,7 +38,7 @@ Mục tiêu cốt lõi của quá trình port:
 
 Tài liệu chi tiết từng controller API được port 1-1 từ tầng gate của hệ thống nguồn:
 
-- [docs/api/Mst_DepartmentController.md](api/Mst_DepartmentController.md): Danh mục phòng ban (`Mst_Department`) — Gồm 9 endpoint đã hoàn thành (#122 - #130):
+- [docs/api/Mst_DepartmentController.md](api/Mst_DepartmentController.md): Danh mục phòng ban (`Mst_Department`) — Gồm 10 endpoint đã hoàn thành (#122 - #131):
   - `POST /api/mst_department/search`: Tìm kiếm danh mục phòng ban phân trang, lọc theo từ khóa, tổ chức và cờ hoạt động.
   - `POST /api/mst_department/getallactive`: Lấy danh sách tất cả phòng ban đang hoạt động (`FlagActive = '1'`) theo tổ chức.
   - `POST /api/mst_department/getbydepartmentcode`: Tra cứu chi tiết một phòng ban theo mã (`DepartmentCode`).
@@ -48,6 +48,7 @@ Tài liệu chi tiết từng controller API được port 1-1 từ tầng gate 
   - `POST /api/mst_department/deletemultiple`: Xóa nhiều phòng ban theo danh sách mã, hỗ trợ hành vi xóa một phần (partial delete).
   - `POST /api/mst_department/import`: Nhập dữ liệu danh mục phòng ban từ file Excel `.xlsx`, sinh mã GUID, hỗ trợ nhập một phần (partial import).
   - `POST /api/mst_department/export`: Xuất danh sách phòng ban ra tập tin Excel `.xlsx` với từ điển 4 cột theo thứ tự nguồn.
+  - `POST /api/mst_department/exporttemplate`: Xuất file mẫu Excel gồm 3 cột tiêu đề, không truy vấn CSDL.
 
 - [docs/api/Mst_BirthPolicyController.md](api/Mst_BirthPolicyController.md): Chính sách sinh nhật (`Mst_BirthPolicy`, `Mst_BirthPolicyDtl`) — Gồm 7 endpoint đã hoàn thành (#70 - #76):
   - `POST /api/mst_birthpolicy/search`: Tìm kiếm danh mục chính sách sinh nhật phân trang, tự động tính toán cờ hiệu lực `FlagShow` theo giờ VN (UTC+7).
@@ -187,7 +188,47 @@ Tài liệu chi tiết từng controller API được port 1-1 từ tầng gate 
 - [docs/api/Map_DealerCP_OrgController.md](api/Map_DealerCP_OrgController.md): Liên kết đại lý - tổ chức chi nhánh (`Map_DealerCP_Org`) — Gồm 1 endpoint đã hoàn thành (#65):
   - `POST /api/map_dealercp_org/getbydlcpcode`: Tra cứu thông tin liên kết tổ chức và mã số thuế chi nhánh của đại lý theo `DLCPCode` (nghiệp vụ 2 bước inner join `Mst_NNT`).
 
-*(Toàn bộ 20 controller API port 1-1 đã hoàn tất 100% đều đã được tài liệu hóa chi tiết).*
+- [docs/api/Mst_GenderController.md](api/Mst_GenderController.md): Danh mục giới tính (`Mst_Gender`) — Gồm 2 endpoint đã hoàn thành (#154, #155):
+  - `POST /api/mst_gender/search`: Tìm kiếm danh mục giới tính phân trang theo từ khóa và trạng thái hoạt động (toán tử `IN`).
+  - `POST /api/mst_gender/getallactive`: Lấy toàn bộ danh sách giới tính đang hoạt động, trả về mảng phẳng trực tiếp.
+
+- [docs/api/Mst_GradeController.md](api/Mst_GradeController.md): Danh mục cấp bậc / bậc lương (`Mst_Grade`) — Gồm 2 endpoint đã hoàn thành (#162, #163):
+  - `POST /api/mst_grade/search`: Tìm kiếm cấp bậc phân trang theo từ khóa tên và trạng thái hoạt động (toán tử `=`).
+  - `POST /api/mst_grade/getallactive`: Lấy toàn bộ danh sách cấp bậc đang hoạt động, sắp xếp theo `GradeCode ASC`.
+
+- [docs/api/Mst_LeaveDayController.md](api/Mst_LeaveDayController.md): Danh mục ngày phép (`Mst_LeaveDay`) — Gồm 2 endpoint đã hoàn thành (#164, #165):
+  - `POST /api/mst_leaveday/search`: Tìm kiếm danh mục ngày phép phân trang, lọc từ khóa theo chuỗi số ngày phép và trạng thái (toán tử `=`).
+  - `POST /api/mst_leaveday/getallactive`: Lấy toàn bộ danh sách ngày phép đang hoạt động, trả về mảng phẳng trực tiếp.
+
+- [docs/api/Mst_LeaveTypeController.md](api/Mst_LeaveTypeController.md): Danh mục loại nghỉ phép (`Mst_LeaveType`) — Gồm 2 endpoint đã hoàn thành (#166, #167):
+  - `POST /api/mst_leavetype/search`: Tìm kiếm danh mục loại nghỉ phép phân trang theo từ khóa và trạng thái hoạt động (toán tử `=`).
+  - `POST /api/mst_leavetype/getallactive`: Lấy toàn bộ danh sách loại nghỉ phép đang hoạt động, trả về mảng phẳng trực tiếp.
+
+- [docs/api/Mst_MajorController.md](api/Mst_MajorController.md): Danh mục chuyên ngành (`Mst_Major`) — Gồm 2 endpoint đã hoàn thành (#168, #169):
+  - `POST /api/mst_major/search`: Tìm kiếm chuyên ngành phân trang theo từ khóa tên và trạng thái hoạt động (toán tử `=`).
+  - `POST /api/mst_major/getallactive`: Lấy toàn bộ danh sách chuyên ngành đang hoạt động, sắp xếp theo `MajorCode ASC`.
+
+- [docs/api/Mst_MajorGroupController.md](api/Mst_MajorGroupController.md): Danh mục nhóm chuyên ngành (`Mst_MajorGroup`) — Gồm 2 endpoint đã hoàn thành (#170, #171):
+  - `POST /api/mst_majorgroup/search`: Tìm kiếm nhóm chuyên ngành phân trang theo từ khóa tên và trạng thái hoạt động (toán tử `=`).
+  - `POST /api/mst_majorgroup/getallactive`: Lấy toàn bộ danh sách nhóm chuyên ngành đang hoạt động, sắp xếp theo `MajorGroupCode ASC`.
+
+- [docs/api/Mst_PersonalBackgroundController.md](api/Mst_PersonalBackgroundController.md): Danh mục thành phần bản thân / lý lịch (`Mst_PersonalBackground`) — Gồm 1 endpoint đã hoàn thành (#188):
+  - `POST /api/mst_personalbackground/search`: Tìm kiếm thành phần bản thân phân trang theo từ khóa tên và trạng thái hoạt động (toán tử `=`).
+
+- [docs/api/Mst_NNTController.md](api/Mst_NNTController.md): Danh mục người nộp thuế / doanh nghiệp (`Mst_NNT`) — Gồm 1 endpoint đã hoàn thành (#172):
+  - `POST /api/mst_nnt/search`: Tìm kiếm doanh nghiệp/người nộp thuế phân trang theo tên (LIKE %kw%), tổ chức (=) và trạng thái (IN), thực thể đầy đủ 48 cột dữ liệu.
+
+- [docs/api/Mst_GovIDTypeController.md](api/Mst_GovIDTypeController.md): Danh mục loại giấy tờ tùy thân (`Mst_GovIDType`) — Gồm 3 endpoint đã hoàn thành (#156, #157, #158):
+  - `POST /api/mst_govidtype/search`: Tìm kiếm danh mục loại giấy tờ tùy thân phân trang theo từ khóa tên và trạng thái hoạt động (toán tử `=`).
+  - `POST /api/mst_govidtype/getbygovidtype`: Tra cứu chi tiết một loại giấy tờ tùy thân theo mã, không kèm cột `MyIdxSeq`.
+  - `POST /api/mst_govidtype/getallactive`: Lấy toàn bộ loại giấy tờ tùy thân đang hoạt động, trả về mảng phẳng 7 thuộc tính sạch.
+  - *(Ghi chú: Các action Create/Update/Delete được hoãn lại theo tài liệu xung đột `conflicts/159_conflict.md` do thiếu script DDL và schema vật lý)*.
+
+- [docs/api/Mst_FamilyStatusController.md](api/Mst_FamilyStatusController.md): Danh mục tình trạng gia đình (`Mst_FamilyStatus`) — Gồm 2 endpoint đã hoàn thành (#152, #153):
+  - `POST /api/mst_familystatus/search`: Tìm kiếm danh mục tình trạng gia đình phân trang theo từ khóa và trạng thái hoạt động (toán tử `=`).
+  - `POST /api/mst_familystatus/getallactive`: Lấy toàn bộ tình trạng gia đình đang hoạt động, trả về mảng phẳng trực tiếp.
+
+*(Toàn bộ 30 controller API port 1-1 đã hoàn tất đều đã được tài liệu hóa chi tiết).*
 
 ### 2.3. Quy trình & Vận hành (`docs/quy-trinh/`)
 

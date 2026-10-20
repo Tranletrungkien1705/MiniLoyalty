@@ -2,9 +2,9 @@
 
 | Thông tin | Giá trị |
 |---|---|
-| **Phạm vi** | Tài liệu tham chiếu chi tiết 9 endpoint đã port 1-1 của Mst_DepartmentController (#122 - #130) |
+| **Phạm vi** | Tài liệu tham chiếu chi tiết 10 endpoint đã port 1-1 của Mst_DepartmentController (#122 - #131) |
 | **Cập nhật** | 2026-10-16 |
-| **Phiên bản mã** | `014ab70` |
+| **Phiên bản mã** | `79657b7` |
 | **Trạng thái** | Nháp — chờ review |
 
 ---
@@ -12,13 +12,13 @@
 ## 1. Tóm tắt Nghiệp vụ & Cấu trúc Dữ liệu
 
 ### 1.1. Mục đích Nghiệp vụ
-API `Mst_DepartmentController` quản lý danh mục phòng ban (`Mst_Department`) trong hệ thống MiniLoyalty. Module này cung cấp các chức năng tìm kiếm phân trang theo từ khóa và tổ chức, lấy danh sách phòng ban đang hoạt động, tra cứu chi tiết một phòng ban theo mã, tạo mới phòng ban kèm sinh sequence tự động và tính toán phân cấp BU toàn bảng, cập nhật thông tin phòng ban, xóa đơn lẻ/xóa hàng loạt, nhập dữ liệu danh mục từ bảng tính Excel và xuất danh sách phòng ban ra tập tin Excel chuẩn.
+API `Mst_DepartmentController` quản lý danh mục phòng ban (`Mst_Department`) trong hệ thống MiniLoyalty. Module này cung cấp các chức năng tìm kiếm phân trang theo từ khóa và tổ chức, lấy danh sách phòng ban đang hoạt động, tra cứu chi tiết một phòng ban theo mã, tạo mới phòng ban kèm sinh sequence tự động và tính toán phân cấp BU toàn bảng, cập nhật thông tin phòng ban, xóa đơn lẻ/xóa hàng loạt, nhập dữ liệu danh mục từ bảng tính Excel, xuất danh sách phòng ban ra tập tin Excel chuẩn và xuất tập tin Excel mẫu (ExportTemplate) phục vụ chức năng nhập dữ liệu.
 
 ### 1.2. Bảng Đối chiếu Nguồn Tra cứu (Source Code Mapping)
 
 | Thành phần | Đường dẫn tập tin nguồn (`2022.7.Loyalty`) | Tập tin đích tương ứng (`MiniLoyalty`) |
 |---|---|---|
-| **Gate Controller** | `13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Mst_DepartmentController.cs:30-812` | [`Controllers/Port/Mst_DepartmentControllerPort.cs`](../../Controllers/Port/Mst_DepartmentControllerPort.cs) |
+| **Gate Controller** | `13.ClientGate\V10\idn.Loyalty.WebAPI\Controllers\Mst_DepartmentController.cs:30-873` | [`Controllers/Port/Mst_DepartmentControllerPort.cs`](../../Controllers/Port/Mst_DepartmentControllerPort.cs) |
 | **API Backend** | `11.BackEnd\V10\idn.Loyalty.Biz.Web\Controllers\MstDepartmentController.cs:20-302` | Tích hợp trực tiếp vào [`Controllers/Port/Mst_DepartmentControllerPort.cs`](../../Controllers/Port/Mst_DepartmentControllerPort.cs) |
 | **Nghiệp vụ (Biz)** | `11.BackEnd\V10\idn.Loyalty.Biz\Master.cs` (Search `:29450-29701`, `:30396-30568`; Create `:29702-29935`, `:30569-30726`; Update `:29936-30180`, `:30727-30864`; Delete `:30181-30395`, `:30865-30968`; Export `:29450-29701`; UpdBU `:29413-29448`; CheckDB `:29275-29411`, `:7813-7890`) | Tích hợp trực tiếp vào [`Controllers/Port/Mst_DepartmentControllerPort.cs`](../../Controllers/Port/Mst_DepartmentControllerPort.cs) |
 | **Entity Model** | `12.Dev.Common\idn.Loyalty.Common\Models\Mst_Department.cs:8-35` | [`Models/Port/Mst_Department.cs:35-50`](../../Models/Port/Mst_Department.cs#L35-L50) |
@@ -819,6 +819,55 @@ Payload JSON gửi qua Request Body (`MstDepartmentExportReq`), hỗ trợ cả 
 
 ---
 
+### 2.9. ExportTemplate (#131)
+
+Xuất tập tin bảng tính Excel mẫu (chỉ chứa tiêu đề cột, không có dòng dữ liệu) dùng cho chức năng nhập danh mục phòng ban từ Excel.
+
+- **Route**: `POST /api/mst_department/exporttemplate`
+- **Controller Action**: [`Mst_DepartmentControllerPort.ExportTemplate`](../../Controllers/Port/Mst_DepartmentControllerPort.cs#L1011)
+- **Tham chiếu nguồn**: Gate `Mst_DepartmentController.cs:815-847`, từ điển mẫu `GetImportDicColumsTemplate:864-873`
+
+#### Bảng tham số Request
+Endpoint không nhận tham số Body (`gate :815`).
+
+#### Quy tắc xử lý theo thứ tự (Business Rules)
+1. **Khởi tạo danh sách thực thể rỗng**: Tạo `new List<Mst_Department>()` (`gate :823`), không truy vấn CSDL, không kiểm tra điều kiện lọc hay phân quyền.
+2. **Từ điển cột mẫu (`GetImportDicColumsTemplate()`)**:
+   - Tầng gate nguồn quy định đúng 3 cột tiêu đề theo thứ tự (`gate :864-873`):
+     1. `DepartmentName`: `"Tên phòng ban (*)"`
+     2. `DepartmentCodeParent`: `"Phòng ban cấp trên"`
+     3. `DepartmentDesc`: `"Mô tả"`
+   - *(Lưu ý: Cột `DepartmentCode` bị comment ở nguồn `:868` nên không xuất hiện trong file mẫu)*.
+3. **Sinh tập tin Excel**:
+   - Xác định thư mục `webRoot` (hoặc `wwwroot`).
+   - Sinh đường dẫn file qua [`PortExcel.GenExcelExportFilePath`](../../Data/PortExcel.cs) với tiền tố `"Mst_Department"`.
+   - Ghi tiêu đề ra sheet `"Mst_Department"` qua [`PortExcel.ExportToExcelFromList`](../../Data/PortExcel.cs).
+4. **Cơ chế bắt ngoại lệ bất ngờ**:
+   - Bọc toàn bộ logic trong `try/catch (Exception ex)`. Nếu xảy ra lỗi I/O hoặc ngoại lệ bất ngờ, trả về HTTP 400 kèm mã lỗi `ErridnLoyalty.Mst_Department_ExportTemplate` với `Params.Exception = ex.Message` (`gate :836-840`).
+5. **Trả về kết quả thành công**:
+   - Trả về HTTP 200 `{ Success = true, Data = { Url = baseAddress + virtualPath } }` (`gate :829-833`).
+
+#### Bảng mã lỗi `ErridnLoyalty.*`
+
+| Mã lỗi | Điều kiện kích hoạt | Các tham số trả về trong `Params` |
+|---|---|---|
+| `ErridnLoyalty.Mst_Department_ExportTemplate` | Ngoại lệ hệ thống hoặc lỗi I/O bất ngờ khi tạo tập tin mẫu Excel | `Exception = <thông báo ngoại lệ>` |
+
+#### Ví dụ Request / Response thực tế (từ lần chạy VERIFY #131)
+- Request: `POST /api/mst_department/exporttemplate`
+- Response (HTTP 200):
+  ```json
+  {
+    "Success": true,
+    "Data": {
+      "Url": "http://localhost:5000/TempFiles/2026/10/16/Mst_Department_20261016120000_yyyy.xlsx"
+    }
+  }
+  ```
+- Kết quả kiểm chứng OpenXML tập tin `.xlsx`: Tên sheet `"Mst_Department"`, đúng 3 cột tiêu đề (`Tên phòng ban (*)`, `Phòng ban cấp trên`, `Mô tả`), không có dòng dữ liệu nào.
+
+---
+
 ## 3. Khác biệt So với Nguồn & Danh sách GAP (Known Gaps)
 
 Tuân thủ nguyên tắc trung thực tuyệt đối, dưới đây là bảng liệt kê toàn bộ các điểm khác biệt, giả định và các thành phần chưa port (GAP) giữa hệ thống đích và hệ thống nguồn:
@@ -854,4 +903,5 @@ Các hạng mục API của `Mst_DepartmentController` được chuyển đổi 
 | **#128** | `Mst_DepartmentController/DeleteMultiple` | Đã hoàn thành | `9de58bd` | Xóa danh sách phòng ban, lặp tuần tự từng transaction riêng biệt, thực thi cơ chế xóa một phần khi có lỗi. |
 | **#129** | `Mst_DepartmentController/Import` | Đã hoàn thành | `e3c84ce` | Nhập danh mục từ Excel, validate toàn bộ dòng trước khi tạo, sinh mã GUID tự động và thực thi cơ chế nhập một phần. |
 | **#130** | `Mst_DepartmentController/Export` | Đã hoàn thành | `2d13be5` | Xuất danh sách phòng ban ra Excel với từ điển 4 cột theo thứ tự nguồn, lọc OrgID/KeyWord/FlagActive. |
+| **#131** | `Mst_DepartmentController/ExportTemplate` | Đã hoàn thành | `a2d6f65` | Xuất tập tin Excel mẫu chứa 3 cột tiêu đề phục vụ nhập dữ liệu (`DepartmentName`, `DepartmentCodeParent`, `DepartmentDesc`). |
 | **Fix** | Sửa lỗi ngoại lệ DB bất ngờ | Đã hoàn thành | `1752274` | Import, Delete, DeleteMultiple, Export bắt mọi ngoại lệ và trả về HTTP 400 PortResult.Fail với Params.Exception thay vì HTTP 500, khớp nguồn 1-1. |

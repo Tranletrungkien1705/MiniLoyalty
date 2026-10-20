@@ -1,7 +1,7 @@
 # QUY TRÌNH CHUẨN PORT 1-1 TỪ `2022.7.Loyalty` SANG MiniLoyalty
 
 > **Phạm vi**: Toàn bộ chu trình port 1-1 các hạng mục Controller/Action từ giải pháp nguồn `2022.7.Loyalty` sang ứng dụng đích `MiniLoyalty`.  
-> **Cập nhật**: 2026-10-16 12:00  
+> **Cập nhật**: 2026-10-16 13:35  
 > **Nguồn dữ liệu**: `PORT_RULES_MiniLoyalty.md` (gồm mục 6), `repos\labs-audit\SOP_CONVERT_1TO1.md`, `repos\labs-audit\INDEX_CONVERT.md` (§5 bẫy), `docs\LESSONS_AGENTS.md`, nhật ký thực tế tại `.parity-run\logs\`.  
 > **Trạng thái**: Nháp — chờ review  
 
@@ -239,10 +239,11 @@ flowchart TD
 - Xử lý: Hoãn lại và quay lại thực hiện sau khi các bảng nền tảng đã được port và kiểm thử hoàn chỉnh.
 
 ### 3. `BO` (Loại bỏ khỏi phạm vi chuyển đổi)
-Áp dụng cho các thành phần không mang giá trị nghiệp vụ vận hành:
+Áp dụng cho các thành phần không mang giá trị nghiệp vụ vận hành hoặc không thể port 1-1 do thiếu nguồn backend:
 - Các endpoint scaffold sinh tự động của framework (`HelpPage`, `/Shared/`).
-- Các action sao lưu cũ của lập trình viên còn sót lại trong mã nguồn (ví dụ: `Mst_OrgController/GetAllOrg_bk`).
-- Xử lý: Đánh dấu trạng thái `Bỏ` trong sổ tiến độ kèm lý do minh bạch, không tính vào khối lượng công việc tồn đọng.
+- Các action sao lưu cũ của lập trình viên còn sót lại trong mã nguồn (ví dụ: `Mst_OrgController/GetAllOrg_bk`, #180).
+- **Thiếu nguồn backend tại tầng Biz (Bài học B.7)**: Các action chỉ tồn tại ở tầng ClientGate gọi qua ClientService sang dịch vụ ngoài (như `MstSv`) mà trong toàn bộ `idn.Loyalty.Biz` và `idn.Loyalty.Biz.Web` không có hàm `WA_` hoặc hàm biz tương ứng, không có DDL và không có mã lỗi (đã áp dụng cho #159–#161 `Mst_GovIDTypeController/Create, Update, Delete`).
+- Xử lý: Đánh dấu trạng thái `Bỏ` trong sổ tiến độ hoặc `skipped.json` kèm lý do minh bạch, không tính vào khối lượng công việc tồn đọng.
 
 ---
 
@@ -254,6 +255,8 @@ flowchart TD
 4. **Cấm sửa ngoài phạm vi cho phép**: Không ghi đè các file dùng chung (`AppDbContext.cs`, `Program.cs`) trừ khi có chỉ thị rõ ràng. Không ghi bất kỳ dữ liệu nào vào thư mục nguồn `D:\idocNet`.
 5. **Cấm báo cáo khống (Over-claim)**: Chưa chạy kiểm thử runtime thực tế thì chỉ được ghi nhận `verify PENDING`, không được tự nhận là hoàn thành.
 6. **Cấm đăng ký SQLite function trong action**: Không gọi `sqlite.CreateFunction("lower", ...)` trong action port; chức năng này đã được đảm nhiệm tập trung bởi `SqliteUnicodeLowerInterceptor`.
+7. **Cấm tự bịa mã lỗi hoặc route (Bài học C.6)**: Mọi mã lỗi (`ErridnLoyalty.*`), route API, tên hàm, tên cột nêu trong tài liệu bắt buộc phải được copy nguyên văn bằng lệnh grep từ mã nguồn. Cấm suy diễn tên mã lỗi.
+8. **Thiếu nguồn backend = không port (Bài học B.7)**: Nếu action ở gate chỉ gọi dịch vụ ngoài mà backend không có hàm tương ứng thì không tự đoán mã lỗi hay quy tắc; bắt buộc lập hồ sơ xung đột `conflicts/<số>_conflict.md` và dừng lại với `CAN_XEM_TAY`.
 
 ---
 
@@ -263,3 +266,4 @@ flowchart TD
 |---|---|---|---|
 | 1.0 | 2026-10-16 11:15 | doc2 (Quản lý quy trình) | Khởi tạo tài liệu quy trình chuẩn port 1-1 cho MiniLoyalty; tích hợp các bài học từ SOP_CONVERT_1TO1 và INDEX_CONVERT §5. |
 | 2.0 | 2026-10-16 12:00 | doc2 (Quản lý quy trình) | Bổ sung phân định vai trò chi tiết (Lead, QA, Docs, Orchestrator, Reviewer, Worker); bổ sung Mục 5 Quy tắc cốt lõi 'Chỉ làm theo tài liệu — Xung đột thì dừng' từ PORT_RULES mục 6; bổ sung Mục 6 mô tả hạ tầng dùng chung (PortFilters.cs, SqliteUnicodeLower.cs). |
+| 3.0 | 2026-10-16 13:35 | doc2 (Quản lý quy trình) | Cập nhật đợt 3: bổ sung tiêu chí BỎ do thiếu nguồn backend tại tầng Biz (Bài học B.7); bổ sung điều cấm số 7 (cấm bịa mã lỗi theo C.6) và số 8 (thiếu backend thì dừng); đồng bộ với các quyết định phê duyệt mới nhất của Claude. |
